@@ -86,7 +86,13 @@ function M.setup(opts)
   -- setup() if needed.
   registry.reset()
 
-  -- TODO: register built-in providers (Step 9: GitHub, etc.)
+  -- Register built-in providers.
+  local gh = require("parley.providers.github.provider")
+  registry.register({
+    name = "GitHub",
+    detect = gh.detect,
+    factory = gh.new,
+  })
   -- TODO: register autocommands (BufEnter, timer)
   -- TODO: register keymaps
   -- TODO: register statusline component
