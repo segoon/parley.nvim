@@ -1,11 +1,12 @@
 - arcanum provider
 - diffview.nvim integration
+- :Telescope discussions|issues|comments? vcs_issues? - preview
+- mark comment as stale (outdated position)
+
+documentation:
 - README.md
 - vim help
 - vim help for providers (auto generate?)
-- :Telescope discussions|issues|comments? vcs_issues? - preview
-- mark comment as stale (outdated position)
-- multiple buffers with different repositories
 
 UI:
 - configure comment preview layout in setup(...)
@@ -13,6 +14,7 @@ UI:
 Bugs:
 - too many asserts - detect_pr() must be called before
 - multiple times: UI thread / non-UI thread / C callback - how to proactively detect it?
+- multiple buffers with different repositories
 
 - MVC? any architecture style?
 
