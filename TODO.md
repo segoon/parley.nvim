@@ -5,7 +5,6 @@
 - lua-language-server warnings
 
 documentation:
-- README.md
 - vim help
 - vim help for providers (auto generate?)
 
