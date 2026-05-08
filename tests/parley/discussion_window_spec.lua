@@ -338,6 +338,45 @@ describe("parley.discussion_window", function()
     assert.is_true(#highlights >= 1)
   end)
 
+  it("submits through the composer handle instead of the raw window instance", function()
+    local bufnr = scratch(10)
+    vim.api.nvim_win_set_cursor(0, { 3, 0 })
+    local submitted_text
+    local submitted_composer
+
+    review_repository._entries[bufnr] = {
+      status = "ready",
+      stale = false,
+      discussions = { make_discussion({ line = 3, text = "Focused discussion" }) },
+      mappings = {
+        d1 = { local_line = 3, stale = false, confidence = 1.0 },
+      },
+    }
+
+    discussion_window.open_current_line(bufnr)
+    local composer = discussion_window.show_new_comment_input(bufnr, {
+      cursor_line = 3,
+      status = "New comment draft",
+      on_submit = function(handle, text)
+        submitted_composer = handle
+        submitted_text = text
+        handle.set_submitting("Submitting draft")
+      end,
+    })
+    local instance = discussion_window._instances[bufnr]
+
+    vim.api.nvim_buf_set_lines(instance.input_bufnr, 1, -1, false, { "draft body" })
+    instance.submit_input()
+
+    assert.is_true(vim.wait(500, function()
+      return submitted_text ~= nil
+    end))
+    assert.is_true(submitted_composer == composer)
+    assert.equals("draft body", submitted_text)
+    assert.equals("submitting", instance.input_state)
+    assert.same({ "Submitting draft" }, vim.api.nvim_buf_get_lines(instance.input_bufnr, 0, 1, false))
+  end)
+
   it("hides the embedded input pane on discard and keeps discussion visible", function()
     local bufnr = scratch(10)
     vim.api.nvim_win_set_cursor(0, { 3, 0 })

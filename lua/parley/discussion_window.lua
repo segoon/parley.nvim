@@ -13,6 +13,31 @@ local M = {}
 local INPUT_HEIGHT = 6
 local HIGHLIGHT_NS = vim.api.nvim_create_namespace("parley.discussion_window")
 
+---@class parley.ComposerHandle
+---@field set_submitting fun(status: string): nil
+---@field set_idle fun(status: string): nil
+---@field set_cancel fun(cancel: fun(): nil): nil
+---@field close fun(force?: boolean): boolean
+
+---@class parley.DiscussionWindowInstance
+---@field bufnr integer
+---@field winid integer
+---@field popup any|nil
+---@field source_winid integer
+---@field comment_ranges table<string, { start_line: integer, end_line: integer }>
+---@field input_bufnr integer|nil
+---@field input_winid integer|nil
+---@field input_state 'hidden'|'idle'|'submitting'
+---@field input_cancel fun(): nil
+---@field request_close_input fun(): boolean
+---@field hide_input fun(force?: boolean): boolean
+---@field set_input_status fun(status: string): nil
+---@field set_input_submitting fun(status: string): nil
+---@field focus_discussion fun(): nil
+---@field focus_input fun(): nil
+---@field close fun(): nil
+---@field submit_input fun(): nil
+
 local REACTION_EMOJI = {
   ["+1"] = "👍",
   ["-1"] = "👎",
@@ -25,24 +50,7 @@ local REACTION_EMOJI = {
 }
 
 --- Active window instances keyed by source buffer number.
---- @type table<integer, {
----   bufnr: integer,
----   winid: integer,
----   popup: any|nil,
----   source_winid: integer,
----   comment_ranges: table<string, { start_line: integer, end_line: integer }>,
----   input_bufnr: integer|nil,
----   input_winid: integer|nil,
----   input_state: 'hidden'|'idle'|'submitting',
----   input_cancel: fun(): nil,
----   request_close_input: fun(): boolean,
----   hide_input: fun(force?: boolean): boolean,
----   set_input_status: fun(status: string): nil,
----   set_input_submitting: fun(status: string): nil,
----   focus_discussion: fun(): nil,
----   focus_input: fun(): nil,
----   close: fun(): nil,
---- }>
+---@type table<integer, parley.DiscussionWindowInstance>
 M._instances = {}
 
 --- Notify hook; replace in tests.
@@ -405,13 +413,14 @@ local function setup_input_keymaps(src_bufnr, instance)
   })
 end
 
---- @param src_bufnr integer
---- @param instance table
---- @param status string
---- @param initial_text string|nil
---- @param parent_comment_id string|nil
---- @param on_submit fun(instance: table, text: string): boolean|nil
-local function show_input(src_bufnr, instance, status, initial_text, parent_comment_id, on_submit)
+---@param src_bufnr integer
+---@param instance parley.DiscussionWindowInstance
+---@param status string
+---@param initial_text string|nil
+---@param parent_comment_id string|nil
+---@param composer parley.ComposerHandle
+---@param on_submit fun(composer: parley.ComposerHandle, text: string): boolean|nil
+local function show_input(src_bufnr, instance, status, initial_text, parent_comment_id, composer, on_submit)
   local discussion_cfg = vim.api.nvim_win_get_config(instance.winid)
   local discussion_height = discussion_cfg.height or vim.api.nvim_win_get_height(instance.winid)
   local width = discussion_cfg.width or vim.api.nvim_win_get_width(instance.winid)
@@ -448,7 +457,7 @@ local function show_input(src_bufnr, instance, status, initial_text, parent_comm
 
     vim.schedule(function()
       if instance.input_state ~= "hidden" then
-        on_submit(instance, text)
+        on_submit(composer, text)
       end
     end)
   end
@@ -485,8 +494,8 @@ local function show_input(src_bufnr, instance, status, initial_text, parent_comm
   vim.cmd.startinsert()
 end
 
---- @param instance table
---- @return table
+---@param instance parley.DiscussionWindowInstance
+---@return parley.ComposerHandle
 local function composer_adapter(instance)
   return {
     set_submitting = function(status)
@@ -504,10 +513,10 @@ local function composer_adapter(instance)
   }
 end
 
---- @param lines string[]
---- @param float_cfg parley.FloatConfig
---- @param source_winid integer
---- @return table
+---@param lines string[]
+---@param float_cfg parley.FloatConfig
+---@param source_winid integer
+---@return parley.DiscussionWindowInstance
 local function create_instance(lines, float_cfg, source_winid)
   local config = make_win_config(lines, float_cfg)
   local bufnr = vim.api.nvim_create_buf(false, true)
@@ -773,8 +782,8 @@ end
 
 --- Show the embedded input pane for a reply.
 --- @param bufnr integer
---- @param opts { parent_comment_id: string, status: string, on_submit: fun(instance: table, text: string): boolean|nil, initial_text?: string }
---- @return table|nil
+--- @param opts { parent_comment_id: string, status: string, on_submit: fun(composer: parley.ComposerHandle, text: string): boolean|nil, initial_text?: string }
+--- @return parley.ComposerHandle|nil
 function M.show_reply_input(bufnr, opts)
   bufnr = resolve_source_bufnr(bufnr)
   local instance = live_instance(bufnr)
@@ -783,14 +792,15 @@ function M.show_reply_input(bufnr, opts)
     return nil
   end
 
-  show_input(bufnr, instance, opts.status, opts.initial_text, opts.parent_comment_id, opts.on_submit)
-  return composer_adapter(instance)
+  local composer = composer_adapter(instance)
+  show_input(bufnr, instance, opts.status, opts.initial_text, opts.parent_comment_id, composer, opts.on_submit)
+  return composer
 end
 
 --- Show the embedded input pane for a new comment.
 --- @param bufnr integer
---- @param opts { cursor_line: integer, status: string, on_submit: fun(instance: table, text: string): boolean|nil, initial_text?: string }
---- @return table|nil
+--- @param opts { cursor_line: integer, status: string, on_submit: fun(composer: parley.ComposerHandle, text: string): boolean|nil, initial_text?: string }
+--- @return parley.ComposerHandle|nil
 function M.show_new_comment_input(bufnr, opts)
   bufnr = resolve_source_bufnr(bufnr)
   local instance = live_instance(bufnr)
@@ -831,8 +841,9 @@ function M.show_new_comment_input(bufnr, opts)
     end
   end
 
-  show_input(bufnr, instance, opts.status, opts.initial_text, nil, opts.on_submit)
-  return composer_adapter(instance)
+  local composer = composer_adapter(instance)
+  show_input(bufnr, instance, opts.status, opts.initial_text, nil, composer, opts.on_submit)
+  return composer
 end
 
 --- Toggle the discussion window for `bufnr`.
