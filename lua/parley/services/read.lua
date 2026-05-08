@@ -124,6 +124,21 @@ function M.get_buffer_state(bufnr)
 end
 
 --- @param bufnr integer
+--- @param opts? { scope?: 'file'|'all' }
+--- @return parley.Discussion[]
+function M.list_discussions(bufnr, opts)
+  opts = opts or {}
+  local snapshot = review_repository.get(bufnr)
+  if not snapshot then
+    return {}
+  end
+  if opts.scope == "all" then
+    return vim.deepcopy(snapshot.all_discussions or {})
+  end
+  return vim.deepcopy(snapshot.discussions or {})
+end
+
+--- @param bufnr integer
 function M.clear_buffer_state(bufnr)
   if M._subscriptions[bufnr] then
     M._subscriptions[bufnr]()
@@ -175,9 +190,15 @@ end
 
 --- @param bufnr integer
 --- @param opts? { force?: boolean, notify_errors?: boolean }
-function M.refresh_async(bufnr, opts)
+--- @param callback? fun(snapshot: table|nil): nil
+function M.refresh_async(bufnr, opts, callback)
   async.run(function()
-    M.refresh(bufnr, opts)
+    local snapshot = M.refresh(bufnr, opts)
+    if callback then
+      vim.schedule(function()
+        callback(snapshot)
+      end)
+    end
   end)
 end
 

@@ -307,6 +307,33 @@ describe("parley.discussion_window", function()
     assert.is_false(vim.tbl_contains(lines, "Second discussion"))
   end)
 
+  it("opens a specific discussion on a commented line", function()
+    local bufnr = scratch(10)
+    vim.api.nvim_win_set_cursor(0, { 3, 0 })
+
+    review_repository._entries[bufnr] = {
+      status = "ready",
+      stale = false,
+      discussions = {
+        make_discussion({ id = "d1", line = 3, text = "First discussion" }),
+        make_discussion({ id = "d2", line = 3, text = "Second discussion" }),
+      },
+      mappings = {
+        d1 = { local_line = 3, stale = false, confidence = 1.0 },
+        d2 = { local_line = 3, stale = false, confidence = 1.0 },
+      },
+    }
+
+    assert.is_true(discussion_window.open_discussion(bufnr, "d2"))
+
+    local instance = discussion_window._instances[bufnr]
+    local lines = vim.api.nvim_buf_get_lines(instance.bufnr, 0, -1, false)
+
+    assert.is_false(vim.tbl_contains(lines, "First discussion"))
+    assert.is_not_nil(vim.tbl_contains(lines, "Second discussion"))
+    assert.equals("d2", discussion_ui_state.get(bufnr).current_discussion_id)
+  end)
+
   it("shows an embedded reply input and highlights the parent comment", function()
     local bufnr = scratch(10)
     vim.api.nvim_win_set_cursor(0, { 3, 0 })

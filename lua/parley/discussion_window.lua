@@ -524,9 +524,8 @@ local function set_input_submitting(instance, status)
   end
 end
 
---- @param src_bufnr integer
 --- @param instance table
-local function setup_input_keymaps(src_bufnr, instance)
+local function setup_input_keymaps(instance)
   vim.keymap.set("n", "q", function()
     instance.request_close_input()
   end, { buffer = instance.input_bufnr, silent = true, nowait = true, desc = "Close Parley draft" })
@@ -584,7 +583,7 @@ local function show_input(src_bufnr, instance, status, initial_text, parent_comm
     vim.bo[instance.input_bufnr].bufhidden = "hide"
     vim.bo[instance.input_bufnr].swapfile = false
     vim.bo[instance.input_bufnr].filetype = "markdown"
-    setup_input_keymaps(src_bufnr, instance)
+    setup_input_keymaps(instance)
   end
 
   local input_cfg = make_input_win_config(instance.winid, discussion_height, width, discussion_cfg.border or "rounded")
@@ -843,6 +842,48 @@ local function discussions_for_line(state, cursor_line)
   return {}
 end
 
+--- @param state { discussions: parley.Discussion[] }
+--- @param discussion_id string
+--- @return parley.Discussion|nil
+local function discussion_by_id(state, discussion_id)
+  for _, discussion in ipairs(state.discussions) do
+    if discussion.id == discussion_id then
+      return discussion
+    end
+  end
+  return nil
+end
+
+--- @param bufnr integer
+--- @param discussions parley.Discussion[]
+--- @param mappings table<string, parley.anchor.Mapping>
+--- @param source_winid integer
+--- @param source_line integer
+--- @return boolean
+local function open_discussions(bufnr, discussions, mappings, source_winid, source_line)
+  local config = M._get_config() or {}
+  local float_cfg = config.float or {
+    border = "rounded",
+    max_width = 80,
+    max_height = 30,
+  }
+  local lines, comment_ranges = render_lines(discussions, mappings)
+  local instance = ensure_instance(bufnr, lines, float_cfg, source_winid, source_line)
+  instance.comment_ranges = comment_ranges
+  write_lines(bufnr, instance, lines)
+  clear_parent_highlight(instance)
+  discussion_ui_state.set(bufnr, {
+    visible = true,
+    current_discussion_id = discussions[1].id,
+    current_source_line = source_line,
+    highlighted_parent_comment_id = nil,
+    selected_comment_id = nil,
+    input_visible = instance.input_state ~= "hidden",
+  })
+  sync_selected_comment(bufnr)
+  return true
+end
+
 --- Return whether the discussion window is open for `bufnr`.
 --- @param bufnr integer
 --- @return boolean
@@ -902,27 +943,40 @@ function M.open_current_line(bufnr, opts)
     return false
   end
 
-  local config = M._get_config() or {}
-  local float_cfg = config.float or {
-    border = "rounded",
-    max_width = 80,
-    max_height = 30,
-  }
-  local lines, comment_ranges = render_lines(discussions, state.mappings)
-  local instance = ensure_instance(bufnr, lines, float_cfg, source_winid, cursor_line)
-  instance.comment_ranges = comment_ranges
-  write_lines(bufnr, instance, lines)
-  clear_parent_highlight(instance)
-  discussion_ui_state.set(bufnr, {
-    visible = true,
-    current_discussion_id = discussions[1].id,
-    current_source_line = cursor_line,
-    highlighted_parent_comment_id = nil,
-    selected_comment_id = nil,
-    input_visible = instance.input_state ~= "hidden",
-  })
-  sync_selected_comment(bufnr)
-  return true
+  return open_discussions(bufnr, discussions, state.mappings or {}, source_winid, cursor_line)
+end
+
+--- Open a specific discussion for `bufnr`.
+--- @param bufnr integer
+--- @param discussion_id string
+--- @return boolean
+function M.open_discussion(bufnr, discussion_id)
+  bufnr = resolve_source_bufnr(bufnr)
+  local state = read_service.get_buffer_state(bufnr)
+  local source_winid = resolve_source_winid(bufnr, live_instance(bufnr) and live_instance(bufnr).source_winid or nil)
+
+  if not state then
+    M.close(bufnr)
+    M._notify("No Parley discussions in this buffer", vim.log.levels.INFO)
+    return false
+  end
+
+  if not source_winid then
+    M.close(bufnr)
+    M._notify("Open the source buffer to view Parley discussions", vim.log.levels.INFO)
+    return false
+  end
+
+  local discussion = discussion_by_id(state, discussion_id)
+  if not discussion then
+    M.close(bufnr)
+    M._notify("Parley discussion not found", vim.log.levels.INFO)
+    return false
+  end
+
+  local mapping = state.mappings and state.mappings[discussion.id] or nil
+  local source_line = (mapping and mapping.local_line) or discussion.line
+  return open_discussions(bufnr, { discussion }, state.mappings or {}, source_winid, source_line)
 end
 
 --- Return the first discussion for the current source buffer line.
@@ -1044,7 +1098,12 @@ end
 
 --- Show the embedded input pane for a reply.
 --- @param bufnr integer
---- @param opts { parent_comment_id: string, status: string, on_submit: fun(composer: parley.ComposerHandle, text: string): boolean|nil, initial_text?: string }
+--- @param opts {
+---   parent_comment_id: string,
+---   status: string,
+---   on_submit: fun(composer: parley.ComposerHandle, text: string): boolean|nil,
+---   initial_text?: string,
+--- }
 --- @return parley.ComposerHandle|nil
 function M.show_reply_input(bufnr, opts)
   bufnr = resolve_source_bufnr(bufnr)
@@ -1061,7 +1120,12 @@ end
 
 --- Show the embedded input pane for a new comment.
 --- @param bufnr integer
---- @param opts { cursor_line: integer, status: string, on_submit: fun(composer: parley.ComposerHandle, text: string): boolean|nil, initial_text?: string }
+--- @param opts {
+---   cursor_line: integer,
+---   status: string,
+---   on_submit: fun(composer: parley.ComposerHandle, text: string): boolean|nil,
+---   initial_text?: string,
+--- }
 --- @return parley.ComposerHandle|nil
 function M.show_new_comment_input(bufnr, opts)
   bufnr = resolve_source_bufnr(bufnr)
@@ -1094,7 +1158,6 @@ function M.show_new_comment_input(bufnr, opts)
         input_visible = false,
       })
     else
-      local config = M._get_config() or {}
       local placeholder = { "_No discussion on this line yet._" }
       instance = ensure_instance(bufnr, placeholder, float_cfg, source_winid, opts.cursor_line)
       instance.comment_ranges = {}

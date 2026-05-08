@@ -17,6 +17,7 @@ local M = {}
 --- @field virtual_text      parley.VirtualTextConfig
 --- @field float             parley.FloatConfig
 --- @field progress          parley.ProgressConfig
+--- @field telescope         boolean  Auto-register Parley Telescope extensions during setup
 --- @field keymaps           parley.KeymapsConfig
 --- @field providers         table<string, table>  Provider-specific options
 
@@ -59,6 +60,7 @@ local M = {}
 local defaults = {
   refresh_interval = 300, -- 5 minutes
   cache_dir = vim.fn.stdpath("cache") .. "/parley",
+  telescope = true,
   signs = {
     enabled = true,
     text = "▐",
@@ -101,6 +103,10 @@ local defaults = {
 --- Active (merged) configuration. Nil until setup() is called.
 --- @type parley.Config | nil
 M.config = nil
+
+M._notify = function(msg, level)
+  vim.notify(msg, level)
+end
 
 --- @type table<string, string[]>
 local PARLEY_GROUPS = {
@@ -281,6 +287,17 @@ function M.setup(opts)
     detect = gh.detect,
     factory = gh.new,
   })
+
+  if M.config.telescope then
+    local ok_telescope, telescope = pcall(require, "telescope")
+    if ok_telescope then
+      telescope.load_extension("parley_discussions")
+      telescope.load_extension("parley_discussions_file")
+    else
+      M._notify("parley: telescope.nvim is not installed", vim.log.levels.WARN)
+    end
+  end
+
   -- Register navigation keymaps (global; act on the current buffer at call time).
   -- An empty string disables the keymap.
   if M.config.keymaps.next_comment ~= "" then

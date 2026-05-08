@@ -292,6 +292,31 @@ async_tests.describe("parley.services.read refresh", function()
     assert.equals(10, state.mappings["1"].local_line)
   end)
 
+  async_tests.it("lists discussions for the current file or the whole PR", function()
+    setup({
+      path = "/repo/src/foo.lua",
+      pr = SAMPLE_PR,
+      discussions = {
+        make_discussion(1, "src/foo.lua", 10, "for foo"),
+        make_discussion(2, "src/foo.lua", 20, "also foo"),
+        make_discussion(3, "src/bar.lua", 5, "for bar"),
+      },
+    })
+
+    read_service.refresh(1)
+
+    local file_discussions = read_service.list_discussions(1)
+    local all_discussions = read_service.list_discussions(1, { scope = "all" })
+
+    assert.equals(2, #file_discussions)
+    assert.equals("1", file_discussions[1].id)
+    assert.equals("2", file_discussions[2].id)
+    assert.equals(3, #all_discussions)
+    assert.equals("1", all_discussions[1].id)
+    assert.equals("2", all_discussions[2].id)
+    assert.equals("3", all_discussions[3].id)
+  end)
+
   async_tests.it("calls detect_pr and fetch_discussions on the provider", function()
     local s = setup({ pr = SAMPLE_PR, discussions = {} })
 

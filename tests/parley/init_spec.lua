@@ -36,7 +36,9 @@ describe("parley setup", function()
   local saved_registry_register
   local saved_signs_setup_highlights
   local saved_progress_setup
+  local saved_notify
   local saved_gh
+  local saved_telescope
 
   before_each(function()
     saved_cache_setup = cache.setup
@@ -45,7 +47,9 @@ describe("parley setup", function()
     saved_registry_register = registry.register
     saved_signs_setup_highlights = signs.setup_highlights
     saved_progress_setup = progress_popup.setup
+    saved_notify = parley._notify
     saved_gh = package.loaded["parley.providers.github.provider"]
+    saved_telescope = package.loaded["telescope"]
   end)
 
   after_each(function()
@@ -55,7 +59,9 @@ describe("parley setup", function()
     registry.register = saved_registry_register
     signs.setup_highlights = saved_signs_setup_highlights
     progress_popup.setup = saved_progress_setup
+    parley._notify = saved_notify
     package.loaded["parley.providers.github.provider"] = saved_gh
+    package.loaded["telescope"] = saved_telescope
     pcall(vim.api.nvim_del_user_command, "Parley")
     pcall(vim.api.nvim_del_user_command, "ParleyRefresh")
   end)
@@ -105,6 +111,87 @@ describe("parley setup", function()
 
     assert.is_true(ok)
     assert.equals("status-12", result)
+  end)
+
+  it("loads Parley Telescope extensions by default", function()
+    local calls = {}
+    cache.setup = function(_opts) end
+    signs.setup_highlights = function() end
+    progress_popup.setup = function() end
+    registry.reset = function() end
+    registry.register = function(_spec) end
+    package.loaded["parley.providers.github.provider"] = {
+      detect = function()
+        return nil
+      end,
+      new = function()
+        return {}
+      end,
+    }
+    package.loaded["telescope"] = {
+      load_extension = function(name)
+        calls[#calls + 1] = name
+      end,
+    }
+
+    parley.setup({})
+
+    assert.same({ "parley_discussions", "parley_discussions_file" }, calls)
+    assert.is_true(parley.config.telescope)
+  end)
+
+  it("skips Telescope autoload when telescope=false", function()
+    local calls = {}
+    cache.setup = function(_opts) end
+    signs.setup_highlights = function() end
+    progress_popup.setup = function() end
+    registry.reset = function() end
+    registry.register = function(_spec) end
+    package.loaded["parley.providers.github.provider"] = {
+      detect = function()
+        return nil
+      end,
+      new = function()
+        return {}
+      end,
+    }
+    package.loaded["telescope"] = {
+      load_extension = function(name)
+        calls[#calls + 1] = name
+      end,
+    }
+
+    parley.setup({ telescope = false })
+
+    assert.same({}, calls)
+    assert.is_false(parley.config.telescope)
+  end)
+
+  it("warns when telescope=true and telescope.nvim is not installed", function()
+    local notifications = {}
+    cache.setup = function(_opts) end
+    signs.setup_highlights = function() end
+    progress_popup.setup = function() end
+    registry.reset = function() end
+    registry.register = function(_spec) end
+    package.loaded["parley.providers.github.provider"] = {
+      detect = function()
+        return nil
+      end,
+      new = function()
+        return {}
+      end,
+    }
+    parley._notify = function(msg, level)
+      notifications[#notifications + 1] = { msg = msg, level = level }
+    end
+    package.loaded["telescope"] = nil
+
+    parley.setup({ telescope = true })
+
+    assert.same({
+      { msg = "parley: telescope.nvim is not installed", level = vim.log.levels.WARN },
+    }, notifications)
   end)
 end)
 

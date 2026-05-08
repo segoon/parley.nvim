@@ -13,6 +13,7 @@ local M = {}
 ---   stale: boolean,
 ---   pr: parley.PR|nil,
 ---   discussions: parley.Discussion[],
+---   all_discussions: parley.Discussion[],
 ---   mappings: table<string, parley.anchor.Mapping>,
 ---   summary: { unresolved_count: integer },
 ---   error: string|nil,
@@ -99,13 +100,14 @@ local function build_summary(discussions)
   return { unresolved_count = unresolved_count }
 end
 
-local function build_snapshot(ctx, provider, head_sha, pr, discussions)
+local function build_snapshot(ctx, head_sha, pr, discussions)
   local file_discussions = filter_for_file(discussions, ctx.rel_path)
   return {
     status = "ready",
     stale = false,
     pr = pr,
     discussions = file_discussions,
+    all_discussions = discussions,
     mappings = anchor.map_discussions(ctx.vcs_info.root, head_sha, file_discussions),
     summary = build_summary(discussions),
     error = nil,
@@ -149,6 +151,7 @@ local function restore_cached_snapshot(bufnr, ctx, provider_snapshot)
     stale = true,
     pr = pr,
     discussions = file_discussions,
+    all_discussions = discussions_entry.data,
     mappings = anchor.map_discussions(ctx.vcs_info.root, pr_entry.data.head_sha or "", file_discussions),
     summary = build_summary(discussions_entry.data),
     error = nil,
@@ -221,7 +224,7 @@ function M.refresh(bufnr, opts)
     local discussions = provider:fetch_discussions(pr)
     cache.set(discussions_cache_key(provider, provider_opts, pr.id), discussions)
     provider_repository.store(bufnr, provider, provider_opts)
-    local snapshot = build_snapshot(ctx, provider, head_sha, pr, discussions)
+    local snapshot = build_snapshot(ctx, head_sha, pr, discussions)
     publish(bufnr, snapshot)
     return snapshot
   end)
@@ -238,6 +241,7 @@ function M.refresh(bufnr, opts)
         stale = false,
         pr = nil,
         discussions = {},
+        all_discussions = {},
         mappings = {},
         summary = { unresolved_count = 0 },
         error = tostring(result),
@@ -267,9 +271,9 @@ function M.invalidate(bufnr, opts)
   local snapshot = M._entries[bufnr]
   if ctx and provider_snapshot and snapshot and snapshot.pr and ctx.vcs_info and ctx.vcs_info.branch then
     local provider = provider_snapshot.provider
-    local opts = provider_snapshot.opts
-    cache.invalidate(pr_cache_key(provider, opts, ctx.vcs_info.branch))
-    cache.invalidate(discussions_cache_key(provider, opts, snapshot.pr.id))
+    local provider_opts = provider_snapshot.opts
+    cache.invalidate(pr_cache_key(provider, provider_opts, ctx.vcs_info.branch))
+    cache.invalidate(discussions_cache_key(provider, provider_opts, snapshot.pr.id))
   end
   if opts.preserve_snapshot ~= true then
     publish(bufnr, nil)
