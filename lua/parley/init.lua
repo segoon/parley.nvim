@@ -237,6 +237,14 @@ function M._dispatch_parley(fargs, bufnr, cmd_opts)
   error("parley: unknown command group: " .. tostring(group), 0)
 end
 
+--- Return a statusline component string for `bufnr`.
+--- Suitable for lualine function components and `%!v:lua.require("parley").statusline()`.
+--- @param bufnr? integer
+--- @return string
+function M.statusline(bufnr)
+  return require("parley.statusline").component(bufnr)
+end
+
 --- Set up parley.nvim.
 ---
 --- Call this once from your Neovim config:

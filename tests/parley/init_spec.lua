@@ -88,6 +88,24 @@ describe("parley setup", function()
     assert.equals(bufnr, calls[#calls].bufnr)
     assert.same({ force = true, progress = true }, calls[#calls].opts)
   end)
+
+  it("exposes the public statusline wrapper", function()
+    local saved_statusline = package.loaded["parley.statusline"]
+    package.loaded["parley.statusline"] = {
+      component = function(bufnr)
+        return "status-" .. tostring(bufnr)
+      end,
+    }
+
+    local ok, result = pcall(function()
+      return parley.statusline(12)
+    end)
+
+    package.loaded["parley.statusline"] = saved_statusline
+
+    assert.is_true(ok)
+    assert.equals("status-12", result)
+  end)
 end)
 
 describe("parley command dispatch", function()

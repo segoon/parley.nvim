@@ -14,6 +14,7 @@ local M = {}
 ---   pr: parley.PR|nil,
 ---   discussions: parley.Discussion[],
 ---   mappings: table<string, parley.anchor.Mapping>,
+---   summary: { unresolved_count: integer },
 ---   error: string|nil,
 ---   head_sha: string,
 --- }>
@@ -83,17 +84,30 @@ local function filter_for_file(discussions, rel_path)
   return out
 end
 
+--- @param discussions parley.Discussion[]
+--- @return { unresolved_count: integer }
+local function build_summary(discussions)
+  local unresolved_count = 0
+  for _, discussion in ipairs(discussions) do
+    -- TODO(segoon): GitHub REST review comments do not expose thread resolution,
+    -- so this currently approximates unresolved_count as all fetched threads.
+    -- Replace this with provider-backed resolved state once GraphQL threads land.
+    if discussion.resolved ~= true then
+      unresolved_count = unresolved_count + 1
+    end
+  end
+  return { unresolved_count = unresolved_count }
+end
+
 local function build_snapshot(ctx, provider, head_sha, pr, discussions)
   local file_discussions = filter_for_file(discussions, ctx.rel_path)
-  if #file_discussions == 0 then
-    return nil
-  end
   return {
     status = "ready",
     stale = false,
     pr = pr,
     discussions = file_discussions,
     mappings = anchor.map_discussions(ctx.vcs_info.root, head_sha, file_discussions),
+    summary = build_summary(discussions),
     error = nil,
     head_sha = head_sha,
   }
@@ -129,10 +143,6 @@ local function restore_cached_snapshot(bufnr, ctx, provider_snapshot)
   end
 
   local file_discussions = filter_for_file(discussions_entry.data, ctx.rel_path)
-  if #file_discussions == 0 then
-    return nil
-  end
-
   provider_repository.store(bufnr, provider, opts)
   return {
     status = "ready",
@@ -140,6 +150,7 @@ local function restore_cached_snapshot(bufnr, ctx, provider_snapshot)
     pr = pr,
     discussions = file_discussions,
     mappings = anchor.map_discussions(ctx.vcs_info.root, pr_entry.data.head_sha or "", file_discussions),
+    summary = build_summary(discussions_entry.data),
     error = nil,
     head_sha = pr_entry.data.head_sha or (write_context and write_context.head_sha) or "",
   }
@@ -228,6 +239,7 @@ function M.refresh(bufnr, opts)
         pr = nil,
         discussions = {},
         mappings = {},
+        summary = { unresolved_count = 0 },
         error = tostring(result),
         head_sha = "",
       })

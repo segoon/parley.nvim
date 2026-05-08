@@ -488,7 +488,7 @@ async_tests.describe("parley.services.read refresh", function()
     assert.equals("99", read_service.get_buffer_state(1).discussions[1].id)
   end)
 
-  async_tests.it("clears buffer state when the current file has no discussions", function()
+  async_tests.it("keeps PR state and clears decorations when the current file has no discussions", function()
     local s = setup({
       path = "/repo/src/foo.lua",
       pr = SAMPLE_PR,
@@ -505,7 +505,11 @@ async_tests.describe("parley.services.read refresh", function()
     read_service.refresh(1)
 
     assert.equals(1, #s.clear_calls)
-    assert.is_nil(read_service.get_buffer_state(1))
+    local state = read_service.get_buffer_state(1)
+    assert.is_not_nil(state)
+    assert.equals("42", state.pr.id)
+    assert.equals(0, #state.discussions)
+    assert.equals(1, state.summary.unresolved_count)
   end)
 
   -- -------------------------------------------------------------------------

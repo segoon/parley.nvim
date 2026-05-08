@@ -35,6 +35,9 @@ Full implementation requires:
   `_thread_root` cache (node_id → root comment db id) for `reply`.
 - `resolve` / `unresolve` — `resolveReviewThread` /
   `unresolveReviewThread` GraphQL mutations, taking the thread node ID.
+- Statusline unresolved counts are currently only an approximation for GitHub:
+  without `isResolved`, Step 17 can only count fetched threads, not truly
+  unresolved ones. Replace the approximation once GraphQL thread data lands.
 
 Both can be driven with `gh api graphql -f query='...' -F var=val` — no new
 HTTP client work required beyond the existing `_runner` seam.
