@@ -16,6 +16,7 @@ local M = {}
 --- @field signs             parley.SignsConfig
 --- @field virtual_text      parley.VirtualTextConfig
 --- @field float             parley.FloatConfig
+--- @field progress          parley.ProgressConfig
 --- @field keymaps           parley.KeymapsConfig
 --- @field providers         table<string, table>  Provider-specific options
 
@@ -31,6 +32,18 @@ local M = {}
 --- @field border    string   Border style (see `:h nvim_open_win`)
 --- @field max_width integer
 --- @field max_height integer
+
+--- @class parley.ProgressConfig
+--- @field enabled           boolean
+--- @field border            string
+--- @field max_width         integer
+--- @field max_height        integer
+--- @field success_timeout   integer
+--- @field failed_timeout    integer
+--- @field cancelled_timeout integer
+--- @field margin_bottom     integer
+--- @field margin_right      integer
+--- @field spinner_interval  integer
 
 --- @class parley.KeymapsConfig
 --- @field next_comment string  Jump to next commented line
@@ -52,6 +65,18 @@ local defaults = {
     border = "rounded",
     max_width = 80,
     max_height = 30,
+  },
+  progress = {
+    enabled = true,
+    border = "rounded",
+    max_width = 60,
+    max_height = 8,
+    success_timeout = 1200,
+    failed_timeout = 2500,
+    cancelled_timeout = 1200,
+    margin_bottom = 1,
+    margin_right = 2,
+    spinner_interval = 100,
   },
   keymaps = {
     next_comment = "]c",
@@ -198,6 +223,7 @@ function M.setup(opts)
 
   -- Define highlight groups for signs and virtual text.
   signs.setup_highlights()
+  require("parley.progress_popup").setup()
 
   -- Reset and re-populate the provider registry on every setup() call so
   -- that calling setup() twice produces a clean, deterministic state.

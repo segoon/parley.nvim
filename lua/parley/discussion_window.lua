@@ -12,6 +12,7 @@ local M = {}
 
 local INPUT_HEIGHT = 6
 local HIGHLIGHT_NS = vim.api.nvim_create_namespace("parley.discussion_window")
+local INPUT_STATUS_NS = vim.api.nvim_create_namespace("parley.discussion_window.input_status")
 
 ---@class parley.ComposerHandle
 ---@field set_submitting fun(status: string): nil
@@ -245,10 +246,14 @@ end
 
 --- @param lines string[]
 --- @param float_cfg parley.FloatConfig
+--- @param source_winid integer
+--- @param source_line integer
 --- @return vim.api.keyset.win_config
-local function make_win_config(lines, float_cfg)
+local function make_win_config(lines, float_cfg, source_winid, source_line)
   return {
-    relative = "cursor",
+    relative = "win",
+    win = source_winid,
+    bufpos = { source_line - 1, 0 },
     row = 1,
     col = 0,
     style = "minimal",
@@ -283,6 +288,32 @@ local function clear_parent_highlight(instance)
   if vim.api.nvim_buf_is_valid(instance.bufnr) then
     vim.api.nvim_buf_clear_namespace(instance.bufnr, HIGHLIGHT_NS, 0, -1)
   end
+end
+
+--- @param bufnr integer
+--- @param winid integer|nil
+--- @return boolean
+local function is_source_window(bufnr, winid)
+  return winid ~= nil and vim.api.nvim_win_is_valid(winid) and vim.api.nvim_win_get_buf(winid) == bufnr
+end
+
+--- @param bufnr integer
+--- @param preferred_winid integer|nil
+--- @return integer|nil
+local function resolve_source_winid(bufnr, preferred_winid)
+  local current_winid = vim.api.nvim_get_current_win()
+  if is_source_window(bufnr, current_winid) then
+    return current_winid
+  end
+  if is_source_window(bufnr, preferred_winid) then
+    return preferred_winid
+  end
+  for _, winid in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+    if is_source_window(bufnr, winid) then
+      return winid
+    end
+  end
+  return nil
 end
 
 --- @param instance table
@@ -323,6 +354,26 @@ local function focus_input(instance)
   end
 end
 
+---@param instance parley.DiscussionWindowInstance
+local function clear_input_status_overlay(instance)
+  if instance.input_bufnr and vim.api.nvim_buf_is_valid(instance.input_bufnr) then
+    vim.api.nvim_buf_clear_namespace(instance.input_bufnr, INPUT_STATUS_NS, 0, -1)
+  end
+end
+
+---@param instance parley.DiscussionWindowInstance
+---@param status string
+local function set_input_status_overlay(instance, status)
+  if not instance.input_bufnr or not vim.api.nvim_buf_is_valid(instance.input_bufnr) then
+    return
+  end
+  clear_input_status_overlay(instance)
+  vim.api.nvim_buf_set_extmark(instance.input_bufnr, INPUT_STATUS_NS, 0, 0, {
+    virt_lines = { { { status, "Comment" } } },
+    virt_lines_above = true,
+  })
+end
+
 --- @param instance table
 --- @param force boolean
 --- @return boolean
@@ -337,7 +388,7 @@ local function hide_input(instance, force)
       return false
     end
 
-    local text = table.concat(vim.api.nvim_buf_get_lines(instance.input_bufnr, 1, -1, false), "\n")
+    local text = table.concat(vim.api.nvim_buf_get_lines(instance.input_bufnr, 0, -1, false), "\n")
     if text:match("%S") and not M._confirm_discard("Are you sure? The draft is not saved and will be lost.") then
       return false
     end
@@ -354,6 +405,7 @@ local function hide_input(instance, force)
   end
   instance.input_winid = nil
   if instance.input_bufnr and vim.api.nvim_buf_is_valid(instance.input_bufnr) then
+    clear_input_status_overlay(instance)
     vim.bo[instance.input_bufnr].modifiable = true
     vim.api.nvim_buf_set_lines(instance.input_bufnr, 0, -1, false, {})
   end
@@ -367,9 +419,8 @@ local function set_input_status(instance, status)
   if not instance.input_bufnr or not vim.api.nvim_buf_is_valid(instance.input_bufnr) then
     return
   end
+  set_input_status_overlay(instance, status)
   vim.bo[instance.input_bufnr].modifiable = true
-  vim.api.nvim_buf_set_lines(instance.input_bufnr, 0, 1, false, { status })
-  vim.bo[instance.input_bufnr].modifiable = instance.input_state ~= "submitting"
 end
 
 --- @param instance table
@@ -377,8 +428,7 @@ end
 local function set_input_submitting(instance, status)
   instance.input_state = "submitting"
   if instance.input_bufnr and vim.api.nvim_buf_is_valid(instance.input_bufnr) then
-    vim.bo[instance.input_bufnr].modifiable = true
-    vim.api.nvim_buf_set_lines(instance.input_bufnr, 0, 1, false, { status })
+    set_input_status_overlay(instance, status)
     vim.bo[instance.input_bufnr].modifiable = false
   end
 end
@@ -449,7 +499,7 @@ local function show_input(src_bufnr, instance, status, initial_text, parent_comm
       return
     end
 
-    local text = table.concat(vim.api.nvim_buf_get_lines(instance.input_bufnr, 1, -1, false), "\n")
+    local text = table.concat(vim.api.nvim_buf_get_lines(instance.input_bufnr, 0, -1, false), "\n")
     if text:match("%S") == nil then
       M._notify("Parley draft is empty", vim.log.levels.WARN)
       return
@@ -484,13 +534,19 @@ local function show_input(src_bufnr, instance, status, initial_text, parent_comm
   end
 
   local body_lines = vim.split(initial_text or "", "\n", { plain = true })
+  if #body_lines == 0 then
+    body_lines = { "" }
+  end
   vim.bo[instance.input_bufnr].modifiable = true
-  vim.api.nvim_buf_set_lines(instance.input_bufnr, 0, -1, false, { status })
-  vim.api.nvim_buf_set_lines(instance.input_bufnr, 1, -1, false, body_lines)
+  vim.api.nvim_buf_set_lines(instance.input_bufnr, 0, -1, false, body_lines)
   vim.bo[instance.input_bufnr].modifiable = true
+  set_input_status_overlay(instance, status)
   composer_ui_state.patch(src_bufnr, { draft = initial_text or "", visible = true, submit_state = "idle" })
   highlight_parent_comment(instance, parent_comment_id)
   focus_input(instance)
+  if instance.input_winid and vim.api.nvim_win_is_valid(instance.input_winid) then
+    vim.api.nvim_win_set_cursor(instance.input_winid, { 1, 0 })
+  end
   vim.cmd.startinsert()
 end
 
@@ -516,9 +572,10 @@ end
 ---@param lines string[]
 ---@param float_cfg parley.FloatConfig
 ---@param source_winid integer
+---@param source_line integer
 ---@return parley.DiscussionWindowInstance
-local function create_instance(lines, float_cfg, source_winid)
-  local config = make_win_config(lines, float_cfg)
+local function create_instance(lines, float_cfg, source_winid, source_line)
+  local config = make_win_config(lines, float_cfg, source_winid, source_line)
   local bufnr = vim.api.nvim_create_buf(false, true)
   local winid = vim.api.nvim_open_win(bufnr, true, config)
   local closed = false
@@ -630,12 +687,15 @@ end
 --- @param bufnr integer
 --- @param lines string[]
 --- @param float_cfg parley.FloatConfig
+--- @param source_winid integer
+--- @param source_line integer
 --- @return table
-local function ensure_instance(bufnr, lines, float_cfg)
+local function ensure_instance(bufnr, lines, float_cfg, source_winid, source_line)
   local instance = live_instance(bufnr)
   if instance then
     instance.source_bufnr = bufnr
-    vim.api.nvim_win_set_config(instance.winid, make_win_config(lines, float_cfg))
+    instance.source_winid = source_winid
+    vim.api.nvim_win_set_config(instance.winid, make_win_config(lines, float_cfg, source_winid, source_line))
     if instance.input_winid and vim.api.nvim_win_is_valid(instance.input_winid) then
       local discussion_cfg = vim.api.nvim_win_get_config(instance.winid)
       vim.api.nvim_win_set_config(
@@ -651,7 +711,7 @@ local function ensure_instance(bufnr, lines, float_cfg)
     return instance
   end
 
-  instance = create_instance(lines, float_cfg, vim.api.nvim_get_current_win())
+  instance = create_instance(lines, float_cfg, source_winid, source_line)
   instance.source_bufnr = bufnr
   M._instances[bufnr] = instance
   return instance
@@ -705,11 +765,20 @@ end
 function M.open_current_line(bufnr, opts)
   opts = opts or {}
   local state = read_service.get_buffer_state(bufnr)
-  local cursor_line = opts.cursor_line or vim.api.nvim_win_get_cursor(0)[1]
+  local source_winid = resolve_source_winid(bufnr, live_instance(bufnr) and live_instance(bufnr).source_winid or nil)
+  local cursor_line = opts.cursor_line
+    or (source_winid and vim.api.nvim_win_get_cursor(source_winid)[1])
+    or vim.api.nvim_win_get_cursor(0)[1]
 
   if not state then
     M.close(bufnr)
     M._notify("No Parley discussions on this line", vim.log.levels.INFO)
+    return false
+  end
+
+  if not source_winid then
+    M.close(bufnr)
+    M._notify("Open the source buffer to view Parley discussions", vim.log.levels.INFO)
     return false
   end
 
@@ -727,7 +796,7 @@ function M.open_current_line(bufnr, opts)
     max_height = 30,
   }
   local lines, comment_ranges = render_lines(discussions, state.mappings)
-  local instance = ensure_instance(bufnr, lines, float_cfg)
+  local instance = ensure_instance(bufnr, lines, float_cfg, source_winid, cursor_line)
   instance.comment_ranges = comment_ranges
   write_lines(bufnr, instance, lines)
   clear_parent_highlight(instance)
@@ -807,15 +876,20 @@ function M.show_new_comment_input(bufnr, opts)
   if not instance then
     local state = read_service.get_buffer_state(bufnr)
     local config = M._get_config() or {}
+    local source_winid = resolve_source_winid(bufnr, nil)
     local float_cfg = config.float or {
       border = "rounded",
       max_width = 80,
       max_height = 30,
     }
+    if not source_winid then
+      M._notify("Open the source buffer to write a Parley comment", vim.log.levels.INFO)
+      return nil
+    end
     local discussions = state and discussions_for_line(state, opts.cursor_line) or {}
     if #discussions > 0 then
       local lines, comment_ranges = render_lines(discussions, state.mappings)
-      instance = ensure_instance(bufnr, lines, float_cfg)
+      instance = ensure_instance(bufnr, lines, float_cfg, source_winid, opts.cursor_line)
       instance.comment_ranges = comment_ranges
       write_lines(bufnr, instance, lines)
       discussion_ui_state.set(bufnr, {
@@ -828,7 +902,7 @@ function M.show_new_comment_input(bufnr, opts)
     else
       local config = M._get_config() or {}
       local placeholder = { "_No discussion on this line yet._" }
-      instance = ensure_instance(bufnr, placeholder, float_cfg)
+      instance = ensure_instance(bufnr, placeholder, float_cfg, source_winid, opts.cursor_line)
       instance.comment_ranges = {}
       write_lines(bufnr, instance, placeholder)
       discussion_ui_state.set(bufnr, {

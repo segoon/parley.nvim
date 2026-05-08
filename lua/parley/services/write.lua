@@ -3,6 +3,7 @@
 local async = require("plenary.async")
 local model = require("parley.model")
 local composer_ui_state = require("parley.ui_states.composer")
+local progress_ui_state = require("parley.ui_states.progress")
 local context_repository = require("parley.repositories.context")
 local provider_repository = require("parley.repositories.provider")
 local review_repository = require("parley.repositories.review")
@@ -18,6 +19,23 @@ M._operations = {}
 M._notify = function(msg, level)
   vim.notify(msg, level)
 end
+
+--- @type fun(cb: fun(), timeout: integer): nil
+M._defer = function(cb, timeout)
+  vim.defer_fn(cb, timeout)
+end
+
+--- @type fun(): integer
+M._now = function()
+  return math.floor((vim.uv or vim.loop).hrtime() / 1000000)
+end
+
+--- @type fun(): parley.Config|{ progress: parley.ProgressConfig }
+M._get_config = function()
+  return require("parley").config
+end
+
+M._next_progress_id = 0
 
 --- @param bufnr integer
 --- @return parley.Provider, parley.PR, string
@@ -81,12 +99,78 @@ local function refresh_after_write(bufnr, callback)
   end)
 end
 
+---@param state 'success'|'failed'|'cancelled'
+---@return integer
+local function progress_timeout(state)
+  local config = M._get_config() or {}
+  local progress = config.progress or {}
+  if state == "success" then
+    return progress.success_timeout or 1200
+  end
+  if state == "failed" then
+    return progress.failed_timeout or 2500
+  end
+  return progress.cancelled_timeout or 1200
+end
+
+---@param bufnr integer
+---@param message string
+---@return { id: string, started_at: integer, title: string }
+local function start_progress(bufnr, message)
+  M._next_progress_id = M._next_progress_id + 1
+  local entry = {
+    id = tostring(M._next_progress_id),
+    bufnr = bufnr,
+    title = "Parley",
+    message = message,
+    kind = "write",
+    state = "running",
+    started_at = M._now(),
+    updated_at = M._now(),
+  }
+  progress_ui_state.upsert(entry)
+  return {
+    id = entry.id,
+    started_at = entry.started_at,
+    title = entry.title,
+  }
+end
+
+---@param progress { id: string, started_at: integer, title: string }
+---@param bufnr integer
+---@param state 'running'|'success'|'failed'|'cancelled'
+---@param message string
+local function update_progress(progress, bufnr, state, message)
+  progress_ui_state.upsert({
+    id = progress.id,
+    bufnr = bufnr,
+    title = progress.title,
+    message = message,
+    kind = "write",
+    state = state,
+    started_at = progress.started_at,
+    updated_at = M._now(),
+  })
+end
+
+---@param progress { id: string, started_at: integer, title: string }
+---@param bufnr integer
+---@param state 'success'|'failed'|'cancelled'
+---@param message string
+local function finish_progress(progress, bufnr, state, message)
+  update_progress(progress, bufnr, state, message)
+  M._defer(function()
+    progress_ui_state.remove(progress.id)
+  end, progress_timeout(state))
+end
+
 --- @param bufnr integer
 --- @param instance table
 --- @param starter fun(callback: fun(result: { ok: boolean, comment?: parley.Comment, err?: string, cancelled?: boolean }): nil): { cancel: fun(): nil }
 --- @param status_text string
+--- @param progress_texts { running: string, success: string, failed: string, cancelled: string }
 --- @param success_opts? { cursor_line?: integer }
-local function run_submit(bufnr, instance, starter, status_text, success_opts)
+local function run_submit(bufnr, instance, starter, status_text, progress_texts, success_opts)
   success_opts = success_opts or {}
   if M._operations[bufnr] ~= nil then
     M._notify("Parley request already in progress for this buffer", vim.log.levels.WARN)
@@ -94,7 +178,7 @@ local function run_submit(bufnr, instance, starter, status_text, success_opts)
   end
 
   local operation
-  M._notify("Parley: sending request...", vim.log.levels.INFO)
+  local progress = start_progress(bufnr, progress_texts.running)
   composer_ui_state.patch(bufnr, { submit_state = "submitting", error = nil })
   instance.set_submitting(status_text)
 
@@ -108,6 +192,7 @@ local function run_submit(bufnr, instance, starter, status_text, success_opts)
     if result.cancelled then
       composer_ui_state.patch(bufnr, { submit_state = "idle" })
       instance.set_idle("Request cancelled. Draft preserved.")
+      finish_progress(progress, bufnr, "cancelled", progress_texts.cancelled)
       refresh_after_write(bufnr, function() end)
       return
     end
@@ -115,11 +200,13 @@ local function run_submit(bufnr, instance, starter, status_text, success_opts)
     if not result.ok then
       composer_ui_state.patch(bufnr, { submit_state = "failed", error = result.err or "parley: request failed" })
       instance.set_idle("Request failed. Fix the draft and retry.")
+      finish_progress(progress, bufnr, "failed", progress_texts.failed)
       M._notify(result.err or "parley: request failed", vim.log.levels.WARN)
       return
     end
 
     composer_ui_state.clear(bufnr)
+    finish_progress(progress, bufnr, "success", progress_texts.success)
     refresh_after_write(bufnr, function()
       close_input(instance, function()
         if vim.api.nvim_buf_is_valid(bufnr) then
@@ -133,6 +220,7 @@ local function run_submit(bufnr, instance, starter, status_text, success_opts)
   operation = {
     cancel = request.cancel,
     input = instance,
+    progress = progress,
   }
   M._operations[bufnr] = operation
   instance.set_cancel(function()
@@ -165,32 +253,44 @@ function M.open_new_comment_input(bufnr, opts)
     status = "Drafting top-level comment. Press <C-s> to send, or <Esc>s in normal mode. q closes.",
     on_submit = function(instance, text)
       local body = model.new_body({ text = text, format = "markdown" })
-      return run_submit(bufnr, instance, function(callback)
-        if provider.begin_post_top_level_comment then
-          return provider:begin_post_top_level_comment(pr, rel_path, line, body, callback)
-        end
+      return run_submit(
+        bufnr,
+        instance,
+        function(callback)
+          if provider.begin_post_top_level_comment then
+            return provider:begin_post_top_level_comment(pr, rel_path, line, body, callback)
+          end
 
-        local cancelled = false
-        async.run(function()
-          local ok, result = pcall(function()
-            return provider:post_top_level_comment(pr, rel_path, line, body)
+          local cancelled = false
+          async.run(function()
+            local ok, result = pcall(function()
+              return provider:post_top_level_comment(pr, rel_path, line, body)
+            end)
+            vim.schedule(function()
+              if cancelled then
+                callback({ ok = false, cancelled = true })
+              elseif ok then
+                callback({ ok = true, comment = result })
+              else
+                callback({ ok = false, err = tostring(result) })
+              end
+            end)
           end)
-          vim.schedule(function()
-            if cancelled then
-              callback({ ok = false, cancelled = true })
-            elseif ok then
-              callback({ ok = true, comment = result })
-            else
-              callback({ ok = false, err = tostring(result) })
-            end
-          end)
-        end)
-        return {
-          cancel = function()
-            cancelled = true
-          end,
-        }
-      end, "Sending request... Press C to cancel request.", { cursor_line = target_line })
+          return {
+            cancel = function()
+              cancelled = true
+            end,
+          }
+        end,
+        "Sending request... Press C to cancel request.",
+        {
+          running = "Sending comment",
+          success = "Comment sent",
+          failed = "Comment failed",
+          cancelled = "Comment cancelled",
+        },
+        { cursor_line = target_line }
+      )
     end,
   })
 end
@@ -222,32 +322,44 @@ function M.open_reply_input(bufnr, discussion_id, parent_comment_id)
     status = "Drafting reply. Press <C-s> to send, or <Esc>s in normal mode. q closes.",
     on_submit = function(instance, text)
       local body = model.new_body({ text = text, format = "markdown" })
-      return run_submit(bufnr, instance, function(callback)
-        if provider.begin_reply then
-          return provider:begin_reply(pr, discussion_id, parent_comment_id, body, callback)
-        end
+      return run_submit(
+        bufnr,
+        instance,
+        function(callback)
+          if provider.begin_reply then
+            return provider:begin_reply(pr, discussion_id, parent_comment_id, body, callback)
+          end
 
-        local cancelled = false
-        async.run(function()
-          local ok, result = pcall(function()
-            return provider:reply(pr, discussion_id, parent_comment_id, body)
+          local cancelled = false
+          async.run(function()
+            local ok, result = pcall(function()
+              return provider:reply(pr, discussion_id, parent_comment_id, body)
+            end)
+            vim.schedule(function()
+              if cancelled then
+                callback({ ok = false, cancelled = true })
+              elseif ok then
+                callback({ ok = true, comment = result })
+              else
+                callback({ ok = false, err = tostring(result) })
+              end
+            end)
           end)
-          vim.schedule(function()
-            if cancelled then
-              callback({ ok = false, cancelled = true })
-            elseif ok then
-              callback({ ok = true, comment = result })
-            else
-              callback({ ok = false, err = tostring(result) })
-            end
-          end)
-        end)
-        return {
-          cancel = function()
-            cancelled = true
-          end,
-        }
-      end, "Sending request... Press C to cancel request.", { cursor_line = target_line })
+          return {
+            cancel = function()
+              cancelled = true
+            end,
+          }
+        end,
+        "Sending request... Press C to cancel request.",
+        {
+          running = "Sending reply",
+          success = "Reply sent",
+          failed = "Reply failed",
+          cancelled = "Reply cancelled",
+        },
+        { cursor_line = target_line }
+      )
     end,
   })
 end

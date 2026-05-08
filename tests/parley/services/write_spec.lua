@@ -7,6 +7,7 @@ local provider_repository = require("parley.repositories.provider")
 local review_repository = require("parley.repositories.review")
 local read_service = require("parley.services.read")
 local write_service = require("parley.services.write")
+local progress_ui_state = require("parley.ui_states.progress")
 
 local SAMPLE_PR = model.new_pr({
   id = "42",
@@ -26,6 +27,9 @@ local function save_seams()
   saved.review_refresh = review_repository.refresh
   saved.review_invalidate = review_repository.invalidate
   saved.notify = write_service._notify
+  saved.defer = write_service._defer
+  saved.now = write_service._now
+  saved.get_config = write_service._get_config
   saved.discussion = package.loaded["parley.discussion_window"]
 end
 
@@ -34,6 +38,9 @@ local function restore_seams()
   review_repository.refresh = saved.review_refresh
   review_repository.invalidate = saved.review_invalidate
   write_service._notify = saved.notify
+  write_service._defer = saved.defer
+  write_service._now = saved.now
+  write_service._get_config = saved.get_config
   package.loaded["parley.discussion_window"] = saved.discussion
 end
 
@@ -64,9 +71,19 @@ describe("parley.services.write", function()
     context_repository._entries = {}
     provider_repository._entries = {}
     review_repository._entries = {}
+    progress_ui_state.clear()
     notify_calls = {}
     write_service._notify = function(msg, level)
       notify_calls[#notify_calls + 1] = { msg = msg, level = level }
+    end
+    write_service._get_config = function()
+      return {
+        progress = {
+          success_timeout = 1200,
+          failed_timeout = 2500,
+          cancelled_timeout = 1200,
+        },
+      }
     end
   end)
 
@@ -76,6 +93,7 @@ describe("parley.services.write", function()
     context_repository._entries = {}
     provider_repository._entries = {}
     review_repository._entries = {}
+    progress_ui_state.clear()
   end)
 
   it("posts a top-level comment with a normalized range and forces a refresh", function()
@@ -126,8 +144,11 @@ describe("parley.services.write", function()
     assert.same({ 5, 8 }, provider.calls.post_top_level_comment[1].line)
     assert.same({ bufnr = 1, opts = { force = true } }, refresh_calls[1])
     assert.is_true(opened.instance.closed)
-    assert.equals("Parley: sending request...", notify_calls[1].msg)
-    assert.equals(vim.log.levels.INFO, notify_calls[1].level)
+    assert.equals(0, #notify_calls)
+    local progress_entries = progress_ui_state.list()
+    assert.equals(1, #progress_entries)
+    assert.equals("success", progress_entries[1].state)
+    assert.equals("Comment sent", progress_entries[1].message)
   end)
 
   it("passes the explicit parent_comment_id to reply", function()
@@ -198,7 +219,10 @@ describe("parley.services.write", function()
     end))
 
     assert.equals("c2", provider.calls.reply[1].parent_comment_id)
-    assert.equals("Parley: sending request...", notify_calls[1].msg)
+    local progress_entries = progress_ui_state.list()
+    assert.equals(1, #progress_entries)
+    assert.equals("success", progress_entries[1].state)
+    assert.equals("Reply sent", progress_entries[1].message)
   end)
 
   it("does not require VCS detection when opening reply input", function()

@@ -7,6 +7,8 @@ local discussion_ui_state = require("parley.ui_states.discussion")
 local read_service = require("parley.services.read")
 local review_repository = require("parley.repositories.review")
 
+local INPUT_STATUS_NS = vim.api.nvim_create_namespace("parley.discussion_window.input_status")
+
 --- @param n integer
 --- @return integer
 local function scratch(n)
@@ -365,7 +367,7 @@ describe("parley.discussion_window", function()
     })
     local instance = discussion_window._instances[bufnr]
 
-    vim.api.nvim_buf_set_lines(instance.input_bufnr, 1, -1, false, { "draft body" })
+    vim.api.nvim_buf_set_lines(instance.input_bufnr, 0, -1, false, { "draft body" })
     instance.submit_input()
 
     assert.is_true(vim.wait(500, function()
@@ -374,7 +376,84 @@ describe("parley.discussion_window", function()
     assert.is_true(submitted_composer == composer)
     assert.equals("draft body", submitted_text)
     assert.equals("submitting", instance.input_state)
-    assert.same({ "Submitting draft" }, vim.api.nvim_buf_get_lines(instance.input_bufnr, 0, 1, false))
+    assert.same({ "draft body" }, vim.api.nvim_buf_get_lines(instance.input_bufnr, 0, -1, false))
+    local marks = vim.api.nvim_buf_get_extmarks(instance.input_bufnr, INPUT_STATUS_NS, 0, -1, { details = true })
+    assert.equals(1, #marks)
+    assert.same({ { { "Submitting draft", "Comment" } } }, marks[1][4].virt_lines)
+  end)
+
+  it("submits the full initial draft text", function()
+    local bufnr = scratch(10)
+    vim.api.nvim_win_set_cursor(0, { 3, 0 })
+    local submitted_text
+
+    review_repository._entries[bufnr] = {
+      status = "ready",
+      stale = false,
+      discussions = { make_discussion({ line = 3, text = "Focused discussion" }) },
+      mappings = {
+        d1 = { local_line = 3, stale = false, confidence = 1.0 },
+      },
+    }
+
+    discussion_window.open_current_line(bufnr)
+    local composer = discussion_window.show_new_comment_input(bufnr, {
+      cursor_line = 3,
+      status = "New comment draft",
+      initial_text = "line one\nline two",
+      on_submit = function(handle, text)
+        submitted_text = text
+        handle.set_idle("Draft preserved")
+      end,
+    })
+    local instance = discussion_window._instances[bufnr]
+
+    assert.is_not_nil(composer)
+    assert.same({ "line one", "line two" }, vim.api.nvim_buf_get_lines(instance.input_bufnr, 0, -1, false))
+
+    instance.submit_input()
+
+    assert.is_true(vim.wait(500, function()
+      return submitted_text ~= nil
+    end))
+    assert.equals("line one\nline two", submitted_text)
+    assert.same({ "line one", "line two" }, vim.api.nvim_buf_get_lines(instance.input_bufnr, 0, -1, false))
+    local marks = vim.api.nvim_buf_get_extmarks(instance.input_bufnr, INPUT_STATUS_NS, 0, -1, { details = true })
+    assert.equals(1, #marks)
+    assert.same({ { { "Draft preserved", "Comment" } } }, marks[1][4].virt_lines)
+  end)
+
+  it("keeps the discussion float anchored to the source window after reopening from the float", function()
+    local bufnr = scratch(20)
+    local source_winid = vim.api.nvim_get_current_win()
+    vim.api.nvim_win_set_cursor(source_winid, { 3, 0 })
+
+    review_repository._entries[bufnr] = {
+      status = "ready",
+      stale = false,
+      discussions = { make_discussion({ line = 3, text = "Focused discussion" }) },
+      mappings = {
+        d1 = { local_line = 3, stale = false, confidence = 1.0 },
+      },
+    }
+
+    discussion_window.open_current_line(bufnr)
+    local instance = discussion_window._instances[bufnr]
+
+    vim.api.nvim_set_current_win(instance.winid)
+    vim.api.nvim_win_set_cursor(instance.winid, { 2, 0 })
+    discussion_window.open_current_line(bufnr, { cursor_line = 3 })
+
+    local cfg = vim.api.nvim_win_get_config(instance.winid)
+    local before = vim.api.nvim_win_get_position(instance.winid)
+
+    vim.api.nvim_win_set_cursor(instance.winid, { 3, 0 })
+    local after = vim.api.nvim_win_get_position(instance.winid)
+
+    assert.equals("win", cfg.relative)
+    assert.equals(source_winid, cfg.win)
+    assert.same({ 2, 0 }, cfg.bufpos)
+    assert.same(before, after)
   end)
 
   it("hides the embedded input pane on discard and keeps discussion visible", function()
@@ -401,7 +480,7 @@ describe("parley.discussion_window", function()
     })
     local instance = discussion_window._instances[bufnr]
 
-    vim.api.nvim_buf_set_lines(instance.input_bufnr, 1, -1, false, { "draft body" })
+    vim.api.nvim_buf_set_lines(instance.input_bufnr, 0, -1, false, { "draft body" })
     assert.is_true(composer.close(false))
 
     assert.is_true(discussion_window.is_open(bufnr))

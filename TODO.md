@@ -23,6 +23,7 @@ Bugs:
 - too many asserts - detect_pr() must be called before
 - input window must be a buffer just under discussion buffer (split)
 - multiple times: UI thread / non-UI thread / C callback - how to proactively detect it?
+- multiline virtual text
 
 - MVC? any architecture style?
 
