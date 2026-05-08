@@ -3,6 +3,7 @@
 
 local cache = require("parley.cache")
 local nav = require("parley.nav")
+local orchestrator = require("parley.orchestrator")
 local registry = require("parley.registry")
 local signs = require("parley.signs")
 
@@ -111,7 +112,23 @@ function M.setup(opts)
     end, { desc = "Jump to previous Parley comment" })
   end
 
-  -- TODO: register autocommands (BufEnter, timer)
+  -- BufEnter triggers a refresh; the orchestrator's classify step decides
+  -- whether the buffer actually warrants a fetch (regular file in a VCS repo
+  -- whose remote matches a registered provider).
+  local augroup = vim.api.nvim_create_augroup("parley", { clear = true })
+  vim.api.nvim_create_autocmd("BufEnter", {
+    group = augroup,
+    callback = function(args)
+      orchestrator.refresh_async(args.buf)
+    end,
+    desc = "Parley: refresh PR discussions on buffer enter",
+  })
+
+  -- :ParleyRefresh — manual re-fetch that bypasses the stale-cache shortcut.
+  vim.api.nvim_create_user_command("ParleyRefresh", function()
+    orchestrator.refresh_async(vim.api.nvim_get_current_buf(), { force = true })
+  end, { desc = "Re-fetch PR discussions for the current buffer" })
+
   -- TODO: register statusline component
 end
 

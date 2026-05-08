@@ -966,48 +966,135 @@ async_tests.describe("parley.providers.github.provider — submit_review", funct
 end)
 
 -- ---------------------------------------------------------------------------
--- Suite: M.detect
+-- Suite: M._parse_remote_url
+-- ---------------------------------------------------------------------------
+
+describe("parley.providers.github.provider — _parse_remote_url", function()
+  it("parses SSH form (github.com)", function()
+    assert.same(
+      { host = "github.com", owner = "owner", repo = "repo" },
+      gh._parse_remote_url("git@github.com:owner/repo.git")
+    )
+  end)
+
+  it("parses SSH form without trailing .git", function()
+    assert.same(
+      { host = "github.com", owner = "owner", repo = "repo" },
+      gh._parse_remote_url("git@github.com:owner/repo")
+    )
+  end)
+
+  it("parses HTTPS form (github.com)", function()
+    assert.same(
+      { host = "github.com", owner = "owner", repo = "repo" },
+      gh._parse_remote_url("https://github.com/owner/repo.git")
+    )
+  end)
+
+  it("parses HTTPS form without trailing .git", function()
+    assert.same(
+      { host = "github.com", owner = "owner", repo = "repo" },
+      gh._parse_remote_url("https://github.com/owner/repo")
+    )
+  end)
+
+  it("parses HTTPS form with embedded user@", function()
+    assert.same(
+      { host = "github.com", owner = "owner", repo = "repo" },
+      gh._parse_remote_url("https://user@github.com/owner/repo.git")
+    )
+  end)
+
+  it("parses SSH form for an Enterprise host", function()
+    assert.same(
+      { host = "github.corp.example.com", owner = "team", repo = "svc" },
+      gh._parse_remote_url("git@github.corp.example.com:team/svc.git")
+    )
+  end)
+
+  it("returns nil for nil input", function()
+    assert.is_nil(gh._parse_remote_url(nil))
+  end)
+
+  it("returns nil for empty string", function()
+    assert.is_nil(gh._parse_remote_url(""))
+  end)
+
+  it("returns nil for unrecognized scheme", function()
+    assert.is_nil(gh._parse_remote_url("file:///tmp/repo"))
+  end)
+
+  it("returns nil for malformed input", function()
+    assert.is_nil(gh._parse_remote_url("not a url"))
+  end)
+end)
+
+-- ---------------------------------------------------------------------------
+-- Suite: M.detect (registry hook — receives parley.VcsInfo)
 -- ---------------------------------------------------------------------------
 
 describe("parley.providers.github.provider — detect", function()
-  local orig_open
-
-  before_each(function()
-    orig_open = gh._io_open
+  it("returns owner/repo/host for an SSH github.com URL", function()
+    local opts = gh.detect({
+      vcs = "git",
+      root = "/some/repo",
+      branch = "main",
+      remote_url = "git@github.com:owner/repo.git",
+    })
+    assert.same({ host = "github.com", owner = "owner", repo = "repo" }, opts)
   end)
 
-  after_each(function()
-    gh._io_open = orig_open
+  it("returns owner/repo/host for an HTTPS github.com URL", function()
+    local opts = gh.detect({
+      vcs = "git",
+      root = "/some/repo",
+      branch = "main",
+      remote_url = "https://github.com/owner/repo",
+    })
+    assert.same({ host = "github.com", owner = "owner", repo = "repo" }, opts)
   end)
 
-  it("returns true when .git/config contains github.com", function()
-    gh._io_open = function(_path, _mode)
-      return {
-        read = function(_, _)
-          return '[remote "origin"]\n\turl = git@github.com:owner/repo.git\n'
-        end,
-        close = function() end,
-      }
-    end
-    assert.is_true(gh.detect("/some/repo"))
+  it("returns nil for a non-GitHub host (gitlab.com)", function()
+    assert.is_nil(gh.detect({
+      vcs = "git",
+      root = "/some/repo",
+      branch = "main",
+      remote_url = "git@gitlab.com:owner/repo.git",
+    }))
   end)
 
-  it("returns false when .git/config does not contain github.com", function()
-    gh._io_open = function(_path, _mode)
-      return {
-        read = function(_, _)
-          return '[remote "origin"]\n\turl = git@gitlab.com:owner/repo.git\n'
-        end,
-        close = function() end,
-      }
-    end
-    assert.is_false(gh.detect("/some/repo"))
+  it("returns nil when remote_url is missing", function()
+    assert.is_nil(gh.detect({ vcs = "git", root = "/some/repo", branch = "main" }))
   end)
 
-  it("returns false when .git/config cannot be opened", function()
-    gh._io_open = function(_path, _mode)
-      return nil
-    end
-    assert.is_false(gh.detect("/no/git/here"))
+  it("returns nil when vcs_info is not a table", function()
+    assert.is_nil(gh.detect(nil))
+  end)
+
+  it("returns nil for an Enterprise host (kept conservative for now)", function()
+    -- github.corp.example.com is parsed but the host check rejects non-github.com.
+    assert.is_nil(gh.detect({
+      vcs = "git",
+      root = "/r",
+      branch = "main",
+      remote_url = "git@github.corp.example.com:team/svc.git",
+    }))
+  end)
+end)
+
+-- ---------------------------------------------------------------------------
+-- Suite: head_sha accessor
+-- ---------------------------------------------------------------------------
+
+describe("parley.providers.github.provider — head_sha", function()
+  it("returns nil when detect_pr has not populated the cache", function()
+    local p = gh.new({ owner = "o", repo = "r" })
+    assert.is_nil(p:head_sha(SAMPLE_PR))
+  end)
+
+  it("returns the cached head_sha after detect_pr", function()
+    local p = gh.new({ owner = "o", repo = "r" })
+    p._pr_cache["42"] = { head_sha = "abc123def456", number = 42 }
+    assert.equals("abc123def456", p:head_sha(SAMPLE_PR))
   end)
 end)

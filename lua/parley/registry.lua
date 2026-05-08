@@ -1,13 +1,17 @@
 --- parley.registry — Provider registry.
 ---
---- Maps buffer paths to provider instances by iterating registered
---- ProviderSpecs and calling each spec's detect function.  The first
---- spec whose detect returns true wins; its factory is called to produce
---- the provider instance.
+--- Maps a parley.VcsInfo (extracted by parley.vcs.detect) to a provider
+--- instance by iterating registered ProviderSpecs and calling each spec's
+--- detect function.  The first spec whose detect returns non-nil wins; the
+--- returned table is forwarded to factory() as its opts argument.
 ---
 --- Design notes:
----   • No VCS assumptions — detect() receives a raw buffer path and may
----     inspect anything it likes (filesystem, env vars, etc.).
+---   • detect() receives a parley.VcsInfo and returns either:
+---       - nil  → this spec does not handle the repo; try the next one.
+---       - opts → match; opts is passed straight to factory(opts).
+---   • This dual role (match + extract) lets a provider derive the bits it
+---     needs (owner/repo/host for GitHub, project/group for GitLab, …) at
+---     detect time, so the orchestrator stays provider-agnostic.
 ---   • First-match wins; registration order is therefore significant.
 ---   • reset() is provided for test isolation.
 
@@ -22,9 +26,9 @@ local M = {}
 --- A self-contained descriptor for one hosting provider.
 ---
 --- @class parley.ProviderSpec
---- @field name    string                            Human-readable name (e.g. "GitHub")
---- @field detect  fun(path: string): boolean        Returns true if this provider should handle `path`
---- @field factory fun(opts: table): parley.Provider Creates and returns a provider instance
+--- @field name    string                                            Human-readable name (e.g. "GitHub")
+--- @field detect  fun(vcs_info: parley.VcsInfo): table|nil           Returns factory opts on match, nil on miss
+--- @field factory fun(opts: table): parley.Provider                  Creates and returns a provider instance
 
 -- ---------------------------------------------------------------------------
 -- Internal state
@@ -51,21 +55,25 @@ function M.register(spec)
   table.insert(_specs, spec)
 end
 
---- Find the first registered spec whose detect(path) returns true, call its
---- factory(opts), validate the result, and return the provider.
+--- Find the first registered spec whose detect(vcs_info) returns non-nil,
+--- call its factory with that return value, validate the result, and return
+--- the provider.
 ---
---- Returns nil if no spec matches the path.
+--- Returns nil if no spec matches.
 --- Raises an error (including spec.name) if the matching factory returns an
 --- invalid provider.
 ---
---- @param path string   Buffer path passed verbatim to each detect function
---- @param opts table    Provider-specific config forwarded to factory
+--- @param vcs_info parley.VcsInfo  Forwarded verbatim to each detect function
 --- @return parley.Provider|nil
-function M.resolve(path, opts)
-  assert(type(path) == "string", "path must be a string")
-  assert(type(opts) == "table", "opts must be a table")
+function M.resolve(vcs_info)
+  assert(type(vcs_info) == "table", "vcs_info must be a table")
   for _, spec in ipairs(_specs) do
-    if spec.detect(path) then
+    local opts = spec.detect(vcs_info)
+    if opts ~= nil then
+      assert(
+        type(opts) == "table",
+        string.format("parley.registry: detect for provider %q must return a table or nil", spec.name)
+      )
       local p = spec.factory(opts)
       if not provider_mod.validate(p) then
         error(

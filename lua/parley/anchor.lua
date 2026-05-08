@@ -53,11 +53,13 @@ local M = {}
 --- @type fun(cmd: string[], cwd: string): { code: integer, stdout: string, stderr: string }
 M._runner = async.wrap(function(cmd, cwd, callback)
   vim.system(cmd, { cwd = cwd, text = true }, function(result)
-    callback({
-      code = result.code,
-      stdout = result.stdout or "",
-      stderr = result.stderr or "",
-    })
+    vim.schedule(function()
+      callback({
+        code = result.code,
+        stdout = result.stdout or "",
+        stderr = result.stderr or "",
+      })
+    end)
   end)
 end, 3)
 

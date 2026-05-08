@@ -16,7 +16,7 @@
 --- Testability:
 ---   • _runner: fun(cmd: string[]): {code,stdout,stderr}  — replace in tests.
 ---   • _auth:   auth module table with read_token(host)    — replace in tests.
----   • _io_open: io.open replacement for detect()         — replace in tests.
+---   • _parse_remote_url is a pure function exported for unit testing.
 
 local async = require("plenary.async")
 local model = require("parley.model")
@@ -68,25 +68,8 @@ local GH_REVIEW_STATE_MAP = {
 }
 
 -- ---------------------------------------------------------------------------
--- Injectable seams
--- ---------------------------------------------------------------------------
-
---- Override io.open in detect() for tests.
---- @type fun(path: string, mode: string): table|nil
-M._io_open = nil
-
--- ---------------------------------------------------------------------------
 -- Internal helpers
 -- ---------------------------------------------------------------------------
-
---- Return the active io.open implementation.
---- @return fun(path: string, mode: string): table|nil
-local function io_open(path, mode)
-  if M._io_open then
-    return M._io_open(path, mode)
-  end
-  return io.open(path, mode)
-end
 
 --- Build the REST API base URL for a given GitHub host.
 --- @param host string  e.g. "github.com" or "ghe.corp.com"
@@ -275,7 +258,9 @@ function M.new(opts)
 
   local default_runner = async.wrap(function(cmd, callback)
     vim.system(cmd, { text = true }, function(result)
-      callback({ code = result.code, stdout = result.stdout or "", stderr = result.stderr or "" })
+      vim.schedule(function()
+        callback({ code = result.code, stdout = result.stdout or "", stderr = result.stderr or "" })
+      end)
     end)
   end, 2)
 
@@ -589,23 +574,85 @@ function GitHubProvider:submit_review(pr, event, body)
   })
 end
 
+--- Return the head commit SHA cached for `pr` by detect_pr.
+--- Returns nil when detect_pr has not been called for this PR.
+---
+--- @param self parley.github.Provider
+--- @param pr   parley.PR
+--- @return string|nil
+function GitHubProvider:head_sha(pr)
+  local cached = self._pr_cache[pr.id]
+  return cached and cached.head_sha or nil
+end
+
 -- ---------------------------------------------------------------------------
 -- Registry helpers
 -- ---------------------------------------------------------------------------
 
---- Detect whether a repository path is a GitHub repository.
---- Reads .git/config synchronously; returns true if github.com appears.
+--- Parse a git remote URL into { host, owner, repo }, or nil if unrecognized.
 ---
---- @param path string  Repository root path
---- @return boolean
-function M.detect(path)
-  local f = io_open(path .. "/.git/config", "r")
-  if not f then
-    return false
+--- Recognized forms (trailing ".git" and trailing "/" are stripped):
+---   • SSH:        git@<host>:<owner>/<repo>(.git)?
+---   • HTTPS/HTTP: https?://[user@]<host>/<owner>/<repo>(.git)?
+---
+--- Pure function exported for unit testing.
+---
+--- @param url string|nil
+--- @return { host: string, owner: string, repo: string }|nil
+function M._parse_remote_url(url)
+  if type(url) ~= "string" or url == "" then
+    return nil
   end
-  local content = f:read("*a")
-  f:close()
-  return content:find("github%.com") ~= nil
+
+  local host, owner, repo
+
+  -- SSH form: git@host:owner/repo[.git]
+  host, owner, repo = url:match("^git@([^:]+):([^/]+)/(.+)$")
+
+  -- HTTPS/HTTP form with embedded user: https?://user@host/owner/repo[.git]
+  if not host then
+    host, owner, repo = url:match("^https?://[^/@]+@([^/]+)/([^/]+)/(.+)$")
+  end
+
+  -- HTTPS/HTTP form without user: https?://host/owner/repo[.git]
+  if not host then
+    host, owner, repo = url:match("^https?://([^/@]+)/([^/]+)/(.+)$")
+  end
+
+  if not host or not owner or not repo or owner == "" or repo == "" then
+    return nil
+  end
+
+  -- Strip trailing ".git" and any trailing slashes from repo.
+  repo = repo:gsub("%.git$", ""):gsub("/+$", "")
+  if repo == "" then
+    return nil
+  end
+
+  return { host = host, owner = owner, repo = repo }
+end
+
+--- Detect whether a VcsInfo points at a GitHub repository.
+---
+--- Returns the opts table for M.new (host/owner/repo) on a match, or nil
+--- when the remote URL is missing or not a recognised GitHub URL.  Only
+--- github.com is recognised today; Enterprise hosts can be added later by
+--- extending the host check.
+---
+--- @param vcs_info parley.VcsInfo
+--- @return { host: string, owner: string, repo: string }|nil
+function M.detect(vcs_info)
+  if type(vcs_info) ~= "table" then
+    return nil
+  end
+  local parsed = M._parse_remote_url(vcs_info.remote_url)
+  if not parsed then
+    return nil
+  end
+  if parsed.host ~= "github.com" then
+    return nil
+  end
+  return parsed
 end
 
 return M
