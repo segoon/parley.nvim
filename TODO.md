@@ -15,7 +15,5 @@ Bugs:
 - too many asserts - detect_pr() must be called before
 - multiple buffers with different repositories
 
-- MVC? any architecture style?
-
 Q:
 - repository + ui-state for UI plugins?

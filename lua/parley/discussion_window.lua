@@ -104,6 +104,11 @@ M._strptime = function(fmt, value)
   return vim.fn.strptime(fmt, value)
 end
 
+--- @type fun(epoch: integer): integer
+M._utc_offset = function(epoch)
+  return timestamp_format.utc_offset(epoch)
+end
+
 --- Reaction picker hook; replace in tests.
 --- @type fun(items: table[], on_choice: fun(item: table|nil): nil): nil
 M._select_reaction = function(items, on_choice)
@@ -165,6 +170,7 @@ local function format_timestamp(timestamp)
     now = M._now,
     date = M._date,
     strptime = M._strptime,
+    utc_offset = M._utc_offset,
   })
 end
 

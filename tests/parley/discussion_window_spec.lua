@@ -63,6 +63,7 @@ local function save_seams()
   saved.now = discussion_window._now
   saved.date = discussion_window._date
   saved.strptime = discussion_window._strptime
+  saved.utc_offset = discussion_window._utc_offset
   saved.confirm_discard = discussion_window._confirm_discard
   saved.select = discussion_window._select_reaction
   saved.reaction_picker_window = package.loaded["parley.reaction_picker_window"]
@@ -75,6 +76,7 @@ local function restore_seams()
   discussion_window._now = saved.now
   discussion_window._date = saved.date
   discussion_window._strptime = saved.strptime
+  discussion_window._utc_offset = saved.utc_offset
   discussion_window._confirm_discard = saved.confirm_discard
   discussion_window._select_reaction = saved.select
   package.loaded["parley.reaction_picker_window"] = saved.reaction_picker_window
@@ -116,6 +118,9 @@ describe("parley.discussion_window", function()
         return values[epoch]
       end
       error("unexpected date format in test: " .. tostring(fmt))
+    end
+    discussion_window._utc_offset = function(_epoch)
+      return 0
     end
     discussion_window._select_reaction = function(_items, on_choice)
       on_choice(nil)

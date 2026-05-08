@@ -82,6 +82,11 @@ M._strptime = function(fmt, value)
   return vim.fn.strptime(fmt, value)
 end
 
+--- @type fun(epoch: integer): integer
+M._utc_offset = function(epoch)
+  return timestamp_format.utc_offset(epoch)
+end
+
 -- ---------------------------------------------------------------------------
 -- Pure helpers
 -- ---------------------------------------------------------------------------
@@ -116,6 +121,7 @@ local function format_comment_timestamp(timestamp)
     now = M._now,
     date = M._date,
     strptime = M._strptime,
+    utc_offset = M._utc_offset,
   })
 end
 

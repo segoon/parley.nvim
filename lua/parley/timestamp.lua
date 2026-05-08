@@ -12,13 +12,23 @@ local function pluralize(seconds, unit)
   return string.format("%d %ss ago", seconds, unit)
 end
 
+--- @param epoch integer
+--- @return integer
+function M.utc_offset(epoch)
+  return math.floor(os.difftime(epoch, os.time(os.date("!*t", epoch))))
+end
+
 ---@param timestamp string
----@param hooks { now: fun(): integer, date: fun(fmt: string, time: integer): string, strptime: fun(fmt: string, value: string): integer|nil }
+---@param hooks { now: fun(): integer, date: fun(fmt: string, time: integer): string, strptime: fun(fmt: string, value: string): integer|nil, utc_offset?: fun(epoch: integer): integer }
 ---@return string
 function M.format(timestamp, hooks)
   local epoch = hooks.strptime("%Y-%m-%dT%H:%M:%SZ", timestamp)
   if not epoch then
     return timestamp
+  end
+  if timestamp:sub(-1) == "Z" then
+    local offset = hooks.utc_offset and hooks.utc_offset(epoch) or M.utc_offset(epoch)
+    epoch = epoch + offset
   end
 
   local delta = math.max(0, hooks.now() - epoch)

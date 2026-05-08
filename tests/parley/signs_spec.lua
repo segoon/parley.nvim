@@ -17,12 +17,14 @@ local function save_seams()
   saved.now = signs._now
   saved.date = signs._date
   saved.strptime = signs._strptime
+  saved.utc_offset = signs._utc_offset
 end
 
 local function restore_seams()
   signs._now = saved.now
   signs._date = saved.date
   signs._strptime = saved.strptime
+  signs._utc_offset = saved.utc_offset
 end
 
 -- ---------------------------------------------------------------------------
@@ -175,6 +177,9 @@ describe("signs.render", function()
         return values[epoch]
       end
       error("unexpected date format in test: " .. tostring(fmt))
+    end
+    signs._utc_offset = function(_epoch)
+      return 0
     end
   end)
 
