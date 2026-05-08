@@ -101,8 +101,7 @@ a.describe("parley.buffer_context classify", function()
   end)
 
   a.it("kind is 'diffview' for diffview:// name even when buftype is non-empty", function()
-    buffer_context._get_buf_props =
-      make_props({ filetype = "", name = "diffview://something", buftype = "nofile" })
+    buffer_context._get_buf_props = make_props({ filetype = "", name = "diffview://something", buftype = "nofile" })
     buffer_context._vcs_detect = make_vcs_detect(nil)
 
     local ctx = buffer_context.classify(1)
@@ -111,8 +110,7 @@ a.describe("parley.buffer_context classify", function()
   end)
 
   a.it("kind is 'diffview' for DiffviewFiles filetype even when buftype is non-empty", function()
-    buffer_context._get_buf_props =
-      make_props({ filetype = "DiffviewFiles", name = "", buftype = "nofile" })
+    buffer_context._get_buf_props = make_props({ filetype = "DiffviewFiles", name = "", buftype = "nofile" })
     buffer_context._vcs_detect = make_vcs_detect(nil)
 
     local ctx = buffer_context.classify(1)
@@ -310,8 +308,7 @@ a.describe("parley.buffer_context classify", function()
   -- -------------------------------------------------------------------------
 
   a.it("kind is 'regular' when _vcs_detect succeeds", function()
-    buffer_context._get_buf_props =
-      make_props({ filetype = "lua", name = "/repo/src/foo.lua", buftype = "" })
+    buffer_context._get_buf_props = make_props({ filetype = "lua", name = "/repo/src/foo.lua", buftype = "" })
     buffer_context._vcs_detect = make_vcs_detect(SAMPLE_VCS)
 
     local ctx = buffer_context.classify(1)
@@ -320,8 +317,7 @@ a.describe("parley.buffer_context classify", function()
   end)
 
   a.it("path equals buffer name for regular buffers", function()
-    buffer_context._get_buf_props =
-      make_props({ filetype = "lua", name = "/repo/src/foo.lua", buftype = "" })
+    buffer_context._get_buf_props = make_props({ filetype = "lua", name = "/repo/src/foo.lua", buftype = "" })
     buffer_context._vcs_detect = make_vcs_detect(SAMPLE_VCS)
 
     local ctx = buffer_context.classify(1)
@@ -330,8 +326,7 @@ a.describe("parley.buffer_context classify", function()
   end)
 
   a.it("vcs_info is populated with what _vcs_detect returned", function()
-    buffer_context._get_buf_props =
-      make_props({ filetype = "lua", name = "/repo/src/foo.lua", buftype = "" })
+    buffer_context._get_buf_props = make_props({ filetype = "lua", name = "/repo/src/foo.lua", buftype = "" })
     buffer_context._vcs_detect = make_vcs_detect(SAMPLE_VCS)
 
     local ctx = buffer_context.classify(1)
@@ -340,8 +335,7 @@ a.describe("parley.buffer_context classify", function()
   end)
 
   a.it("bufnr is preserved for regular buffers", function()
-    buffer_context._get_buf_props =
-      make_props({ filetype = "lua", name = "/repo/src/foo.lua", buftype = "" })
+    buffer_context._get_buf_props = make_props({ filetype = "lua", name = "/repo/src/foo.lua", buftype = "" })
     buffer_context._vcs_detect = make_vcs_detect(SAMPLE_VCS)
 
     local ctx = buffer_context.classify(7)
@@ -372,8 +366,7 @@ a.describe("parley.buffer_context classify", function()
 
   a.it("_vcs_detect receives the buffer name as the path argument", function()
     local received_path = nil
-    buffer_context._get_buf_props =
-      make_props({ filetype = "lua", name = "/repo/file.lua", buftype = "" })
+    buffer_context._get_buf_props = make_props({ filetype = "lua", name = "/repo/file.lua", buftype = "" })
     buffer_context._vcs_detect = function(path)
       received_path = path
       return SAMPLE_VCS

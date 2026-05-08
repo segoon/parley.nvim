@@ -1,6 +1,7 @@
 --- parley.nvim — inline PR discussion for Neovim
 --- https://github.com/your-org/parley.nvim
 
+local cache = require("parley.cache")
 local registry = require("parley.registry")
 
 local M = {}
@@ -74,8 +75,9 @@ M.config = nil
 function M.setup(opts)
   M.config = vim.tbl_deep_extend("force", defaults, opts or {})
 
-  -- Ensure cache directory exists
+  -- Ensure cache directory exists and initialise the cache module.
   vim.fn.mkdir(M.config.cache_dir, "p")
+  cache.setup({ cache_dir = M.config.cache_dir })
 
   -- Reset and re-populate the provider registry on every setup() call so
   -- that calling setup() twice produces a clean, deterministic state.
