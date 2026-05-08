@@ -5,9 +5,11 @@ local context_repository = require("parley.repositories.context")
 local provider_repository = require("parley.repositories.provider")
 local review_repository = require("parley.repositories.review")
 local signs = require("parley.signs")
+local progress_ui_state = require("parley.ui_states.progress")
 
 local M = {}
 M._subscriptions = {}
+M._next_progress_id = 0
 
 M._notify = function(msg, level)
   vim.notify(msg, level)
@@ -15,6 +17,72 @@ end
 
 M._get_config = function()
   return require("parley").config
+end
+
+M._defer = function(cb, timeout)
+  vim.defer_fn(cb, timeout)
+end
+
+M._now = function()
+  return math.floor((vim.uv or vim.loop).hrtime() / 1000000)
+end
+
+---@param state 'success'|'failed'|'cancelled'
+---@return integer
+local function progress_timeout(state)
+  local config = M._get_config() or {}
+  local progress = config.progress or {}
+  if state == "success" then
+    return progress.success_timeout or 1200
+  end
+  if state == "failed" then
+    return progress.failed_timeout or 2500
+  end
+  return progress.cancelled_timeout or 1200
+end
+
+---@param bufnr integer
+---@param message string
+---@return { id: string, started_at: integer, title: string }
+local function start_progress(bufnr, message)
+  M._next_progress_id = M._next_progress_id + 1
+  local now = M._now()
+  local entry = {
+    id = "read-" .. tostring(M._next_progress_id),
+    bufnr = bufnr,
+    title = "Parley",
+    message = message,
+    kind = "refresh",
+    state = "running",
+    started_at = now,
+    updated_at = now,
+  }
+  progress_ui_state.upsert(entry)
+  return {
+    id = entry.id,
+    started_at = entry.started_at,
+    title = entry.title,
+  }
+end
+
+---@param progress { id: string, started_at: integer, title: string }
+---@param bufnr integer
+---@param state 'success'|'failed'|'cancelled'
+---@param message string
+local function finish_progress(progress, bufnr, state, message)
+  progress_ui_state.upsert({
+    id = progress.id,
+    bufnr = bufnr,
+    title = progress.title,
+    message = message,
+    kind = "refresh",
+    state = state,
+    started_at = progress.started_at,
+    updated_at = M._now(),
+  })
+  M._defer(function()
+    progress_ui_state.remove(progress.id)
+  end, progress_timeout(state))
 end
 
 --- @param snapshot table|nil
@@ -90,9 +158,17 @@ function M.refresh(bufnr, opts)
     return nil
   end
   ensure_subscription(bufnr)
+  local progress = opts.progress and start_progress(bufnr, "Refreshing discussions") or nil
   local snapshot = review_repository.refresh(bufnr, opts)
   if snapshot and snapshot.status == "error" and opts.notify_errors ~= false and snapshot.error then
     M._notify("parley: refresh failed: " .. tostring(snapshot.error), vim.log.levels.WARN)
+  end
+  if progress then
+    if snapshot and snapshot.status == "error" then
+      finish_progress(progress, bufnr, "failed", "Refresh failed")
+    else
+      finish_progress(progress, bufnr, "success", "Refresh complete")
+    end
   end
   return snapshot
 end

@@ -99,6 +99,7 @@ describe("parley.services.write", function()
   it("posts a top-level comment with a normalized range and forces a refresh", function()
     local provider = mock_provider.new({ pr = SAMPLE_PR })
     local refresh_calls = {}
+    local invalidate_calls = {}
     local opened
     context_repository._entries[1] = {
       kind = "regular",
@@ -129,7 +130,9 @@ describe("parley.services.write", function()
       end,
       open_current_line = function() end,
     }
-    review_repository.invalidate = function(_bufnr) end
+    review_repository.invalidate = function(bufnr, opts)
+      invalidate_calls[#invalidate_calls + 1] = { bufnr = bufnr, opts = opts }
+    end
     review_repository.refresh = function(bufnr, opts)
       refresh_calls[#refresh_calls + 1] = { bufnr = bufnr, opts = opts }
     end
@@ -142,6 +145,7 @@ describe("parley.services.write", function()
     end))
 
     assert.same({ 5, 8 }, provider.calls.post_top_level_comment[1].line)
+    assert.same({ bufnr = 1, opts = { preserve_snapshot = true } }, invalidate_calls[1])
     assert.same({ bufnr = 1, opts = { force = true } }, refresh_calls[1])
     assert.is_true(opened.instance.closed)
     assert.equals(0, #notify_calls)
@@ -149,6 +153,58 @@ describe("parley.services.write", function()
     assert.equals(1, #progress_entries)
     assert.equals("success", progress_entries[1].state)
     assert.equals("Comment sent", progress_entries[1].message)
+  end)
+
+  it("closes the composer before starting the success refresh", function()
+    local provider = mock_provider.new({ pr = SAMPLE_PR })
+    local opened
+    local refresh_saw_closed = false
+    local refresh_progress_message
+    context_repository._entries[1] = {
+      kind = "regular",
+      bufnr = 1,
+      path = "/repo/src/foo.lua",
+      vcs_info = { vcs = "git", root = "/repo", branch = "feature", remote_url = "git@github.com:owner/repo.git" },
+      rel_path = "src/foo.lua",
+      status = "ready",
+    }
+    provider_repository._entries[1] = {
+      status = "ready",
+      provider = provider,
+      opts = { owner = "owner", repo = "repo", host = "github.com" },
+    }
+    review_repository._entries[1] = {
+      status = "ready",
+      stale = false,
+      discussions = {},
+      mappings = {},
+      pr = SAMPLE_PR,
+      head_sha = "deadbeef",
+    }
+
+    package.loaded["parley.discussion_window"] = {
+      show_new_comment_input = function(_bufnr, opts)
+        opened = { opts = opts, instance = fake_instance(99) }
+        return opened.instance
+      end,
+      open_current_line = function() end,
+    }
+    review_repository.invalidate = function(_bufnr, _opts) end
+    review_repository.refresh = function(_bufnr, _opts)
+      refresh_saw_closed = opened.instance.closed == true
+      local progress_entries = progress_ui_state.list()
+      refresh_progress_message = progress_entries[1] and progress_entries[1].message or nil
+    end
+
+    write_service.open_new_comment_input(1, { line = 5 })
+    opened.opts.on_submit(opened.instance, "draft")
+
+    assert.is_true(vim.wait(500, function()
+      return #provider.calls.post_top_level_comment == 1
+    end))
+    assert.is_true(refresh_saw_closed)
+    assert.equals("Refreshing discussion", refresh_progress_message)
+    assert.is_true(opened.instance.closed)
   end)
 
   it("passes the explicit parent_comment_id to reply", function()

@@ -90,12 +90,14 @@ local function close_input(instance, callback)
 end
 
 --- @param bufnr integer
---- @param callback fun(): nil
+--- @param callback fun(snapshot: table|nil): nil
 local function refresh_after_write(bufnr, callback)
   async.run(function()
-    review_repository.invalidate(bufnr)
-    review_repository.refresh(bufnr, { force = true })
-    vim.schedule(callback)
+    review_repository.invalidate(bufnr, { preserve_snapshot = true })
+    local snapshot = review_repository.refresh(bufnr, { force = true })
+    vim.schedule(function()
+      callback(snapshot)
+    end)
   end)
 end
 
@@ -168,7 +170,7 @@ end
 --- @param instance table
 --- @param starter fun(callback: fun(result: { ok: boolean, comment?: parley.Comment, err?: string, cancelled?: boolean }): nil): { cancel: fun(): nil }
 --- @param status_text string
---- @param progress_texts { running: string, success: string, failed: string, cancelled: string }
+--- @param progress_texts { running: string, refreshing: string, success: string, failed: string, cancelled: string }
 --- @param success_opts? { cursor_line?: integer }
 local function run_submit(bufnr, instance, starter, status_text, progress_texts, success_opts)
   success_opts = success_opts or {}
@@ -206,9 +208,10 @@ local function run_submit(bufnr, instance, starter, status_text, progress_texts,
     end
 
     composer_ui_state.clear(bufnr)
-    finish_progress(progress, bufnr, "success", progress_texts.success)
-    refresh_after_write(bufnr, function()
-      close_input(instance, function()
+    update_progress(progress, bufnr, "running", progress_texts.refreshing)
+    close_input(instance, function()
+      refresh_after_write(bufnr, function()
+        finish_progress(progress, bufnr, "success", progress_texts.success)
         if vim.api.nvim_buf_is_valid(bufnr) then
           local discussion_window = require("parley.discussion_window")
           pcall(discussion_window.open_current_line, bufnr, { cursor_line = success_opts.cursor_line })
@@ -285,6 +288,7 @@ function M.open_new_comment_input(bufnr, opts)
         "Sending request... Press C to cancel request.",
         {
           running = "Sending comment",
+          refreshing = "Refreshing discussion",
           success = "Comment sent",
           failed = "Comment failed",
           cancelled = "Comment cancelled",
@@ -354,6 +358,7 @@ function M.open_reply_input(bufnr, discussion_id, parent_comment_id)
         "Sending request... Press C to cancel request.",
         {
           running = "Sending reply",
+          refreshing = "Refreshing discussion",
           success = "Reply sent",
           failed = "Reply failed",
           cancelled = "Reply cancelled",

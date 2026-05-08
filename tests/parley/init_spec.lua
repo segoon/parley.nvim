@@ -1,6 +1,11 @@
 --- tests/parley/init_spec.lua — :Parley command dispatch and completion
 
 local parley = require("parley")
+local cache = require("parley.cache")
+local read_service = require("parley.services.read")
+local registry = require("parley.registry")
+local signs = require("parley.signs")
+local progress_popup = require("parley.progress_popup")
 
 describe("parley command completion", function()
   it("returns top-level groups for the first argument", function()
@@ -16,6 +21,67 @@ describe("parley command completion", function()
   it("returns nav actions for the second argument", function()
     local items = parley._complete_parley("", ":Parley nav ")
     assert.same({ "next", "prev" }, items)
+  end)
+end)
+
+describe("parley setup", function()
+  local saved_cache_setup
+  local saved_read_refresh_async
+  local saved_registry_reset
+  local saved_registry_register
+  local saved_signs_setup_highlights
+  local saved_progress_setup
+  local saved_gh
+
+  before_each(function()
+    saved_cache_setup = cache.setup
+    saved_read_refresh_async = read_service.refresh_async
+    saved_registry_reset = registry.reset
+    saved_registry_register = registry.register
+    saved_signs_setup_highlights = signs.setup_highlights
+    saved_progress_setup = progress_popup.setup
+    saved_gh = package.loaded["parley.providers.github.provider"]
+  end)
+
+  after_each(function()
+    cache.setup = saved_cache_setup
+    read_service.refresh_async = saved_read_refresh_async
+    registry.reset = saved_registry_reset
+    registry.register = saved_registry_register
+    signs.setup_highlights = saved_signs_setup_highlights
+    progress_popup.setup = saved_progress_setup
+    package.loaded["parley.providers.github.provider"] = saved_gh
+    pcall(vim.api.nvim_del_user_command, "Parley")
+    pcall(vim.api.nvim_del_user_command, "ParleyRefresh")
+  end)
+
+  it("wires :ParleyRefresh to a progress-enabled refresh", function()
+    local calls = {}
+    cache.setup = function(_opts) end
+    signs.setup_highlights = function() end
+    progress_popup.setup = function() end
+    registry.reset = function() end
+    registry.register = function(_spec) end
+    package.loaded["parley.providers.github.provider"] = {
+      detect = function()
+        return nil
+      end,
+      new = function()
+        return {}
+      end,
+    }
+    read_service.refresh_async = function(bufnr, opts)
+      calls[#calls + 1] = { bufnr = bufnr, opts = opts }
+    end
+
+    parley.setup({})
+    local bufnr = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_set_current_buf(bufnr)
+    vim.cmd("ParleyRefresh")
+
+    assert.is_true(#calls >= 1)
+    assert.equals(bufnr, calls[#calls].bufnr)
+    assert.same({ force = true, progress = true }, calls[#calls].opts)
   end)
 end)
 

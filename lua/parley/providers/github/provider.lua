@@ -38,6 +38,9 @@ local M = {}
 --- @field _api_base     string
 --- @field _runner       fun(cmd: string[]): {code: integer, stdout: string, stderr: string}
 --- @field _spawn        fun(cmd: string[], callback: fun(result: {code: integer, stdout: string, stderr: string})): vim.SystemObj|nil
+--- @field _sleep        fun(timeout_ms: integer): nil
+--- @field _defer        fun(callback: fun(), timeout_ms: integer): uv_timer_t|nil
+--- @field _get_config   fun(): parley.Config|nil
 --- @field _auth         table
 --- @field _pr_cache     table<string, parley.github.PrCache>
 --- @field _viewer_login string|nil
@@ -58,6 +61,24 @@ local REVIEW_EVENT_MAP = {
   approve = "APPROVE",
   request_changes = "REQUEST_CHANGES",
   comment = "COMMENT",
+}
+
+local DEFAULT_TIMEOUT_MS = 5000
+local DEFAULT_RETRY_COUNT = 2
+local DEFAULT_RETRY_BASE_DELAY_MS = 250
+local DEFAULT_RETRY_MAX_DELAY_MS = 2000
+
+local RETRYABLE_ERROR_PATTERNS = {
+  "i/o timeout",
+  "tls handshake timeout",
+  "connection reset",
+  "connection refused",
+  "no such host",
+  "temporary failure in name resolution",
+  "timeout awaiting response headers",
+  "context deadline exceeded",
+  "network is unreachable",
+  "software caused connection abort",
 }
 
 --- Map GitHub review states → parley.ReviewStatus values.
@@ -81,6 +102,44 @@ local function api_base_for_host(host)
     return "https://api.github.com"
   end
   return "https://" .. host .. "/api/v3"
+end
+
+---@param self parley.github.Provider
+---@return { timeout_ms: integer, retry_count: integer, retry_base_delay_ms: integer, retry_max_delay_ms: integer }
+local function transport_config(self)
+  local config = self._get_config and self._get_config() or nil
+  local github = config and config.providers and config.providers.github or {}
+  return {
+    timeout_ms = github.timeout_ms or DEFAULT_TIMEOUT_MS,
+    retry_count = github.retry_count or DEFAULT_RETRY_COUNT,
+    retry_base_delay_ms = github.retry_base_delay_ms or DEFAULT_RETRY_BASE_DELAY_MS,
+    retry_max_delay_ms = github.retry_max_delay_ms or DEFAULT_RETRY_MAX_DELAY_MS,
+  }
+end
+
+---@param attempt integer
+---@param cfg { retry_base_delay_ms: integer, retry_max_delay_ms: integer }
+---@return integer
+local function retry_delay_ms(attempt, cfg)
+  return math.min(cfg.retry_base_delay_ms * (2 ^ math.max(0, attempt - 1)), cfg.retry_max_delay_ms)
+end
+
+---@param stderr string|nil
+---@return boolean
+local function is_retryable_error(stderr)
+  local text = (stderr or ""):lower()
+  for _, pattern in ipairs(RETRYABLE_ERROR_PATTERNS) do
+    if text:find(pattern, 1, true) then
+      return true
+    end
+  end
+  return false
+end
+
+---@param result { code: integer, stderr: string|nil }
+---@return boolean
+local function is_retryable_failure(result)
+  return result.code == 124 or is_retryable_error(result.stderr)
 end
 
 --- Compute review_status from a list of GitHub review objects.
@@ -275,10 +334,21 @@ GitHubProvider.__index = GitHubProvider
 --- @return table|nil
 local function gh_run(self, cmd)
   local runner = self._runner
-  local result = runner(cmd)
-  if result.code ~= 0 then
-    error(string.format("parley.github: gh command failed (exit %d): %s", result.code, result.stderr or ""), 0)
+  local cfg = transport_config(self)
+  local attempts = cfg.retry_count + 1
+  local result
+
+  for attempt = 1, attempts do
+    result = runner(cmd)
+    if result.code == 0 then
+      break
+    end
+    if attempt >= attempts or not is_retryable_failure(result) then
+      error(string.format("parley.github: gh command failed (exit %d): %s", result.code, result.stderr or ""), 0)
+    end
+    self._sleep(retry_delay_ms(attempt, cfg))
   end
+
   local stdout = result.stdout or ""
   if stdout == "" then
     return nil
@@ -298,39 +368,86 @@ end
 local function gh_start(self, cmd, callback)
   local completed = false
   local cancelled = false
-  local handle = self._spawn(cmd, function(result)
+  local handle = nil
+  local retry_timer = nil
+  local cfg = transport_config(self)
+  local attempts = cfg.retry_count + 1
+  local attempt = 0
+
+  local function clear_retry_timer()
+    if not retry_timer then
+      return
+    end
+    if retry_timer.stop then
+      pcall(function()
+        retry_timer:stop()
+      end)
+    end
+    if retry_timer.close then
+      pcall(function()
+        retry_timer:close()
+      end)
+    end
+    retry_timer = nil
+  end
+
+  local function finish(result)
     if completed then
       return
     end
     completed = true
+    clear_retry_timer()
+    callback(result)
+  end
 
-    if cancelled then
-      callback({ ok = false, cancelled = true })
-      return
-    end
+  local function start_attempt()
+    attempt = attempt + 1
+    handle = self._spawn(cmd, function(result)
+      handle = nil
+      if completed then
+        return
+      end
 
-    if result.code ~= 0 then
-      callback({
-        ok = false,
-        err = string.format("parley.github: gh command failed (exit %d): %s", result.code, result.stderr or ""),
-      })
-      return
-    end
+      if cancelled then
+        finish({ ok = false, cancelled = true })
+        return
+      end
 
-    local stdout = result.stdout or ""
-    if stdout == "" then
-      callback({ ok = true, data = nil })
-      return
-    end
+      if result.code ~= 0 then
+        if attempt < attempts and is_retryable_failure(result) then
+          retry_timer = self._defer(function()
+            retry_timer = nil
+            if completed or cancelled then
+              return
+            end
+            start_attempt()
+          end, retry_delay_ms(attempt, cfg))
+          return
+        end
+        finish({
+          ok = false,
+          err = string.format("parley.github: gh command failed (exit %d): %s", result.code, result.stderr or ""),
+        })
+        return
+      end
 
-    local ok_decode, decoded = pcall(vim.json.decode, stdout)
-    if not ok_decode then
-      callback({ ok = false, err = string.format("parley.github: failed to decode JSON response: %s", stdout) })
-      return
-    end
+      local stdout = result.stdout or ""
+      if stdout == "" then
+        finish({ ok = true, data = nil })
+        return
+      end
 
-    callback({ ok = true, data = decoded })
-  end)
+      local ok_decode, decoded = pcall(vim.json.decode, stdout)
+      if not ok_decode then
+        finish({ ok = false, err = string.format("parley.github: failed to decode JSON response: %s", stdout) })
+        return
+      end
+
+      finish({ ok = true, data = decoded })
+    end)
+  end
+
+  start_attempt()
 
   return {
     cancel = function()
@@ -338,11 +455,14 @@ local function gh_start(self, cmd, callback)
         return
       end
       cancelled = true
+      clear_retry_timer()
       if handle and handle.kill then
         pcall(function()
           handle:kill(15)
         end)
+        return
       end
+      finish({ ok = false, cancelled = true })
     end,
   }
 end
@@ -364,7 +484,10 @@ end
 --- Optional opts: host (default "github.com"), api_base, _runner, _auth.
 ---
 --- @param opts { owner: string, repo: string, host?: string, api_base?: string,
----   _runner?: fun(cmd: string[]): table, _auth?: table }
+---   _runner?: fun(cmd: string[]): table, _spawn?: fun(cmd: string[], callback: fun(result: {code: integer, stdout: string, stderr: string})): vim.SystemObj|nil,
+---   _sleep?: fun(timeout_ms: integer): nil, _defer?: fun(callback: fun(), timeout_ms: integer): uv_timer_t|nil,
+---   _get_config?: fun(): parley.Config|nil, _system?: fun(cmd: string[], opts: table, callback: fun(result: vim.SystemCompleted)): vim.SystemObj,
+---   _auth?: table }
 --- @return parley.github.Provider
 function M.new(opts)
   opts = opts or {}
@@ -372,9 +495,11 @@ function M.new(opts)
   assert(type(opts.repo) == "string" and opts.repo ~= "", "parley.github: opts.repo must be a non-empty string")
 
   local host = opts.host or "github.com"
+  local self
+  local system = opts._system or vim.system
 
   local default_runner = async.wrap(function(cmd, callback)
-    vim.system(cmd, { text = true }, function(result)
+    system(cmd, { text = true, timeout = transport_config(self).timeout_ms }, function(result)
       vim.schedule(function()
         callback({ code = result.code, stdout = result.stdout or "", stderr = result.stderr or "" })
       end)
@@ -382,20 +507,29 @@ function M.new(opts)
   end, 2)
 
   local default_spawn = function(cmd, callback)
-    return vim.system(cmd, { text = true }, function(result)
+    return system(cmd, { text = true, timeout = transport_config(self).timeout_ms }, function(result)
       vim.schedule(function()
         callback({ code = result.code, stdout = result.stdout or "", stderr = result.stderr or "" })
       end)
     end)
   end
 
-  local self = setmetatable({
+  self = setmetatable({
     _host = host,
     _owner = opts.owner,
     _repo = opts.repo,
     _api_base = opts.api_base or api_base_for_host(host),
     _runner = opts._runner or default_runner,
     _spawn = opts._spawn or default_spawn,
+    _sleep = opts._sleep or function(timeout_ms)
+      vim.wait(timeout_ms, function()
+        return false
+      end)
+    end,
+    _defer = opts._defer or vim.defer_fn,
+    _get_config = opts._get_config or function()
+      return require("parley").config
+    end,
     _auth = opts._auth or require("parley.providers.github.auth"),
     _pr_cache = {},
     _viewer_login = nil,

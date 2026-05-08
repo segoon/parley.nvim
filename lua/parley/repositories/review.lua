@@ -246,7 +246,10 @@ function M.refresh_async(bufnr, opts)
   end)
 end
 
-function M.invalidate(bufnr)
+--- @param bufnr integer
+--- @param opts? { preserve_snapshot?: boolean }
+function M.invalidate(bufnr, opts)
+  opts = opts or {}
   local ctx = context_repository.get(bufnr)
   local provider_snapshot = provider_repository.get(bufnr)
   local snapshot = M._entries[bufnr]
@@ -256,7 +259,9 @@ function M.invalidate(bufnr)
     cache.invalidate(pr_cache_key(provider, opts, ctx.vcs_info.branch))
     cache.invalidate(discussions_cache_key(provider, opts, snapshot.pr.id))
   end
-  publish(bufnr, nil)
+  if opts.preserve_snapshot ~= true then
+    publish(bufnr, nil)
+  end
 end
 
 function M.subscribe(bufnr, cb)

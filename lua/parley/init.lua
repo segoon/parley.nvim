@@ -49,6 +49,12 @@ local M = {}
 --- @field next_comment string  Jump to next commented line
 --- @field prev_comment string  Jump to previous commented line
 
+--- @class parley.GitHubProviderConfig
+--- @field timeout_ms integer
+--- @field retry_count integer
+--- @field retry_base_delay_ms integer
+--- @field retry_max_delay_ms integer
+
 --- @type parley.Config
 local defaults = {
   refresh_interval = 300, -- 5 minutes
@@ -82,7 +88,14 @@ local defaults = {
     next_comment = "]c",
     prev_comment = "[c",
   },
-  providers = {},
+  providers = {
+    github = {
+      timeout_ms = 5000,
+      retry_count = 2,
+      retry_base_delay_ms = 250,
+      retry_max_delay_ms = 2000,
+    },
+  },
 }
 
 --- Active (merged) configuration. Nil until setup() is called.
@@ -279,7 +292,7 @@ function M.setup(opts)
   })
 
   vim.api.nvim_create_user_command("ParleyRefresh", function()
-    read_service.refresh_async(vim.api.nvim_get_current_buf(), { force = true })
+    read_service.refresh_async(vim.api.nvim_get_current_buf(), { force = true, progress = true })
   end, { desc = "Re-fetch PR discussions for the current buffer" })
 
   vim.api.nvim_create_autocmd("BufWipeout", {

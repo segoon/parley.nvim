@@ -282,12 +282,21 @@ local function make_auth_err(msg)
 end
 
 --- Build a minimal provider for testing.
---- @param runner_fn fun(cmd: string[]): table  optional
-local function make_provider(runner_fn)
+--- @param opts? { _runner?: fun(cmd: string[]): table, _spawn?: fun(cmd: string[], callback: fun(result: {code: integer, stdout: string, stderr: string})): vim.SystemObj|nil, _sleep?: fun(timeout_ms: integer): nil, _defer?: fun(callback: fun(), timeout_ms: integer): uv_timer_t|nil, _get_config?: fun(): table|nil, _system?: fun(cmd: string[], opts: table, callback: fun(result: vim.SystemCompleted)): vim.SystemObj }
+local function make_provider(opts)
+  if type(opts) == "function" then
+    opts = { _runner = opts }
+  end
+  opts = opts or {}
   return gh.new({
     owner = "owner",
     repo = "repo",
-    _runner = runner_fn,
+    _runner = opts._runner,
+    _spawn = opts._spawn,
+    _sleep = opts._sleep,
+    _defer = opts._defer,
+    _get_config = opts._get_config,
+    _system = opts._system,
     _auth = make_auth("ghp_TESTTOKEN"),
   })
 end
@@ -352,6 +361,75 @@ end)
 -- ---------------------------------------------------------------------------
 
 async_tests.describe("parley.providers.github.provider — detect_pr", function()
+  async_tests.it("retries transient gh transport failures with backoff", function()
+    local sleeps = {}
+    local pull_calls = 0
+    local runner = make_runner(function(cmd)
+      for _, arg in ipairs(cmd) do
+        if arg:find("/reviews", 1, true) then
+          return ok(REVIEWS_EMPTY_JSON)
+        end
+      end
+      pull_calls = pull_calls + 1
+      if pull_calls == 1 then
+        return fail('Post "https://api.github.com": dial tcp 140.82.121.5:443: i/o timeout')
+      end
+      return ok(PR_LIST_JSON)
+    end)
+    local p = make_provider({
+      _runner = runner.fn,
+      _sleep = function(timeout_ms)
+        sleeps[#sleeps + 1] = timeout_ms
+      end,
+    })
+
+    local pr = p:detect_pr("/repo/root", "feature")
+
+    assert.is_not_nil(pr)
+    assert.equals(250, sleeps[1])
+    assert.equals(3, #runner._calls)
+  end)
+
+  async_tests.it("does not retry non-retryable gh failures", function()
+    local sleeps = {}
+    local runner = make_runner(function(_cmd)
+      return fail("HTTP 422: Validation Failed")
+    end)
+    local p = make_provider({
+      _runner = runner.fn,
+      _sleep = function(timeout_ms)
+        sleeps[#sleeps + 1] = timeout_ms
+      end,
+    })
+
+    local ok, err = pcall(function()
+      p:detect_pr("/repo/root", "feature")
+    end)
+    assert.is_false(ok)
+    assert.is_not_nil(tostring(err):find("parley.github: gh command failed", 1, true))
+    assert.equals(0, #sleeps)
+    assert.equals(1, #runner._calls)
+  end)
+
+  async_tests.it("passes a 5 second timeout to gh by default", function()
+    local timeouts = {}
+    local p = make_provider({
+      _system = function(_cmd, opts, callback)
+        timeouts[#timeouts + 1] = opts.timeout
+        callback({ code = 0, stdout = PR_LIST_EMPTY_JSON, stderr = "" })
+        return { kill = function() end }
+      end,
+      _get_config = function()
+        return nil
+      end,
+    })
+
+    local pr = p:detect_pr("/repo/root", "feature")
+
+    assert.is_nil(pr)
+    assert.equals(5000, timeouts[1])
+  end)
+
   async_tests.it("returns nil when the PR list is empty", function()
     local runner = make_route_runner({
       { pattern = "/pulls", response = ok(PR_LIST_EMPTY_JSON) },
@@ -659,6 +737,42 @@ end)
 -- ---------------------------------------------------------------------------
 
 async_tests.describe("parley.providers.github.provider — reply", function()
+  async_tests.it("retries transient async gh transport failures with backoff", function()
+    local calls = 0
+    local delays = {}
+    local p = make_provider({
+      _spawn = function(_cmd, callback)
+        calls = calls + 1
+        if calls == 1 then
+          callback({ code = 1, stdout = "", stderr = "dial tcp 140.82.121.5:443: i/o timeout" })
+        else
+          callback({ code = 0, stdout = POST_COMMENT_RESP_JSON, stderr = "" })
+        end
+        return {
+          kill = function() end,
+        }
+      end,
+      _defer = function(cb, timeout_ms)
+        delays[#delays + 1] = timeout_ms
+        cb()
+        return nil
+      end,
+    })
+    p._pr_cache["42"] = { head_sha = "abc123def456", number = 42 }
+    local body = model.new_body({ text = "reply", format = "markdown" })
+    local result
+
+    p:begin_reply(SAMPLE_PR, "1001", "1002", body, function(value)
+      result = value
+    end)
+
+    assert.is_not_nil(result)
+    assert.is_true(result.ok)
+    assert.equals(2, calls)
+    assert.equals(250, delays[1])
+    assert.equals("3001", result.comment.id)
+  end)
+
   async_tests.it("sends in_reply_to equal to the explicit parent_comment_id", function()
     local runner = make_runner(function(_cmd)
       return ok(POST_COMMENT_RESP_JSON)

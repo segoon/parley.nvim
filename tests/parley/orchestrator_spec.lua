@@ -25,6 +25,7 @@ local review_repository = require("parley.repositories.review")
 local read_service = require("parley.services.read")
 local registry = require("parley.registry")
 local signs = require("parley.signs")
+local progress_ui_state = require("parley.ui_states.progress")
 
 -- ---------------------------------------------------------------------------
 -- Fixtures
@@ -110,6 +111,8 @@ local function save_seams()
   saved.cache_fs = cache._fs
   saved.notify = read_service._notify
   saved.get_config = read_service._get_config
+  saved.defer = read_service._defer
+  saved.now = read_service._now
 end
 
 local function restore_seams()
@@ -121,6 +124,8 @@ local function restore_seams()
   cache._fs = saved.cache_fs
   read_service._notify = saved.notify
   read_service._get_config = saved.get_config
+  read_service._defer = saved.defer
+  read_service._now = saved.now
 end
 
 --- Wire seams for a test.
@@ -248,11 +253,13 @@ end
 async_tests.describe("parley.services.read refresh", function()
   async_tests.before_each(function()
     save_seams()
+    progress_ui_state.clear()
   end)
 
   async_tests.after_each(function()
     restore_seams()
     registry.reset()
+    progress_ui_state.clear()
   end)
 
   -- -------------------------------------------------------------------------
@@ -386,6 +393,43 @@ async_tests.describe("parley.services.read refresh", function()
 
     assert.equals(1, #s.render_calls)
     assert.equals("1", s.render_calls[1].discussions[1].id)
+  end)
+
+  async_tests.it("preserves rendered decorations when only cached review data is invalidated", function()
+    local s = setup({
+      pr = SAMPLE_PR,
+      discussions = { make_discussion(1, "src/foo.lua", 10, "fresh") },
+    })
+
+    read_service.refresh(1)
+    local clear_count = #s.clear_calls
+
+    review_repository.invalidate(1, { preserve_snapshot = true })
+
+    assert.is_not_nil(read_service.get_buffer_state(1))
+    assert.equals(clear_count, #s.clear_calls)
+    assert.equals(1, #s.render_calls)
+  end)
+
+  async_tests.it("publishes progress for explicit refresh requests", function()
+    setup({
+      pr = SAMPLE_PR,
+      discussions = { make_discussion(1, "src/foo.lua", 10, "fresh") },
+    })
+    local ticks = 0
+    read_service._now = function()
+      ticks = ticks + 1
+      return ticks
+    end
+    read_service._defer = function(_cb, _timeout) end
+
+    read_service.refresh(1, { force = true, progress = true })
+
+    local progress_entries = progress_ui_state.list()
+    assert.equals(1, #progress_entries)
+    assert.equals("refresh", progress_entries[1].kind)
+    assert.equals("success", progress_entries[1].state)
+    assert.equals("Refresh complete", progress_entries[1].message)
   end)
 
   -- -------------------------------------------------------------------------
