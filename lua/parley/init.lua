@@ -235,15 +235,6 @@ function M.setup(opts)
     orchestrator.refresh_async(vim.api.nvim_get_current_buf(), { force = true })
   end, { desc = "Re-fetch PR discussions for the current buffer" })
 
-  vim.api.nvim_create_autocmd("BufLeave", {
-    group = augroup,
-    callback = function(args)
-      local discussion_window = require("parley.discussion_window")
-      discussion_window.close(args.buf)
-    end,
-    desc = "Parley: close discussion window on buffer leave",
-  })
-
   vim.api.nvim_create_autocmd("BufWipeout", {
     group = augroup,
     callback = function(args)

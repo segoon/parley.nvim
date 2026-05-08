@@ -54,11 +54,17 @@ local notify_calls = {}
 local function save_seams()
   saved.get_config = discussion_window._get_config
   saved.notify = discussion_window._notify
+  saved.now = discussion_window._now
+  saved.date = discussion_window._date
+  saved.strptime = discussion_window._strptime
 end
 
 local function restore_seams()
   discussion_window._get_config = saved.get_config
   discussion_window._notify = saved.notify
+  discussion_window._now = saved.now
+  discussion_window._date = saved.date
+  discussion_window._strptime = saved.strptime
 end
 
 describe("parley.discussion_window", function()
@@ -76,6 +82,26 @@ describe("parley.discussion_window", function()
     end
     discussion_window._notify = function(msg, level)
       notify_calls[#notify_calls + 1] = { msg = msg, level = level }
+    end
+    discussion_window._now = function()
+      return 160
+    end
+    discussion_window._strptime = function(_fmt, value)
+      local epochs = {
+        ["2024-01-01T10:00:00Z"] = 100,
+        ["2024-01-01T10:00:01Z"] = 101,
+      }
+      return epochs[value]
+    end
+    discussion_window._date = function(fmt, epoch)
+      if fmt == "%Y-%m-%d %H:%M:%S (%Z)" then
+        local values = {
+          [100] = "2026-05-08 15:08:38 (MSK)",
+          [101] = "2026-05-08 15:08:39 (MSK)",
+        }
+        return values[epoch]
+      end
+      error("unexpected date format in test: " .. tostring(fmt))
     end
     for bufnr in pairs(discussion_window._instances) do
       discussion_window.close(bufnr)
@@ -97,6 +123,7 @@ describe("parley.discussion_window", function()
 
   it("opens a window for discussions on the current line", function()
     local bufnr = scratch(10)
+    local source_winid = vim.api.nvim_get_current_win()
     vim.api.nvim_win_set_cursor(0, { 3, 0 })
 
     orchestrator._buffer_state[bufnr] = {
@@ -113,9 +140,13 @@ describe("parley.discussion_window", function()
     assert.is_true(discussion_window.is_open(bufnr))
     assert.is_not_nil(instance)
     assert.is_true(vim.api.nvim_win_is_valid(instance.winid))
+    assert.equal(instance.winid, vim.api.nvim_get_current_win())
+    assert.equal(source_winid, instance.source_winid)
 
     local lines = vim.api.nvim_buf_get_lines(instance.bufnr, 0, -1, false)
-    assert.is_not_nil(vim.tbl_contains(lines, "## Thread 1 · unresolved"))
+    assert.is_false(vim.tbl_contains(lines, "# Parley Discussion"))
+    assert.is_false(vim.tbl_contains(lines, "## Thread 1 · unresolved"))
+    assert.is_not_nil(vim.tbl_contains(lines, "unresolved"))
     assert.is_not_nil(vim.tbl_contains(lines, "Review this nil guard"))
   end)
 
@@ -140,6 +171,7 @@ describe("parley.discussion_window", function()
 
   it("toggle_current_line opens, then closes the existing window", function()
     local bufnr = scratch(10)
+    local source_winid = vim.api.nvim_get_current_win()
     vim.api.nvim_win_set_cursor(0, { 3, 0 })
 
     orchestrator._buffer_state[bufnr] = {
@@ -151,9 +183,11 @@ describe("parley.discussion_window", function()
 
     assert.is_true(discussion_window.toggle_current_line(bufnr))
     assert.is_true(discussion_window.is_open(bufnr))
+    assert.equal(discussion_window._instances[bufnr].winid, vim.api.nvim_get_current_win())
 
-    assert.is_false(discussion_window.toggle_current_line(bufnr))
+    assert.is_false(discussion_window.toggle_current_line(discussion_window._instances[bufnr].bufnr))
     assert.is_false(discussion_window.is_open(bufnr))
+    assert.equal(source_winid, vim.api.nvim_get_current_win())
   end)
 
   it("renders nested replies using parent_comment_id indentation", function()
@@ -179,36 +213,92 @@ describe("parley.discussion_window", function()
     local instance = discussion_window._instances[bufnr]
     local lines = vim.api.nvim_buf_get_lines(instance.bufnr, 0, -1, false)
 
-    assert.is_not_nil(vim.tbl_contains(lines, "- **alice** · 2024-01-01T10:00:00Z"))
-    assert.is_not_nil(vim.tbl_contains(lines, "  - **bob** · 2024-01-01T10:00:00Z"))
+    assert.is_not_nil(vim.tbl_contains(lines, "- **alice** · 2026-05-08 15:08:38 (MSK) (1 min ago)"))
+    assert.is_not_nil(vim.tbl_contains(lines, "  - **bob** · 2026-05-08 15:08:38 (MSK) (1 min ago)"))
     assert.is_not_nil(vim.tbl_contains(lines, "    Reply comment"))
   end)
 
-  it("updates the window content when reopened on a different line", function()
+  it("renders emoji reactions and omits x1 counts", function()
     local bufnr = scratch(10)
+    vim.api.nvim_win_set_cursor(0, { 3, 0 })
 
     orchestrator._buffer_state[bufnr] = {
       discussions = {
-        make_discussion({ id = "d1", line = 3, text = "First line discussion" }),
-        make_discussion({ id = "d2", line = 6, text = "Second line discussion" }),
+        make_discussion({
+          line = 3,
+          comments = {
+            make_comment({
+              id = "c1",
+              author = "alice",
+              text = "Root comment",
+              reactions = {
+                model.new_reaction({ type = "+1", count = 1, viewer_reacted = false }),
+                model.new_reaction({ type = "heart", count = 2, viewer_reacted = true }),
+              },
+            }),
+          },
+        }),
       },
       mappings = {
         d1 = { local_line = 3, stale = false, confidence = 1.0 },
-        d2 = { local_line = 6, stale = false, confidence = 1.0 },
       },
     }
 
-    vim.api.nvim_win_set_cursor(0, { 3, 0 })
     discussion_window.open_current_line(bufnr)
-    local first_winid = discussion_window._instances[bufnr].winid
-
-    vim.api.nvim_win_set_cursor(0, { 6, 0 })
-    discussion_window.open_current_line(bufnr)
-
     local instance = discussion_window._instances[bufnr]
     local lines = vim.api.nvim_buf_get_lines(instance.bufnr, 0, -1, false)
-    assert.is_true(vim.api.nvim_win_is_valid(instance.winid))
-    assert.is_not_nil(vim.tbl_contains(lines, "Second line discussion"))
-    assert.equal(first_winid, instance.winid)
+
+    assert.is_not_nil(vim.tbl_contains(lines, "  Reactions: 👍, ❤️ x2 (you)"))
+  end)
+
+  it("renders only the first discussion on a commented line", function()
+    local bufnr = scratch(10)
+    vim.api.nvim_win_set_cursor(0, { 3, 0 })
+
+    orchestrator._buffer_state[bufnr] = {
+      discussions = {
+        make_discussion({ id = "d1", line = 3, text = "First discussion" }),
+        make_discussion({ id = "d2", line = 3, text = "Second discussion" }),
+      },
+      mappings = {
+        d1 = { local_line = 3, stale = false, confidence = 1.0 },
+        d2 = { local_line = 3, stale = false, confidence = 1.0 },
+      },
+    }
+
+    discussion_window.open_current_line(bufnr)
+    local instance = discussion_window._instances[bufnr]
+    local lines = vim.api.nvim_buf_get_lines(instance.bufnr, 0, -1, false)
+
+    assert.is_not_nil(vim.tbl_contains(lines, "First discussion"))
+    assert.is_false(vim.tbl_contains(lines, "Second discussion"))
+  end)
+
+  it("closes the discussion window when focus leaves it", function()
+    local bufnr = scratch(10)
+    vim.cmd("vsplit")
+    local other_winid = vim.api.nvim_get_current_win()
+    vim.cmd("wincmd p")
+    local source_winid = vim.api.nvim_get_current_win()
+    vim.api.nvim_win_set_cursor(source_winid, { 3, 0 })
+
+    orchestrator._buffer_state[bufnr] = {
+      discussions = { make_discussion({ line = 3, text = "Focused discussion" }) },
+      mappings = {
+        d1 = { local_line = 3, stale = false, confidence = 1.0 },
+      },
+    }
+
+    discussion_window.open_current_line(bufnr)
+    assert.equal(discussion_window._instances[bufnr].winid, vim.api.nvim_get_current_win())
+
+    vim.api.nvim_set_current_win(other_winid)
+    vim.wait(50, function()
+      return not discussion_window.is_open(bufnr)
+    end)
+
+    assert.is_false(discussion_window.is_open(bufnr))
+    assert.equal(other_winid, vim.api.nvim_get_current_win())
+    assert.is_true(vim.api.nvim_win_is_valid(source_winid))
   end)
 end)
