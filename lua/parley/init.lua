@@ -1,6 +1,8 @@
 --- parley.nvim — inline PR discussion for Neovim
 --- https://github.com/your-org/parley.nvim
 
+local registry = require("parley.registry")
+
 local M = {}
 
 --- Default configuration values.
@@ -75,7 +77,14 @@ function M.setup(opts)
   -- Ensure cache directory exists
   vim.fn.mkdir(M.config.cache_dir, "p")
 
-  -- TODO: initialise provider registry
+  -- Reset and re-populate the provider registry on every setup() call so
+  -- that calling setup() twice produces a clean, deterministic state.
+  -- Built-in provider specs are registered here as they are implemented
+  -- (Step 9+).  User-supplied providers can call registry.register() after
+  -- setup() if needed.
+  registry.reset()
+
+  -- TODO: register built-in providers (Step 9: GitHub, etc.)
   -- TODO: register autocommands (BufEnter, timer)
   -- TODO: register keymaps
   -- TODO: register statusline component
