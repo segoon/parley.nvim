@@ -6,7 +6,7 @@ LUA_DIRS := lua/ plugin/ tests/
 # ─── Linting ──────────────────────────────────────────────────────────────────
 
 lint:
-	luacheck $(LUA_DIRS)
+	luacheck -q $(LUA_DIRS)
 
 # ─── Formatting ───────────────────────────────────────────────────────────────
 

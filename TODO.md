@@ -4,3 +4,6 @@
 - discussion view
 - discussion edits (new comment / add reaction / etc.)
 - statusline
+- checkhealth
+- README.md
+- vim help

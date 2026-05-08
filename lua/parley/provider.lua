@@ -35,7 +35,8 @@ local M = {}
 ---
 --- Post a new top-level comment anchored to a file/line.
 --- Returns the newly created Comment.
---- @field post_comment fun(self: parley.Provider, pr: parley.PR, file: string, line: integer, body: parley.Body): parley.Comment
+--- @field post_comment fun(self: parley.Provider, pr: parley.PR, file: string, line: integer,
+---   body: parley.Body): parley.Comment
 ---
 --- Post a reply to an existing discussion.
 --- Returns the newly created Comment.
