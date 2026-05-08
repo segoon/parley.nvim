@@ -26,3 +26,4 @@
 - Never call `git`, it is run manually by the user
 - TDD
 - DRY, KISS, SOLID
+- UI quality is paramount

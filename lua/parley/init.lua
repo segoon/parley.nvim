@@ -3,6 +3,7 @@
 
 local cache = require("parley.cache")
 local registry = require("parley.registry")
+local signs = require("parley.signs")
 
 local M = {}
 
@@ -78,6 +79,9 @@ function M.setup(opts)
   -- Ensure cache directory exists and initialise the cache module.
   vim.fn.mkdir(M.config.cache_dir, "p")
   cache.setup({ cache_dir = M.config.cache_dir })
+
+  -- Define highlight groups for signs and virtual text.
+  signs.setup_highlights()
 
   -- Reset and re-populate the provider registry on every setup() call so
   -- that calling setup() twice produces a clean, deterministic state.
