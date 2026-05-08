@@ -1,6 +1,5 @@
 - arcanum provider
 - diffview.nvim integration
-- checkhealth
 - README.md
 - vim help
 - vim help for providers (auto generate?)
