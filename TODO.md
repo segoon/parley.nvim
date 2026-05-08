@@ -1,0 +1,6 @@
+- github provider
+- arcanum provider
+- diffview.nvim integration
+- discussion view
+- discussion edits (new comment / add reaction / etc.)
+- statusline

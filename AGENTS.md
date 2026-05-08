@@ -1,1 +1,28 @@
-Read @PROJECT.md for the core concept and the project goals.
+## Core documentation
+
+- @PROJECT.md - the core concept and the project goals
+- @TODO.md - the plans
+
+## Quick Reference
+
+**Language:** Lua. Neovim plugin. Minimum Neovim: 0.10.
+
+**Layout:**
+- `lua/parley/` — all plugin logic (modules go here)
+- `plugin/parley.lua` — entry point, load guard only; no logic
+- `tests/parley/` — mirrors `lua/parley/` structure
+
+**Conventions**
+- stylua
+- luacheck
+- luacats annotations (**MANDATORY**)
+- make test
+
+**Requirements**
+- `plenary.async`. No synchronous HTTP anywhere.
+
+## Development
+
+- Never call `git`, it is run manually by the user
+- TDD
+- DRY, KISS, SOLID
