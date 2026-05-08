@@ -21,3 +21,6 @@ Bugs:
 - background update failure should be silent
 - too many asserts - detect_pr() must be called before
 - input window must be a buffer just under discussion buffer (split)
+- multiple times: UI thread / non-UI thread / C callback - how to proactively detect it?
+
+- MVC? any architecture style?
