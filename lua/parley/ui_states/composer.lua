@@ -1,6 +1,7 @@
 --- parley.ui_states.composer — composer UI state.
 
 local M = {}
+local ui = require("parley.runtime.ui")
 
 M._entries = {}
 M._subscribers = {}
@@ -18,7 +19,9 @@ local function publish(bufnr, snapshot)
   end
   local payload = clone(snapshot)
   for _, cb in pairs(subs) do
-    cb(payload)
+    ui.dispatch(function()
+      cb(payload)
+    end)
   end
 end
 

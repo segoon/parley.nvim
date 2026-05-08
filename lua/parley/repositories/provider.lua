@@ -3,6 +3,7 @@
 local async = require("plenary.async")
 local context_repository = require("parley.repositories.context")
 local registry = require("parley.registry")
+local ui = require("parley.runtime.ui")
 
 local M = {}
 
@@ -26,7 +27,9 @@ local function publish(bufnr, snapshot)
   end
   local payload = clone(snapshot)
   for _, cb in pairs(subs) do
-    cb(payload)
+    ui.dispatch(function()
+      cb(payload)
+    end)
   end
 end
 

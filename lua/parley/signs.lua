@@ -20,6 +20,7 @@
 ---   signs.clear(bufnr)
 
 local model = require("parley.model")
+local ui = require("parley.runtime.ui")
 local timestamp_format = require("parley.timestamp")
 
 local M = {}
@@ -126,6 +127,7 @@ end
 ---
 --- @param bufnr integer  Target buffer
 function M.clear(bufnr)
+  ui.assert_main_loop("signs.clear")
   vim.api.nvim_buf_clear_namespace(bufnr, M._get_ns(), 0, -1)
 end
 
@@ -139,6 +141,7 @@ end
 --- @param mappings    table<string, parley.anchor.Mapping> Keyed by discussion.id
 --- @param opts        { signs: parley.SignsConfig, virtual_text: parley.VirtualTextConfig }
 function M.render(bufnr, discussions, mappings, opts)
+  ui.assert_main_loop("signs.render")
   M.clear(bufnr)
 
   local ns = M._get_ns()

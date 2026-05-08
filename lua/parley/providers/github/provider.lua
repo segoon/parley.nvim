@@ -18,8 +18,9 @@
 ---   • _auth:   auth module table with read_token(host)    — replace in tests.
 ---   • _parse_remote_url is a pure function exported for unit testing.
 
-local async = require("plenary.async")
 local model = require("parley.model")
+local await = require("parley.runtime.await")
+local ui = require("parley.runtime.ui")
 
 local M = {}
 
@@ -397,7 +398,9 @@ local function gh_start(self, cmd, callback)
     end
     completed = true
     clear_retry_timer()
-    callback(result)
+    ui.dispatch(function()
+      callback(result)
+    end)
   end
 
   local function start_attempt()
@@ -498,20 +501,19 @@ function M.new(opts)
   local self
   local system = opts._system or vim.system
 
-  local default_runner = async.wrap(function(cmd, callback)
-    system(cmd, { text = true, timeout = transport_config(self).timeout_ms }, function(result)
-      vim.schedule(function()
-        callback({ code = result.code, stdout = result.stdout or "", stderr = result.stderr or "" })
-      end)
-    end)
-  end, 2)
+  local default_runner = function(cmd)
+    local result = await.system(cmd, { text = true, timeout = transport_config(self).timeout_ms, _system = system })
+    return { code = result.code, stdout = result.stdout or "", stderr = result.stderr or "" }
+  end
 
   local default_spawn = function(cmd, callback)
-    return system(cmd, { text = true, timeout = transport_config(self).timeout_ms }, function(result)
-      vim.schedule(function()
+    return system(
+      cmd,
+      { text = true, timeout = transport_config(self).timeout_ms },
+      ui.wrap(function(result)
         callback({ code = result.code, stdout = result.stdout or "", stderr = result.stderr or "" })
       end)
-    end)
+    )
   end
 
   self = setmetatable({
@@ -521,11 +523,7 @@ function M.new(opts)
     _api_base = opts.api_base or api_base_for_host(host),
     _runner = opts._runner or default_runner,
     _spawn = opts._spawn or default_spawn,
-    _sleep = opts._sleep or function(timeout_ms)
-      vim.wait(timeout_ms, function()
-        return false
-      end)
-    end,
+    _sleep = opts._sleep or await.sleep,
     _defer = opts._defer or vim.defer_fn,
     _get_config = opts._get_config or function()
       return require("parley").config
@@ -547,7 +545,8 @@ end
 --- @param self parley.github.Provider
 --- @return string
 function GitHubProvider:auth()
-  local token, err = self._auth.read_token(self._host)
+  local read_token = self._auth.read_token_async or self._auth.read_token
+  local token, err = read_token(self._host)
   if not token then
     error(string.format("parley.github: auth failed: %s", err or "unknown error"), 0)
   end

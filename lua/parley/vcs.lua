@@ -12,7 +12,7 @@
 ---   • Only git is supported today; the interface is intentionally generic
 ---     so additional VCS backends can be added in later phases.
 
-local async = require("plenary.async")
+local await = require("parley.runtime.await")
 
 local M = {}
 
@@ -38,17 +38,14 @@ local M = {}
 --- the subprocess runs, keeping Neovim responsive.
 ---
 --- @type fun(cmd: string[], cwd: string): { code: integer, stdout: string, stderr: string }
-M._runner = async.wrap(function(cmd, cwd, callback)
-  vim.system(cmd, { cwd = cwd, text = true }, function(result)
-    vim.schedule(function()
-      callback({
-        code = result.code,
-        stdout = result.stdout or "",
-        stderr = result.stderr or "",
-      })
-    end)
-  end)
-end, 3)
+M._runner = function(cmd, cwd)
+  local result = await.system(cmd, { cwd = cwd, text = true })
+  return {
+    code = result.code,
+    stdout = result.stdout or "",
+    stderr = result.stderr or "",
+  }
+end
 
 -- ---------------------------------------------------------------------------
 -- Helpers

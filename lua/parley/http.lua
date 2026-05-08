@@ -16,7 +16,7 @@
 ---   names as plenary.curl (get, post, put, patch, delete, head, request) with
 ---   the callback-based signature: fn(url, { ..., callback = fn(response) }).
 
-local async = require("plenary.async")
+local await = require("parley.runtime.await")
 
 local M = {}
 
@@ -56,14 +56,14 @@ end
 --- @param method_name string  e.g. "get", "post"
 --- @return fun(url: string, opts: table): table
 local function wrap_method(method_name)
-  -- plenary.async.wrap converts a callback function into a coroutine-safe one.
-  -- The arity (3) = url + opts + callback.
-  return async.wrap(function(url, opts, callback)
+  return function(url, opts)
     local backend = curl_backend()
     local method = backend[method_name]
     assert(type(method) == "function", "curl backend missing method: " .. method_name)
-    method(url, vim.tbl_extend("force", opts, { callback = callback }))
-  end, 3)
+    return await.callback(function(callback)
+      method(url, vim.tbl_extend("force", opts, { callback = callback }))
+    end)
+  end
 end
 
 --- Build the headers table to send, merging caller-supplied headers with the

@@ -1,6 +1,7 @@
 --- parley.ui_states.progress — global progress UI state.
 
 local M = {}
+local ui = require("parley.runtime.ui")
 
 M._entries = {}
 M._subscribers = {}
@@ -30,7 +31,9 @@ end
 local function publish()
   local payload = sorted_entries()
   for _, cb in pairs(M._subscribers) do
-    cb(vim.deepcopy(payload))
+    ui.dispatch(function()
+      cb(vim.deepcopy(payload))
+    end)
   end
 end
 

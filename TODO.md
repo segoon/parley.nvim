@@ -13,7 +13,6 @@ UI:
 
 Bugs:
 - too many asserts - detect_pr() must be called before
-- multiple times: UI thread / non-UI thread / C callback - how to proactively detect it?
 - multiple buffers with different repositories
 
 - MVC? any architecture style?

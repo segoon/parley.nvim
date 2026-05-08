@@ -22,6 +22,7 @@
 ---   Set M._getenv to a fun(name)->string|nil fake to control env vars.
 
 local M = {}
+local runtime_fs = require("parley.runtime.fs")
 
 -- ---------------------------------------------------------------------------
 -- Type annotations
@@ -66,13 +67,16 @@ local function read_file(path)
   if M._read_file then
     return M._read_file(path)
   end
-  local f = io.open(path, "r")
-  if not f then
-    return nil
+  return runtime_fs.read_file_sync(path)
+end
+
+--- @param path string
+--- @return string|nil
+local function read_file_async(path)
+  if M._read_file then
+    return M._read_file(path)
   end
-  local content = f:read("*a")
-  f:close()
-  return content
+  return runtime_fs.read_file(path)
 end
 
 --- Return true when the host belongs to the github.com / *.ghe.com class
@@ -167,6 +171,18 @@ local function token_from_file(host)
   return parse_hosts_yaml(content, host)
 end
 
+--- @param host string
+--- @return string|nil token
+--- @return string|nil error
+local function token_from_file_async(host)
+  local path = M.token_path()
+  local content = read_file_async(path)
+  if not content then
+    return nil, string.format("parley.github.auth: cannot read '%s'", path)
+  end
+  return parse_hosts_yaml(content, host)
+end
+
 -- ---------------------------------------------------------------------------
 -- Public API
 -- ---------------------------------------------------------------------------
@@ -216,6 +232,24 @@ function M.read_token(host)
   end
 
   return token_from_file(host)
+end
+
+--- Resolve the GitHub token for `host` without blocking the main loop.
+---
+--- Must be called inside a plenary.async coroutine when using the real filesystem.
+---
+--- @param host string
+--- @return string|nil token
+--- @return string|nil error
+function M.read_token_async(host)
+  assert(type(host) == "string" and host ~= "", "parley.github.auth.read_token_async: host must be a non-empty string")
+
+  local env_token = token_from_env(host)
+  if env_token and env_token ~= "" then
+    return env_token, nil
+  end
+
+  return token_from_file_async(host)
 end
 
 return M

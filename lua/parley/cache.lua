@@ -18,6 +18,7 @@
 ---   delete(path), mkdir(path).
 
 local M = {}
+local runtime_fs = require("parley.runtime.fs")
 
 -- ---------------------------------------------------------------------------
 -- Type annotations
@@ -47,39 +48,66 @@ local M = {}
 --- @type table|nil
 M._fs = nil
 
---- Return the active filesystem backend.
---- @return table
-local function fs()
+local function read_file_sync(path)
   if M._fs then
-    return M._fs
+    return M._fs.read(path)
   end
-  return {
-    read = function(path)
-      local fh = io.open(path, "r")
-      if not fh then
-        return nil
-      end
-      local content = fh:read("*a")
-      fh:close()
-      return content
-    end,
-    write = function(path, content)
-      -- Ensure parent directory exists.
-      local parent = path:match("^(.*)/[^/]+$")
-      if parent then
-        vim.fn.mkdir(parent, "p")
-      end
-      local fh = assert(io.open(path, "w"))
-      fh:write(content)
-      fh:close()
-    end,
-    delete = function(path)
-      vim.fn.delete(path, "rf")
-    end,
-    mkdir = function(path)
-      vim.fn.mkdir(path, "p")
-    end,
-  }
+  return runtime_fs.read_file_sync(path)
+end
+
+local function write_file_sync(path, content)
+  if M._fs then
+    M._fs.write(path, content)
+    return
+  end
+  runtime_fs.write_file_sync(path, content)
+end
+
+local function delete_sync(path)
+  if M._fs then
+    M._fs.delete(path)
+    return
+  end
+  runtime_fs.rm_rf_sync(path)
+end
+
+local function mkdir_sync(path)
+  if M._fs then
+    M._fs.mkdir(path)
+    return
+  end
+  runtime_fs.mkdir_p_sync(path)
+end
+
+local function read_file(path)
+  if M._fs then
+    return M._fs.read(path)
+  end
+  return runtime_fs.read_file(path)
+end
+
+local function write_file(path, content)
+  if M._fs then
+    M._fs.write(path, content)
+    return
+  end
+  runtime_fs.write_file(path, content)
+end
+
+local function delete(path)
+  if M._fs then
+    M._fs.delete(path)
+    return
+  end
+  runtime_fs.rm_rf(path)
+end
+
+local function mkdir(path)
+  if M._fs then
+    M._fs.mkdir(path)
+    return
+  end
+  runtime_fs.mkdir_p(path)
 end
 
 -- ---------------------------------------------------------------------------
@@ -148,7 +176,7 @@ function M.setup(cfg)
     "parley.cache.setup: cfg.cache_dir must be a non-empty string"
   )
   cache_dir = cfg.cache_dir
-  fs().mkdir(cache_dir)
+  mkdir_sync(cache_dir)
 end
 
 --- Retrieve a cached entry.
@@ -163,7 +191,36 @@ end
 function M.get(key)
   validate_key(key)
   local path = key_to_path(key)
-  local raw = fs().read(path)
+  local raw = read_file_sync(path)
+  if raw == nil then
+    return nil
+  end
+  local ok, entry = pcall(vim.json.decode, raw)
+  if not ok or type(entry) ~= "table" then
+    return nil
+  end
+  -- Both fields must be present; data may be any JSON-decoded type but
+  -- fetched_at must be a number.  A missing "data" key (or JSON null decoded
+  -- to nil) is treated as a cache miss.
+  if entry.data == nil then
+    return nil
+  end
+  if type(entry.fetched_at) ~= "number" then
+    return nil
+  end
+  return { data = entry.data, fetched_at = entry.fetched_at }
+end
+
+--- Retrieve a cached entry without blocking the main loop.
+---
+--- Must be called inside a plenary.async coroutine when using the real filesystem.
+---
+--- @param key parley.CacheKey
+--- @return parley.CacheEntry|nil
+function M.get_async(key)
+  validate_key(key)
+  local path = key_to_path(key)
+  local raw = read_file(path)
   if raw == nil then
     return nil
   end
@@ -198,10 +255,27 @@ function M.set(key, data)
   -- Ensure parent directory exists.
   local parent = path:match("^(.*)/[^/]+$")
   if parent then
-    fs().mkdir(parent)
+    mkdir_sync(parent)
   end
   local entry = { data = data, fetched_at = os.time() }
-  fs().write(path, vim.json.encode(entry))
+  write_file_sync(path, vim.json.encode(entry))
+end
+
+--- Store a value in the cache without blocking the main loop.
+---
+--- Must be called inside a plenary.async coroutine when using the real filesystem.
+---
+--- @param key  parley.CacheKey
+--- @param data any
+function M.set_async(key, data)
+  validate_key(key)
+  local path = key_to_path(key)
+  local parent = path:match("^(.*)/[^/]+$")
+  if parent then
+    mkdir(parent)
+  end
+  local entry = { data = data, fetched_at = os.time() }
+  write_file(path, vim.json.encode(entry))
 end
 
 --- Delete the cache entry for a single key.
@@ -212,7 +286,18 @@ end
 function M.invalidate(key)
   validate_key(key)
   local path = key_to_path(key)
-  fs().delete(path)
+  delete_sync(path)
+end
+
+--- Delete a cache entry without blocking the main loop.
+---
+--- Must be called inside a plenary.async coroutine when using the real filesystem.
+---
+--- @param key parley.CacheKey
+function M.invalidate_async(key)
+  validate_key(key)
+  local path = key_to_path(key)
+  delete(path)
 end
 
 --- Delete all cache entries under a provider (and optionally a repository).
@@ -234,7 +319,24 @@ function M.invalidate_prefix(partial_key)
   if type(partial_key.repository) == "string" and partial_key.repository ~= "" then
     path = path .. "/" .. sanitize(partial_key.repository)
   end
-  fs().delete(path)
+  delete_sync(path)
+end
+
+--- Delete all cache entries under a provider/repository without blocking the main loop.
+---
+--- Must be called inside a plenary.async coroutine when using the real filesystem.
+---
+--- @param partial_key { provider: string, repository?: string }
+function M.invalidate_prefix_async(partial_key)
+  assert(
+    type(partial_key) == "table" and type(partial_key.provider) == "string" and partial_key.provider ~= "",
+    "parley.cache.invalidate_prefix: partial_key.provider must be a non-empty string"
+  )
+  local path = cache_dir .. "/" .. sanitize(partial_key.provider)
+  if type(partial_key.repository) == "string" and partial_key.repository ~= "" then
+    path = path .. "/" .. sanitize(partial_key.repository)
+  end
+  delete(path)
 end
 
 --- Return true when a cache entry is considered stale.

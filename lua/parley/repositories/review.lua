@@ -5,6 +5,7 @@ local anchor = require("parley.anchor")
 local cache = require("parley.cache")
 local context_repository = require("parley.repositories.context")
 local provider_repository = require("parley.repositories.provider")
+local ui = require("parley.runtime.ui")
 
 local M = {}
 
@@ -43,7 +44,9 @@ local function publish(bufnr, snapshot)
   end
   local payload = clone(snapshot)
   for _, cb in pairs(subs) do
-    cb(payload)
+    ui.dispatch(function()
+      cb(payload)
+    end)
   end
 end
 
@@ -123,7 +126,7 @@ local function restore_cached_snapshot(bufnr, ctx, provider_snapshot)
     return nil
   end
 
-  local pr_entry = cache.get(pr_cache_key(provider, opts, branch))
+  local pr_entry = cache.get_async(pr_cache_key(provider, opts, branch))
   if not pr_entry or not pr_entry.data then
     return nil
   end
@@ -139,7 +142,7 @@ local function restore_cached_snapshot(bufnr, ctx, provider_snapshot)
     return nil
   end
 
-  local discussions_entry = cache.get(discussions_cache_key(provider, opts, pr_id))
+  local discussions_entry = cache.get_async(discussions_cache_key(provider, opts, pr_id))
   if not discussions_entry or not discussions_entry.data then
     return nil
   end
@@ -208,21 +211,21 @@ function M.refresh(bufnr, opts)
   local ok, result = pcall(function()
     local pr = provider:detect_pr(ctx.vcs_info.root, branch)
     if pr == nil then
-      cache.invalidate(pr_cache_key(provider, provider_opts, branch))
+      cache.invalidate_async(pr_cache_key(provider, provider_opts, branch))
       publish(bufnr, nil)
       return nil
     end
 
     local head_sha = (provider.head_sha and provider:head_sha(pr)) or ""
     local write_context = provider.export_write_context and provider:export_write_context(pr) or nil
-    cache.set(pr_cache_key(provider, provider_opts, branch), {
+    cache.set_async(pr_cache_key(provider, provider_opts, branch), {
       pr = pr,
       head_sha = head_sha,
       write_context = write_context,
     })
 
     local discussions = provider:fetch_discussions(pr)
-    cache.set(discussions_cache_key(provider, provider_opts, pr.id), discussions)
+    cache.set_async(discussions_cache_key(provider, provider_opts, pr.id), discussions)
     provider_repository.store(bufnr, provider, provider_opts)
     local snapshot = build_snapshot(ctx, head_sha, pr, discussions)
     publish(bufnr, snapshot)

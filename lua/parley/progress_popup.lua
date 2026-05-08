@@ -1,6 +1,7 @@
 --- parley.progress_popup — bottom-right request progress popup.
 
 local progress_state = require("parley.ui_states.progress")
+local ui = require("parley.runtime.ui")
 
 local M = {}
 
@@ -114,6 +115,7 @@ local function ensure_buffer()
 end
 
 local function render()
+  ui.assert_main_loop("progress_popup.render")
   local config = M._get_config() or {}
   local popup_cfg = config.progress
     or {
