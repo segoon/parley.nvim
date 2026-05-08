@@ -11,6 +11,20 @@
 local signs = require("parley.signs")
 local model = require("parley.model")
 
+local saved = {}
+
+local function save_seams()
+  saved.now = signs._now
+  saved.date = signs._date
+  saved.strptime = signs._strptime
+end
+
+local function restore_seams()
+  signs._now = saved.now
+  signs._date = saved.date
+  signs._strptime = saved.strptime
+end
+
 -- ---------------------------------------------------------------------------
 -- Helpers
 -- ---------------------------------------------------------------------------
@@ -138,6 +152,36 @@ end)
 -- ---------------------------------------------------------------------------
 
 describe("signs.render", function()
+  before_each(function()
+    save_seams()
+    signs._now = function()
+      return 160
+    end
+    signs._strptime = function(_fmt, value)
+      local epochs = {
+        ["2024-01-01T00:00:00Z"] = 100,
+        ["2024-01-01T00:00:01Z"] = 101,
+        ["2024-01-01T00:00:02Z"] = 102,
+      }
+      return epochs[value]
+    end
+    signs._date = function(fmt, epoch)
+      if fmt == "%Y-%m-%d %H:%M:%S (%Z)" then
+        local values = {
+          [100] = "2026-05-08 15:08:38 (MSK)",
+          [101] = "2026-05-08 15:08:39 (MSK)",
+          [102] = "2026-05-08 15:08:40 (MSK)",
+        }
+        return values[epoch]
+      end
+      error("unexpected date format in test: " .. tostring(fmt))
+    end
+  end)
+
+  after_each(function()
+    restore_seams()
+  end)
+
   it("places no extmarks when discussions list is empty", function()
     local bufnr = scratch(5)
     signs.render(bufnr, {}, {}, default_opts())
@@ -223,7 +267,7 @@ describe("signs.render", function()
   -- Virtual text
   -- -------------------------------------------------------------------------
 
-  it("includes virt_text with first-comment snippet when virtual_text.enabled = true", function()
+  it("renders metadata and first-comment snippet in below-line virtual lines", function()
     local bufnr = scratch(5)
     local disc = make_discussion("d1", "foo.lua", 2, "check the nil guard here")
     local mappings = { ["d1"] = make_mapping(2) }
@@ -231,14 +275,14 @@ describe("signs.render", function()
     signs.render(bufnr, { disc }, mappings, default_opts())
     local marks = all_extmarks(bufnr)
     assert.equal(1, #marks)
-    local vt = marks[1][4].virt_text
-    assert.is_not_nil(vt)
-    assert.is_true(#vt > 0)
-    -- First chunk text should contain the comment snippet
-    assert.is_not_nil(vt[1][1]:find("check the nil guard here", 1, true))
+    local virt_lines = marks[1][4].virt_lines
+    assert.is_not_nil(virt_lines)
+    assert.is_true(#virt_lines > 0)
+    assert.equals("alice · 2026-05-08 15:08:38 (MSK) (1 min ago)", virt_lines[1][1][1])
+    assert.equals("check the nil guard here", virt_lines[2][1][1])
   end)
 
-  it("truncates long comment text in virt_text", function()
+  it("truncates long comment text in virtual lines", function()
     local bufnr = scratch(5)
     local long_text = ("x"):rep(120)
     local disc = make_discussion("d1", "foo.lua", 2, long_text)
@@ -248,9 +292,67 @@ describe("signs.render", function()
 
     signs.render(bufnr, { disc }, mappings, opts)
     local marks = all_extmarks(bufnr)
-    local vt = marks[1][4].virt_text
-    -- The rendered snippet must end with the ellipsis character
-    assert.equal("…", vt[1][1]:sub(-3))
+    local virt_lines = marks[1][4].virt_lines
+    assert.equal("…", virt_lines[2][1][1]:sub(-3))
+  end)
+
+  it("renders multiline comments as multiple virtual lines", function()
+    local bufnr = scratch(5)
+    local disc = make_discussion("d1", "foo.lua", 2, "line one\nline two\nline three")
+    local mappings = { ["d1"] = make_mapping(2) }
+
+    signs.render(bufnr, { disc }, mappings, default_opts())
+    local virt_lines = all_extmarks(bufnr)[1][4].virt_lines
+
+    assert.equals(4, #virt_lines)
+    assert.equals("alice · 2026-05-08 15:08:38 (MSK) (1 min ago)", virt_lines[1][1][1])
+    assert.equals("line one", virt_lines[2][1][1])
+    assert.equals("line two", virt_lines[3][1][1])
+    assert.equals("line three", virt_lines[4][1][1])
+  end)
+
+  it("adds a summary virtual line when the discussion has additional comments", function()
+    local bufnr = scratch(5)
+    local disc = model.new_discussion({
+      id = "d1",
+      file = "foo.lua",
+      line = 2,
+      comments = {
+        model.new_comment({
+          id = "c1",
+          author = "alice",
+          body = model.new_body({ text = "first", format = "plaintext" }),
+          created_at = "2024-01-01T00:00:00Z",
+          updated_at = "2024-01-01T00:00:00Z",
+        }),
+        model.new_comment({
+          id = "c2",
+          author = "bob",
+          body = model.new_body({ text = "second", format = "plaintext" }),
+          created_at = "2024-01-01T00:00:01Z",
+          updated_at = "2024-01-01T00:00:01Z",
+          parent_comment_id = "c1",
+        }),
+        model.new_comment({
+          id = "c3",
+          author = "carol",
+          body = model.new_body({ text = "third", format = "plaintext" }),
+          created_at = "2024-01-01T00:00:02Z",
+          updated_at = "2024-01-01T00:00:02Z",
+          parent_comment_id = "c1",
+        }),
+      },
+    })
+    local mappings = { ["d1"] = make_mapping(2) }
+
+    signs.render(bufnr, { disc }, mappings, default_opts())
+    local marks = all_extmarks(bufnr)
+    local virt_lines = marks[1][4].virt_lines
+
+    assert.equals(3, #virt_lines)
+    assert.equals("alice · 2026-05-08 15:08:38 (MSK) (1 min ago)", virt_lines[1][1][1])
+    assert.equals("first", virt_lines[2][1][1])
+    assert.equals("(2 more comments)", virt_lines[3][1][1])
   end)
 
   it("omits virt_text when virtual_text.enabled = false", function()
@@ -263,9 +365,8 @@ describe("signs.render", function()
     signs.render(bufnr, { disc }, mappings, opts)
     local marks = all_extmarks(bufnr)
     assert.equal(1, #marks) -- extmark still placed
-    local vt = marks[1][4].virt_text
-    -- Either nil or empty list
-    assert.is_true(vt == nil or #vt == 0)
+    local virt_lines = marks[1][4].virt_lines
+    assert.is_true(virt_lines == nil or #virt_lines == 0)
   end)
 
   -- -------------------------------------------------------------------------
@@ -282,10 +383,10 @@ describe("signs.render", function()
     assert.equal(1, #marks)
     local det = marks[1][4]
     assert.equal("ParleyStaleSign", det.sign_hl_group)
-    -- Virtual text chunk highlight
-    local vt = det.virt_text
-    assert.is_not_nil(vt)
-    assert.equal("ParleyStaleVirtualText", vt[1][2])
+    local virt_lines = det.virt_lines
+    assert.is_not_nil(virt_lines)
+    assert.equal("ParleyStaleVirtualTextMeta", virt_lines[1][1][2])
+    assert.equal("ParleyStaleVirtualText", virt_lines[2][1][2])
   end)
 
   it("uses normal highlight groups for non-stale mappings", function()
@@ -297,8 +398,9 @@ describe("signs.render", function()
     local marks = all_extmarks(bufnr)
     local det = marks[1][4]
     assert.equal("ParleySign", det.sign_hl_group)
-    local vt = det.virt_text
-    assert.equal("ParleyVirtualText", vt[1][2])
+    local virt_lines = det.virt_lines
+    assert.equal("ParleyVirtualTextMeta", virt_lines[1][1][2])
+    assert.equal("ParleyVirtualText", virt_lines[2][1][2])
   end)
 
   -- -------------------------------------------------------------------------
@@ -385,7 +487,7 @@ describe("signs.render", function()
     assert.has_no_error(function()
       signs.render(bufnr, { disc }, mappings, default_opts())
     end)
-    -- Extmark still placed; virt_text may be empty but no crash
+    -- Extmark still placed; virt_lines may be empty but no crash
     assert.equal(1, #all_extmarks(bufnr))
   end)
 end)

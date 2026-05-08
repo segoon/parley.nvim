@@ -208,7 +208,7 @@ across diffview.nvim version changes.
 | Element | Behavior |
 |---|---|
 | **Gutter sign** | Appears on every line with ≥1 comment. Indicates presence only (no count, no state). Works in both regular buffers and diffview new-side pane. |
-| **Virtual text** | End-of-line, truncated snippet of the first comment on that line. |
+| **Virtual text** | Virtual lines below the commented line showing `author · timestamp`, the multiline first comment body, and, when applicable, a compact remaining-comment summary. |
 | **Discussion float** | Opens tied to cursor position; stays open until explicitly closed. Follows cursor to new lines on move. Rendered as overlay in both regular buffer and diffview contexts. |
 | **Thread rendering** | Flat list for GitHub; generic tree renderer for providers with nested replies. Markdown rendered via `render-markdown.nvim`. |
 | **Input subwindow** | Multiline Markdown buffer within or adjacent to the discussion float. Opens for: new reply, new top-level comment, edit existing. |

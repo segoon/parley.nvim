@@ -3,13 +3,15 @@
 --- Places Neovim extmarks on buffer lines that have PR discussion anchors.
 --- Each extmark carries:
 ---   • a gutter sign (sign_text)         — configurable character, default "▐"
----   • an EOL virtual-text snippet       — first comment body, truncated
+---   • virtual lines below the comment   — author/timestamp metadata plus body
 ---
 --- Highlight groups (defined with default = true so users can override):
----   ParleySign             → DiagnosticSignInfo   (normal sign)
----   ParleyStaleSign        → Comment              (stale/diverged sign)
----   ParleyVirtualText      → DiagnosticVirtualTextInfo  (normal vtext)
----   ParleyStaleVirtualText → Comment              (stale vtext)
+---   ParleySign                 → DiagnosticSignInfo         (normal sign)
+---   ParleyStaleSign            → Comment                    (stale/diverged sign)
+---   ParleyVirtualTextMeta      → DiagnosticVirtualTextHint  (normal metadata)
+---   ParleyStaleVirtualTextMeta → Comment                    (stale metadata)
+---   ParleyVirtualText          → DiagnosticVirtualTextInfo  (normal body)
+---   ParleyStaleVirtualText     → Comment                    (stale body)
 ---
 --- Usage:
 ---   local signs = require("parley.signs")
@@ -18,6 +20,7 @@
 ---   signs.clear(bufnr)
 
 local model = require("parley.model")
+local timestamp_format = require("parley.timestamp")
 
 local M = {}
 
@@ -45,6 +48,8 @@ end
 --- Highlight group names (single source of truth).
 local HL_SIGN = "ParleySign"
 local HL_STALE_SIGN = "ParleyStaleSign"
+local HL_VTEXT_META = "ParleyVirtualTextMeta"
+local HL_STALE_VTEXT_META = "ParleyStaleVirtualTextMeta"
 local HL_VTEXT = "ParleyVirtualText"
 local HL_STALE_VTEXT = "ParleyStaleVirtualText"
 
@@ -55,8 +60,25 @@ local HL_STALE_VTEXT = "ParleyStaleVirtualText"
 function M.setup_highlights()
   vim.api.nvim_set_hl(0, HL_SIGN, { link = "DiagnosticSignInfo", default = true })
   vim.api.nvim_set_hl(0, HL_STALE_SIGN, { link = "Comment", default = true })
+  vim.api.nvim_set_hl(0, HL_VTEXT_META, { link = "DiagnosticVirtualTextHint", default = true })
+  vim.api.nvim_set_hl(0, HL_STALE_VTEXT_META, { link = "Comment", default = true })
   vim.api.nvim_set_hl(0, HL_VTEXT, { link = "DiagnosticVirtualTextInfo", default = true })
   vim.api.nvim_set_hl(0, HL_STALE_VTEXT, { link = "Comment", default = true })
+end
+
+--- @type fun(): integer
+M._now = function()
+  return os.time()
+end
+
+--- @type fun(fmt: string, time: integer): string
+M._date = function(fmt, time)
+  return os.date(fmt, time)
+end
+
+--- @type fun(fmt: string, value: string): integer|nil
+M._strptime = function(fmt, value)
+  return vim.fn.strptime(fmt, value)
 end
 
 -- ---------------------------------------------------------------------------
@@ -84,6 +106,16 @@ function M._truncate(text, max_width)
     return "…"
   end
   return text:sub(1, max_width - 1) .. "…"
+end
+
+---@param timestamp string
+---@return string
+local function format_comment_timestamp(timestamp)
+  return timestamp_format.format(timestamp, {
+    now = M._now,
+    date = M._date,
+    strptime = M._strptime,
+  })
 end
 
 -- ---------------------------------------------------------------------------
@@ -121,6 +153,7 @@ function M.render(bufnr, discussions, mappings, opts)
 
     local stale = mapping.stale
     local hl_sign = stale and HL_STALE_SIGN or HL_SIGN
+    local hl_vtext_meta = stale and HL_STALE_VTEXT_META or HL_VTEXT_META
     local hl_vtext = stale and HL_STALE_VTEXT or HL_VTEXT
 
     -- Extmark options (always placed; sign/vtext conditional on config).
@@ -133,13 +166,31 @@ function M.render(bufnr, discussions, mappings, opts)
       ext_opts.sign_hl_group = hl_sign
     end
 
-    -- EOL virtual text: truncated first-comment snippet.
+    -- Virtual lines below the anchored line: metadata, full multiline body,
+    -- then a compact summary when the discussion has additional comments.
     if opts.virtual_text.enabled then
       local first = model.first_comment(disc)
       if first then
-        local snippet = M._truncate(first.body.text, opts.virtual_text.max_width)
-        ext_opts.virt_text = { { snippet, hl_vtext } }
-        ext_opts.virt_text_pos = "eol"
+        ext_opts.virt_lines = {
+          {
+            {
+              string.format("%s · %s", first.author, format_comment_timestamp(first.created_at)),
+              hl_vtext_meta,
+            },
+          },
+        }
+        for _, line in ipairs(vim.split(first.body.text, "\n", { plain = true })) do
+          ext_opts.virt_lines[#ext_opts.virt_lines + 1] = {
+            { M._truncate(line, opts.virtual_text.max_width), hl_vtext },
+          }
+        end
+        local more_comments = model.comment_count(disc) - 1
+        if more_comments > 0 then
+          local suffix = more_comments == 1 and "comment" or "comments"
+          ext_opts.virt_lines[#ext_opts.virt_lines + 1] = {
+            { string.format("(%d more %s)", more_comments, suffix), hl_vtext },
+          }
+        end
       end
     end
 

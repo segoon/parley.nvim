@@ -7,6 +7,7 @@
 local read_service = require("parley.services.read")
 local composer_ui_state = require("parley.ui_states.composer")
 local discussion_ui_state = require("parley.ui_states.discussion")
+local timestamp_format = require("parley.timestamp")
 
 local M = {}
 
@@ -116,35 +117,14 @@ local function reaction_summary(reactions)
   return table.concat(parts, ", ")
 end
 
---- @param seconds integer
---- @param unit string
---- @return string
-local function pluralize(seconds, unit)
-  if seconds == 1 then
-    return string.format("1 %s ago", unit)
-  end
-  return string.format("%d %ss ago", seconds, unit)
-end
-
 --- @param timestamp string
 --- @return string
 local function format_timestamp(timestamp)
-  local epoch = M._strptime("%Y-%m-%dT%H:%M:%SZ", timestamp)
-  if not epoch then
-    return timestamp
-  end
-
-  local delta = math.max(0, M._now() - epoch)
-  local ago
-  if delta < 3600 then
-    ago = pluralize(math.max(1, math.floor(delta / 60)), "min")
-  elseif delta < 86400 then
-    ago = pluralize(math.floor(delta / 3600), "hour")
-  else
-    ago = pluralize(math.floor(delta / 86400), "day")
-  end
-
-  return string.format("%s (%s)", M._date("%Y-%m-%d %H:%M:%S (%Z)", epoch), ago)
+  return timestamp_format.format(timestamp, {
+    now = M._now,
+    date = M._date,
+    strptime = M._strptime,
+  })
 end
 
 --- @param comment parley.Comment
