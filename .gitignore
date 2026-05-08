@@ -1,0 +1,25 @@
+# Editor artifacts
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Neovim session / shada
+*.shada
+
+# Tags
+tags
+.tags
+
+# Test runner output
+.tests/
+
+# Luarocks / dependency installs used locally during development
+deps/
+
+# Cache
+.cache/
+
+# Compiled / built docs
+doc/tags
