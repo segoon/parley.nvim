@@ -5,6 +5,8 @@
 --- render-markdown.nvim installed get rich rendering automatically.
 
 local read_service = require("parley.services.read")
+local composer_ui_state = require("parley.ui_states.composer")
+local discussion_ui_state = require("parley.ui_states.discussion")
 
 local M = {}
 
@@ -282,6 +284,8 @@ end
 local function highlight_parent_comment(instance, comment_id)
   clear_parent_highlight(instance)
   if not comment_id then
+    local source_bufnr = instance.source_bufnr or instance.bufnr
+    discussion_ui_state.patch(source_bufnr, { highlighted_parent_comment_id = nil })
     return
   end
 
@@ -295,6 +299,8 @@ local function highlight_parent_comment(instance, comment_id)
     hl_group = "Visual",
     hl_eol = true,
   })
+  local source_bufnr = instance.source_bufnr or instance.bufnr
+  discussion_ui_state.patch(source_bufnr, { highlighted_parent_comment_id = comment_id })
 end
 
 --- @param instance table
@@ -334,6 +340,9 @@ local function hide_input(instance, force)
   clear_parent_highlight(instance)
   instance.input_state = "hidden"
   instance.input_cancel = nil
+  local source_bufnr = instance.source_bufnr or instance.bufnr
+  composer_ui_state.clear(source_bufnr)
+  discussion_ui_state.patch(source_bufnr, { input_visible = false, highlighted_parent_comment_id = nil })
   if instance.input_winid and vim.api.nvim_win_is_valid(instance.input_winid) then
     vim.api.nvim_win_close(instance.input_winid, true)
   end
@@ -427,6 +436,7 @@ local function show_input(src_bufnr, instance, status, initial_text, parent_comm
 
   instance.input_state = "idle"
   instance.input_cancel = nil
+  discussion_ui_state.patch(src_bufnr, { input_visible = true })
   instance.submit_input = function()
     if instance.input_state == "submitting" then
       return
@@ -471,6 +481,7 @@ local function show_input(src_bufnr, instance, status, initial_text, parent_comm
   vim.api.nvim_buf_set_lines(instance.input_bufnr, 0, -1, false, { status })
   vim.api.nvim_buf_set_lines(instance.input_bufnr, 1, -1, false, body_lines)
   vim.bo[instance.input_bufnr].modifiable = true
+  composer_ui_state.patch(src_bufnr, { draft = initial_text or "", visible = true, submit_state = "idle" })
   highlight_parent_comment(instance, parent_comment_id)
   focus_input(instance)
   vim.cmd.startinsert()
@@ -509,6 +520,7 @@ local function create_instance(lines, float_cfg, source_winid)
     bufnr = bufnr,
     winid = winid,
     popup = nil,
+    source_bufnr = nil,
     source_winid = source_winid,
     discussion = nil,
     cursor_line = nil,
@@ -617,6 +629,7 @@ end
 local function ensure_instance(bufnr, lines, float_cfg)
   local instance = live_instance(bufnr)
   if instance then
+    instance.source_bufnr = bufnr
     vim.api.nvim_win_set_config(instance.winid, make_win_config(lines, float_cfg))
     if instance.input_winid and vim.api.nvim_win_is_valid(instance.input_winid) then
       local discussion_cfg = vim.api.nvim_win_get_config(instance.winid)
@@ -634,6 +647,7 @@ local function ensure_instance(bufnr, lines, float_cfg)
   end
 
   instance = create_instance(lines, float_cfg, vim.api.nvim_get_current_win())
+  instance.source_bufnr = bufnr
   M._instances[bufnr] = instance
   return instance
 end
@@ -667,10 +681,14 @@ function M.close(bufnr)
   local instance = live_instance(bufnr)
   if not instance then
     M._instances[bufnr] = nil
+    discussion_ui_state.clear(bufnr)
+    composer_ui_state.clear(bufnr)
     return false
   end
 
   M._instances[bufnr] = nil
+  discussion_ui_state.clear(bufnr)
+  composer_ui_state.clear(bufnr)
   instance.close()
   return true
 end
@@ -710,6 +728,13 @@ function M.open_current_line(bufnr, opts)
   instance.comment_ranges = comment_ranges
   write_lines(bufnr, instance, lines)
   clear_parent_highlight(instance)
+  discussion_ui_state.set(bufnr, {
+    visible = true,
+    current_discussion_id = discussions[1].id,
+    current_source_line = cursor_line,
+    highlighted_parent_comment_id = nil,
+    input_visible = instance.input_state ~= "hidden",
+  })
   return true
 end
 
@@ -718,9 +743,15 @@ end
 --- @return parley.Discussion|nil
 function M.current_discussion(bufnr)
   bufnr = resolve_source_bufnr(bufnr)
-  local instance = live_instance(bufnr)
-  if instance and instance.discussion then
-    return instance.discussion
+  local ui_state = discussion_ui_state.get(bufnr)
+  local snapshot = read_service.get_buffer_state(bufnr)
+  local discussion_id = ui_state and ui_state.current_discussion_id or nil
+  if snapshot and discussion_id then
+    for _, discussion in ipairs(snapshot.discussions or {}) do
+      if discussion.id == discussion_id then
+        return discussion
+      end
+    end
   end
   return nil
 end
@@ -730,8 +761,7 @@ end
 --- @return boolean
 function M.reply_current_line(bufnr)
   bufnr = resolve_source_bufnr(bufnr)
-  local instance = live_instance(bufnr)
-  local discussion = instance and instance.discussion or nil
+  local discussion = M.current_discussion(bufnr)
   if not discussion then
     M._notify("Open a Parley discussion before replying", vim.log.levels.INFO)
     return false
@@ -786,6 +816,13 @@ function M.show_new_comment_input(bufnr, opts)
       instance.cursor_line = opts.cursor_line
       instance.comment_ranges = comment_ranges
       write_lines(bufnr, instance, lines)
+      discussion_ui_state.set(bufnr, {
+        visible = true,
+        current_discussion_id = discussions[1].id,
+        current_source_line = opts.cursor_line,
+        highlighted_parent_comment_id = nil,
+        input_visible = false,
+      })
     else
       local config = M._get_config() or {}
       local placeholder = { "_No discussion on this line yet._" }
@@ -794,6 +831,13 @@ function M.show_new_comment_input(bufnr, opts)
       instance.cursor_line = opts.cursor_line
       instance.comment_ranges = {}
       write_lines(bufnr, instance, placeholder)
+      discussion_ui_state.set(bufnr, {
+        visible = true,
+        current_discussion_id = nil,
+        current_source_line = opts.cursor_line,
+        highlighted_parent_comment_id = nil,
+        input_visible = false,
+      })
     end
   end
 

@@ -25,3 +25,6 @@ Bugs:
 - multiple times: UI thread / non-UI thread / C callback - how to proactively detect it?
 
 - MVC? any architecture style?
+
+Q:
+- repository + ui-state for UI plugins?

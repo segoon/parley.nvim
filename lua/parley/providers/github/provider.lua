@@ -41,6 +41,7 @@ local M = {}
 --- @field _auth         table
 --- @field _pr_cache     table<string, parley.github.PrCache>
 --- @field _viewer_login string|nil
+--- @field _cache_provider string
 
 -- ---------------------------------------------------------------------------
 -- Constants
@@ -398,6 +399,7 @@ function M.new(opts)
     _auth = opts._auth or require("parley.providers.github.auth"),
     _pr_cache = {},
     _viewer_login = nil,
+    _cache_provider = "github",
   }, GitHubProvider)
 
   return self
@@ -755,6 +757,35 @@ end
 function GitHubProvider:head_sha(pr)
   local cached = self._pr_cache[pr.id]
   return cached and cached.head_sha or nil
+end
+
+--- Export provider write context for cached stale startup restores.
+--- @param self parley.github.Provider
+--- @param pr parley.PR
+--- @return { number: integer, head_sha: string }|nil
+function GitHubProvider:export_write_context(pr)
+  local cached = self._pr_cache[pr.id]
+  if not cached then
+    return nil
+  end
+  return {
+    number = cached.number,
+    head_sha = cached.head_sha,
+  }
+end
+
+--- Import provider write context previously exported by export_write_context.
+--- @param self parley.github.Provider
+--- @param pr parley.PR
+--- @param ctx { number: integer, head_sha: string }|nil
+function GitHubProvider:import_write_context(pr, ctx)
+  if not ctx then
+    return
+  end
+  self._pr_cache[pr.id] = {
+    number = ctx.number,
+    head_sha = ctx.head_sha,
+  }
 end
 
 -- ---------------------------------------------------------------------------

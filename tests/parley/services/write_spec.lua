@@ -2,6 +2,9 @@
 
 local mock_provider = require("parley.mock_provider")
 local model = require("parley.model")
+local context_repository = require("parley.repositories.context")
+local provider_repository = require("parley.repositories.provider")
+local review_repository = require("parley.repositories.review")
 local read_service = require("parley.services.read")
 local write_service = require("parley.services.write")
 
@@ -20,12 +23,16 @@ local saved = {}
 
 local function save_seams()
   saved.refresh = read_service.refresh
+  saved.review_refresh = review_repository.refresh
+  saved.review_invalidate = review_repository.invalidate
   saved.notify = write_service._notify
   saved.discussion = package.loaded["parley.discussion_window"]
 end
 
 local function restore_seams()
   read_service.refresh = saved.refresh
+  review_repository.refresh = saved.review_refresh
+  review_repository.invalidate = saved.review_invalidate
   write_service._notify = saved.notify
   package.loaded["parley.discussion_window"] = saved.discussion
 end
@@ -55,6 +62,9 @@ describe("parley.services.write", function()
     save_seams()
     write_service._operations = {}
     read_service._buffer_state = {}
+    context_repository._entries = {}
+    provider_repository._entries = {}
+    review_repository._entries = {}
     notify_calls = {}
     write_service._notify = function(msg, level)
       notify_calls[#notify_calls + 1] = { msg = msg, level = level }
@@ -65,19 +75,35 @@ describe("parley.services.write", function()
     restore_seams()
     write_service._operations = {}
     read_service._buffer_state = {}
+    context_repository._entries = {}
+    provider_repository._entries = {}
+    review_repository._entries = {}
   end)
 
   it("posts a top-level comment with a normalized range and forces a refresh", function()
     local provider = mock_provider.new({ pr = SAMPLE_PR })
     local refresh_calls = {}
     local opened
-    read_service._buffer_state[1] = {
+    context_repository._entries[1] = {
+      kind = "regular",
+      bufnr = 1,
+      path = "/repo/src/foo.lua",
+      vcs_info = { vcs = "git", root = "/repo", branch = "feature", remote_url = "git@github.com:owner/repo.git" },
+      rel_path = "src/foo.lua",
+      status = "ready",
+    }
+    provider_repository._entries[1] = {
+      status = "ready",
+      provider = provider,
+      opts = { owner = "owner", repo = "repo", host = "github.com" },
+    }
+    review_repository._entries[1] = {
+      status = "ready",
+      stale = false,
       discussions = {},
       mappings = {},
       pr = SAMPLE_PR,
       head_sha = "deadbeef",
-      provider = provider,
-      rel_path = "src/foo.lua",
     }
 
     package.loaded["parley.discussion_window"] = {
@@ -87,7 +113,8 @@ describe("parley.services.write", function()
       end,
       open_current_line = function() end,
     }
-    read_service.refresh = function(bufnr, opts)
+    review_repository.invalidate = function(_bufnr) end
+    review_repository.refresh = function(bufnr, opts)
       refresh_calls[#refresh_calls + 1] = { bufnr = bufnr, opts = opts }
     end
 
@@ -99,7 +126,7 @@ describe("parley.services.write", function()
     end))
 
     assert.same({ 5, 8 }, provider.calls.post_top_level_comment[1].line)
-    assert.same({ bufnr = 1, opts = { force = true, notify_errors = true } }, refresh_calls[1])
+    assert.same({ bufnr = 1, opts = { force = true } }, refresh_calls[1])
     assert.is_true(opened.instance.closed)
     assert.equals("Parley: sending request...", notify_calls[1].msg)
     assert.equals(vim.log.levels.INFO, notify_calls[1].level)
@@ -133,13 +160,26 @@ describe("parley.services.write", function()
       },
     })
     local opened
-    read_service._buffer_state[1] = {
+    context_repository._entries[1] = {
+      kind = "regular",
+      bufnr = 1,
+      path = "/repo/src/foo.lua",
+      vcs_info = { vcs = "git", root = "/repo", branch = "feature", remote_url = "git@github.com:owner/repo.git" },
+      rel_path = "src/foo.lua",
+      status = "ready",
+    }
+    provider_repository._entries[1] = {
+      status = "ready",
+      provider = provider,
+      opts = { owner = "owner", repo = "repo", host = "github.com" },
+    }
+    review_repository._entries[1] = {
+      status = "ready",
+      stale = false,
       discussions = {},
       mappings = {},
       pr = SAMPLE_PR,
       head_sha = "deadbeef",
-      provider = provider,
-      rel_path = "src/foo.lua",
     }
 
     package.loaded["parley.discussion_window"] = {
@@ -149,7 +189,8 @@ describe("parley.services.write", function()
       end,
       open_current_line = function() end,
     }
-    read_service.refresh = function(_bufnr, _opts) end
+    review_repository.invalidate = function(_bufnr) end
+    review_repository.refresh = function(_bufnr, _opts) end
 
     write_service.open_reply_input(1, "d1", "c2")
     opened.opts.on_submit(opened.instance, "reply draft")
@@ -164,13 +205,26 @@ describe("parley.services.write", function()
 
   it("does not require VCS detection when opening reply input", function()
     local provider = mock_provider.new({ pr = SAMPLE_PR })
-    read_service._buffer_state[1] = {
+    context_repository._entries[1] = {
+      kind = "regular",
+      bufnr = 1,
+      path = "/repo/src/foo.lua",
+      vcs_info = { vcs = "git", root = "/repo", branch = "feature", remote_url = "git@github.com:owner/repo.git" },
+      rel_path = "src/foo.lua",
+      status = "ready",
+    }
+    provider_repository._entries[1] = {
+      status = "ready",
+      provider = provider,
+      opts = { owner = "owner", repo = "repo", host = "github.com" },
+    }
+    review_repository._entries[1] = {
+      status = "ready",
+      stale = false,
       discussions = {},
       mappings = {},
       pr = SAMPLE_PR,
       head_sha = "deadbeef",
-      provider = provider,
-      rel_path = "src/foo.lua",
     }
 
     package.loaded["parley.discussion_window"] = {

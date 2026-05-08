@@ -2,7 +2,10 @@
 
 local async = require("plenary.async")
 local model = require("parley.model")
-local read_service = require("parley.services.read")
+local composer_ui_state = require("parley.ui_states.composer")
+local context_repository = require("parley.repositories.context")
+local provider_repository = require("parley.repositories.provider")
+local review_repository = require("parley.repositories.review")
 
 local M = {}
 
@@ -19,11 +22,19 @@ end
 --- @param bufnr integer
 --- @return parley.Provider, parley.PR, string
 local function resolve_write_context(bufnr)
-  local state = read_service.get_buffer_state(bufnr)
-  assert(state and state.pr, "parley: no PR context available for this buffer")
-  assert(state.provider ~= nil, "parley: provider context is not ready for this buffer")
-  assert(type(state.rel_path) == "string" and state.rel_path ~= "", "parley: file context is not ready for this buffer")
-  return state.provider, state.pr, state.rel_path
+  local review_snapshot = review_repository.get(bufnr)
+  local provider_snapshot = provider_repository.get(bufnr)
+  local context_snapshot = context_repository.get(bufnr)
+  assert(review_snapshot and review_snapshot.pr, "parley: no PR context available for this buffer")
+  assert(
+    provider_snapshot and provider_snapshot.provider ~= nil,
+    "parley: provider context is not ready for this buffer"
+  )
+  assert(
+    context_snapshot and type(context_snapshot.rel_path) == "string" and context_snapshot.rel_path ~= "",
+    "parley: file context is not ready for this buffer"
+  )
+  return provider_snapshot.provider, review_snapshot.pr, context_snapshot.rel_path
 end
 
 --- @param line integer|nil
@@ -64,7 +75,8 @@ end
 --- @param callback fun(): nil
 local function refresh_after_write(bufnr, callback)
   async.run(function()
-    read_service.refresh(bufnr, { force = true, notify_errors = true })
+    review_repository.invalidate(bufnr)
+    review_repository.refresh(bufnr, { force = true })
     vim.schedule(callback)
   end)
 end
@@ -83,6 +95,7 @@ local function run_submit(bufnr, instance, starter, status_text, success_opts)
 
   local operation
   M._notify("Parley: sending request...", vim.log.levels.INFO)
+  composer_ui_state.patch(bufnr, { submit_state = "submitting", error = nil })
   instance.set_submitting(status_text)
 
   local request = starter(function(result)
@@ -93,17 +106,20 @@ local function run_submit(bufnr, instance, starter, status_text, success_opts)
     M._operations[bufnr] = nil
 
     if result.cancelled then
+      composer_ui_state.patch(bufnr, { submit_state = "idle" })
       instance.set_idle("Request cancelled. Draft preserved.")
       refresh_after_write(bufnr, function() end)
       return
     end
 
     if not result.ok then
+      composer_ui_state.patch(bufnr, { submit_state = "failed", error = result.err or "parley: request failed" })
       instance.set_idle("Request failed. Fix the draft and retry.")
       M._notify(result.err or "parley: request failed", vim.log.levels.WARN)
       return
     end
 
+    composer_ui_state.clear(bufnr)
     refresh_after_write(bufnr, function()
       close_input(instance, function()
         if vim.api.nvim_buf_is_valid(bufnr) then
@@ -136,6 +152,13 @@ function M.open_new_comment_input(bufnr, opts)
   local provider, pr, rel_path = resolve_write_context(bufnr)
   local line = resolve_line_range(opts.line, opts.range, opts.line1, opts.line2)
   local target_line = type(line) == "table" and line[1] or line
+  composer_ui_state.set(bufnr, {
+    mode = "new",
+    visible = true,
+    submit_state = "idle",
+    target_line = line,
+    draft = "",
+  })
 
   require("parley.discussion_window").show_new_comment_input(bufnr, {
     cursor_line = target_line,
@@ -179,12 +202,20 @@ end
 function M.open_reply_input(bufnr, discussion_id, parent_comment_id)
   assert(type(parent_comment_id) == "string" and parent_comment_id ~= "", "parley: parent_comment_id is required")
   local provider, pr = resolve_write_context(bufnr)
-  local state = read_service.get_buffer_state(bufnr)
-  local target_line = state
-      and state.mappings
-      and state.mappings[discussion_id]
-      and state.mappings[discussion_id].local_line
+  local review_snapshot = review_repository.get(bufnr)
+  local target_line = review_snapshot
+      and review_snapshot.mappings
+      and review_snapshot.mappings[discussion_id]
+      and review_snapshot.mappings[discussion_id].local_line
     or nil
+  composer_ui_state.set(bufnr, {
+    mode = "reply",
+    visible = true,
+    submit_state = "idle",
+    target_discussion_id = discussion_id,
+    target_parent_comment_id = parent_comment_id,
+    draft = "",
+  })
 
   require("parley.discussion_window").show_reply_input(bufnr, {
     parent_comment_id = parent_comment_id,
