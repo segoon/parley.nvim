@@ -11,7 +11,11 @@
 - default keymapping
 - :Telescope discussions|issues|comments? vcs_issues?
 - mark comment as stale (outdated position)
+- ]c, [c for the discussion buffer
 
 UI:
 - virtual lines below the commented line, not right to it
 - configure comment preview layout in setup(...)
+
+Bugs:
+- background update failure should be silent
