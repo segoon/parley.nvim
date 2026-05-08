@@ -10,7 +10,7 @@ local review_repository = require("parley.repositories.review")
 local M = {}
 
 --- Active write operations keyed by source buffer.
---- @type table<integer, { cancel: fun(): nil, input: parley.input_window.Instance }>
+--- @type table<integer, { cancel: fun(): nil, input: table }>
 M._operations = {}
 
 --- Notify hook; replace in tests.
@@ -62,7 +62,7 @@ local function resolve_line_range(line, range, line1, line2)
   return cursor_line
 end
 
---- @param instance parley.input_window.Instance
+--- @param instance table
 --- @param callback fun(): nil
 local function close_input(instance, callback)
   instance.close(true)
@@ -82,7 +82,7 @@ local function refresh_after_write(bufnr, callback)
 end
 
 --- @param bufnr integer
---- @param instance parley.input_window.Instance
+--- @param instance table
 --- @param starter fun(callback: fun(result: { ok: boolean, comment?: parley.Comment, err?: string, cancelled?: boolean }): nil): { cancel: fun(): nil }
 --- @param status_text string
 --- @param success_opts? { cursor_line?: integer }

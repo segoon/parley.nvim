@@ -7,10 +7,6 @@ local review_repository = require("parley.repositories.review")
 local signs = require("parley.signs")
 
 local M = {}
-
-M._in_flight = review_repository._in_flight
-M._pending_force = review_repository._pending_force
-M._buffer_state = review_repository._entries
 M._subscriptions = {}
 
 M._notify = function(msg, level)

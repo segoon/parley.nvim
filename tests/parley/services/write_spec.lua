@@ -61,7 +61,6 @@ describe("parley.services.write", function()
   before_each(function()
     save_seams()
     write_service._operations = {}
-    read_service._buffer_state = {}
     context_repository._entries = {}
     provider_repository._entries = {}
     review_repository._entries = {}
@@ -74,7 +73,6 @@ describe("parley.services.write", function()
   after_each(function()
     restore_seams()
     write_service._operations = {}
-    read_service._buffer_state = {}
     context_repository._entries = {}
     provider_repository._entries = {}
     review_repository._entries = {}

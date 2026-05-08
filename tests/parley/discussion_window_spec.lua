@@ -2,7 +2,10 @@
 
 local discussion_window = require("parley.discussion_window")
 local model = require("parley.model")
+local composer_ui_state = require("parley.ui_states.composer")
+local discussion_ui_state = require("parley.ui_states.discussion")
 local read_service = require("parley.services.read")
+local review_repository = require("parley.repositories.review")
 
 --- @param n integer
 --- @return integer
@@ -108,18 +111,22 @@ describe("parley.discussion_window", function()
     for bufnr in pairs(discussion_window._instances) do
       discussion_window.close(bufnr)
     end
-    for bufnr in pairs(read_service._buffer_state) do
+    for bufnr in pairs(review_repository._entries) do
       read_service.clear_buffer_state(bufnr)
     end
+    discussion_ui_state._entries = {}
+    composer_ui_state._entries = {}
   end)
 
   after_each(function()
     for bufnr in pairs(discussion_window._instances) do
       discussion_window.close(bufnr)
     end
-    for bufnr in pairs(read_service._buffer_state) do
+    for bufnr in pairs(review_repository._entries) do
       read_service.clear_buffer_state(bufnr)
     end
+    discussion_ui_state._entries = {}
+    composer_ui_state._entries = {}
     restore_seams()
   end)
 
@@ -128,7 +135,9 @@ describe("parley.discussion_window", function()
     local source_winid = vim.api.nvim_get_current_win()
     vim.api.nvim_win_set_cursor(0, { 3, 0 })
 
-    read_service._buffer_state[bufnr] = {
+    review_repository._entries[bufnr] = {
+      status = "ready",
+      stale = false,
       discussions = { make_discussion({ line = 3, text = "Review this nil guard" }) },
       mappings = {
         d1 = { local_line = 3, stale = false, confidence = 1.0 },
@@ -156,7 +165,9 @@ describe("parley.discussion_window", function()
     local bufnr = scratch(10)
     vim.api.nvim_win_set_cursor(0, { 1, 0 })
 
-    read_service._buffer_state[bufnr] = {
+    review_repository._entries[bufnr] = {
+      status = "ready",
+      stale = false,
       discussions = { make_discussion({ line = 3 }) },
       mappings = {
         d1 = { local_line = 3, stale = false, confidence = 1.0 },
@@ -176,7 +187,9 @@ describe("parley.discussion_window", function()
     local source_winid = vim.api.nvim_get_current_win()
     vim.api.nvim_win_set_cursor(0, { 3, 0 })
 
-    read_service._buffer_state[bufnr] = {
+    review_repository._entries[bufnr] = {
+      status = "ready",
+      stale = false,
       discussions = { make_discussion({ line = 3 }) },
       mappings = {
         d1 = { local_line = 3, stale = false, confidence = 1.0 },
@@ -196,7 +209,9 @@ describe("parley.discussion_window", function()
     local bufnr = scratch(10)
     vim.api.nvim_win_set_cursor(0, { 3, 0 })
 
-    read_service._buffer_state[bufnr] = {
+    review_repository._entries[bufnr] = {
+      status = "ready",
+      stale = false,
       discussions = {
         make_discussion({
           line = 3,
@@ -224,7 +239,9 @@ describe("parley.discussion_window", function()
     local bufnr = scratch(10)
     vim.api.nvim_win_set_cursor(0, { 3, 0 })
 
-    read_service._buffer_state[bufnr] = {
+    review_repository._entries[bufnr] = {
+      status = "ready",
+      stale = false,
       discussions = {
         make_discussion({
           line = 3,
@@ -257,7 +274,9 @@ describe("parley.discussion_window", function()
     local bufnr = scratch(10)
     vim.api.nvim_win_set_cursor(0, { 3, 0 })
 
-    read_service._buffer_state[bufnr] = {
+    review_repository._entries[bufnr] = {
+      status = "ready",
+      stale = false,
       discussions = {
         make_discussion({ id = "d1", line = 3, text = "First discussion" }),
         make_discussion({ id = "d2", line = 3, text = "Second discussion" }),
@@ -280,7 +299,9 @@ describe("parley.discussion_window", function()
     local bufnr = scratch(10)
     vim.api.nvim_win_set_cursor(0, { 3, 0 })
 
-    read_service._buffer_state[bufnr] = {
+    review_repository._entries[bufnr] = {
+      status = "ready",
+      stale = false,
       discussions = {
         make_discussion({
           line = 3,
@@ -321,7 +342,9 @@ describe("parley.discussion_window", function()
     local bufnr = scratch(10)
     vim.api.nvim_win_set_cursor(0, { 3, 0 })
 
-    read_service._buffer_state[bufnr] = {
+    review_repository._entries[bufnr] = {
+      status = "ready",
+      stale = false,
       discussions = { make_discussion({ line = 3, text = "Focused discussion" }) },
       mappings = {
         d1 = { local_line = 3, stale = false, confidence = 1.0 },

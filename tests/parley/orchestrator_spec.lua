@@ -19,6 +19,9 @@ local buffer_context = require("parley.buffer_context")
 local cache = require("parley.cache")
 local mock_provider = require("parley.mock_provider")
 local model = require("parley.model")
+local context_repository = require("parley.repositories.context")
+local provider_repository = require("parley.repositories.provider")
+local review_repository = require("parley.repositories.review")
 local read_service = require("parley.services.read")
 local registry = require("parley.registry")
 local signs = require("parley.signs")
@@ -193,12 +196,15 @@ local function setup(o)
   end
 
   -- Reentrancy guard: clear any state from previous tests.
-  for k in pairs(read_service._in_flight) do
-    read_service._in_flight[k] = nil
+  for k in pairs(review_repository._in_flight) do
+    review_repository._in_flight[k] = nil
   end
-  for k in pairs(read_service._pending_force) do
-    read_service._pending_force[k] = nil
+  for k in pairs(review_repository._pending_force) do
+    review_repository._pending_force[k] = nil
   end
+  review_repository._entries = {}
+  context_repository._entries = {}
+  provider_repository._entries = {}
 
   -- Provider via the registry.
   registry.reset()
@@ -297,7 +303,9 @@ async_tests.describe("parley.services.read refresh", function()
   async_tests.it("clears signs when detect_pr returns nil (no PR for branch)", function()
     local s = setup({ pr = nil })
 
-    read_service._buffer_state[1] = {
+    review_repository._entries[1] = {
+      status = "ready",
+      stale = false,
       discussions = { make_discussion(99, "src/foo.lua", 5, "stale") },
       mappings = { ["99"] = { local_line = 5, stale = false, confidence = 1.0 } },
     }
@@ -443,7 +451,9 @@ async_tests.describe("parley.services.read refresh", function()
       discussions = { make_discussion(1, "src/bar.lua", 10, "for bar") },
     })
 
-    read_service._buffer_state[1] = {
+    review_repository._entries[1] = {
+      status = "ready",
+      stale = false,
       discussions = { make_discussion(99, "src/foo.lua", 5, "stale") },
       mappings = { ["99"] = { local_line = 5, stale = false, confidence = 1.0 } },
     }
@@ -462,28 +472,28 @@ async_tests.describe("parley.services.read refresh", function()
     local s = setup({ pr = SAMPLE_PR, discussions = {} })
 
     -- Simulate an in-flight call.
-    read_service._in_flight[1] = true
+    review_repository._in_flight[1] = true
 
     read_service.refresh(1)
 
     assert.equals(0, #s.provider.calls.detect_pr)
     assert.equals(0, #s.render_calls)
 
-    read_service._in_flight[1] = nil
+    review_repository._in_flight[1] = nil
   end)
 
   async_tests.it("queues a forced rerun when force=true arrives during an in-flight refresh", function()
     local s = setup({ pr = SAMPLE_PR, discussions = {} })
 
-    read_service._in_flight[1] = true
+    review_repository._in_flight[1] = true
 
     read_service.refresh(1, { force = true })
 
-    assert.is_true(read_service._pending_force[1])
+    assert.is_true(review_repository._pending_force[1])
     assert.equals(0, #s.provider.calls.detect_pr)
 
-    read_service._in_flight[1] = nil
-    read_service._pending_force[1] = nil
+    review_repository._in_flight[1] = nil
+    review_repository._pending_force[1] = nil
   end)
 
   -- -------------------------------------------------------------------------

@@ -1111,3 +1111,23 @@ describe("parley.providers.github.provider — head_sha", function()
     assert.equals("abc123def456", p:head_sha(SAMPLE_PR))
   end)
 end)
+
+describe("parley.providers.github.provider — write context export/import", function()
+  it("exports cached PR write context after detect_pr", function()
+    local runner = make_route_runner({
+      { pattern = "/reviews", response = ok(REVIEWS_EMPTY_JSON) },
+      { pattern = "/pulls", response = ok(PR_LIST_JSON) },
+    })
+    local p = make_provider(runner.fn)
+    local pr = p:detect_pr("/repo", "feature")
+
+    assert.same({ number = 42, head_sha = "abc123def456" }, p:export_write_context(pr))
+  end)
+
+  it("imports cached PR write context for later writes", function()
+    local p = make_provider(function(_) end)
+    p:import_write_context(SAMPLE_PR, { number = 42, head_sha = "abc123def456" })
+
+    assert.equals("abc123def456", p:head_sha(SAMPLE_PR))
+  end)
+end)

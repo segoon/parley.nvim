@@ -30,8 +30,6 @@ local REACTION_EMOJI = {
 ---   winid: integer,
 ---   popup: any|nil,
 ---   source_winid: integer,
----   discussion: parley.Discussion|nil,
----   cursor_line: integer|nil,
 ---   comment_ranges: table<string, { start_line: integer, end_line: integer }>,
 ---   input_bufnr: integer|nil,
 ---   input_winid: integer|nil,
@@ -522,8 +520,6 @@ local function create_instance(lines, float_cfg, source_winid)
     popup = nil,
     source_bufnr = nil,
     source_winid = source_winid,
-    discussion = nil,
-    cursor_line = nil,
     comment_ranges = {},
     input_bufnr = nil,
     input_winid = nil,
@@ -723,8 +719,6 @@ function M.open_current_line(bufnr, opts)
   }
   local lines, comment_ranges = render_lines(discussions, state.mappings)
   local instance = ensure_instance(bufnr, lines, float_cfg)
-  instance.discussion = discussions[1]
-  instance.cursor_line = cursor_line
   instance.comment_ranges = comment_ranges
   write_lines(bufnr, instance, lines)
   clear_parent_highlight(instance)
@@ -784,7 +778,7 @@ end
 function M.show_reply_input(bufnr, opts)
   bufnr = resolve_source_bufnr(bufnr)
   local instance = live_instance(bufnr)
-  if not instance or not instance.discussion then
+  if not instance or not M.current_discussion(bufnr) then
     M._notify("Open a Parley discussion before replying", vim.log.levels.INFO)
     return nil
   end
@@ -812,8 +806,6 @@ function M.show_new_comment_input(bufnr, opts)
     if #discussions > 0 then
       local lines, comment_ranges = render_lines(discussions, state.mappings)
       instance = ensure_instance(bufnr, lines, float_cfg)
-      instance.discussion = discussions[1]
-      instance.cursor_line = opts.cursor_line
       instance.comment_ranges = comment_ranges
       write_lines(bufnr, instance, lines)
       discussion_ui_state.set(bufnr, {
@@ -827,8 +819,6 @@ function M.show_new_comment_input(bufnr, opts)
       local config = M._get_config() or {}
       local placeholder = { "_No discussion on this line yet._" }
       instance = ensure_instance(bufnr, placeholder, float_cfg)
-      instance.discussion = nil
-      instance.cursor_line = opts.cursor_line
       instance.comment_ranges = {}
       write_lines(bufnr, instance, placeholder)
       discussion_ui_state.set(bufnr, {
