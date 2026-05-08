@@ -338,11 +338,14 @@ function M.new(opts)
       end
     else
       -- New reaction type.
-      table.insert(comment.reactions, model.new_reaction({
-        type = reaction,
-        count = 1,
-        viewer_reacted = true,
-      }))
+      table.insert(
+        comment.reactions,
+        model.new_reaction({
+          type = reaction,
+          count = 1,
+          viewer_reacted = true,
+        })
+      )
     end
   end
 
