@@ -126,7 +126,7 @@ describe("signs.clear", function()
 
   it("is a no-op on a buffer with no extmarks", function()
     local bufnr = scratch(3)
-    assert.has_no.errors(function()
+    assert.has_no_error(function()
       signs.clear(bufnr)
     end)
     assert.equal(0, #all_extmarks(bufnr))
@@ -362,7 +362,7 @@ describe("signs.render", function()
     local disc = make_discussion("d1", "foo.lua", 2, "")
     local mappings = { ["d1"] = make_mapping(2) }
 
-    assert.has_no.errors(function()
+    assert.has_no_error(function()
       signs.render(bufnr, { disc }, mappings, default_opts())
     end)
     assert.equal(1, #all_extmarks(bufnr))
@@ -382,7 +382,7 @@ describe("signs.render", function()
     })
     local mappings = { ["d1"] = make_mapping(2) }
 
-    assert.has_no.errors(function()
+    assert.has_no_error(function()
       signs.render(bufnr, { disc }, mappings, default_opts())
     end)
     -- Extmark still placed; virt_text may be empty but no crash

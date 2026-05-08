@@ -9,3 +9,7 @@
 - vim help
 - vim help for providers (auto generate?)
 - default keymapping
+
+UI:
+- virtual lines below the commented line, not right to it
+- configure comment preview layout in setup(...)

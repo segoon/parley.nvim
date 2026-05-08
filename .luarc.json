@@ -1,17 +1,9 @@
 {
   "$schema": "https://raw.githubusercontent.com/sumneko/vscode-lua/master/setting/schema.json",
   "runtime": {
-    "version": "LuaJIT"
-  },
-  "diagnostics": {
-    "globals": ["vim"]
+    "version": "LuaJIT",
   },
   "workspace": {
-    "library": [
-      "$VIMRUNTIME/lua",
-      "$VIMRUNTIME/lua/vim/lsp",
-      "${3rd}/luv/library"
-    ],
     "checkThirdParty": false,
     "maxPreload": 100000,
     "preloadFileSize": 10000
