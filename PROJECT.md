@@ -251,35 +251,6 @@ All write operations are supported in both regular buffer and diffview contexts:
 
 ---
 
-## 9. Phasing Plan
-
-### Phase 1 (initial release)
-GitHub provider. Core UI (signs, virtual text, discussion float, input subwindow).
-Full read/write operations. Line anchoring with staleness warning. diffview.nvim
-integration. Statusline component. Disk cache.
-
-### Phase 2
-GitLab provider. REST API structurally similar to GitHub; auth and endpoint
-differences.
-
-### Phase 3
-Gitbucket and other self-hosted GitHub/GitLab-compatible instances. Likely covered
-by Phase 1/2 with configurable base URL.
-
-### Phase 4
-Yandex Arcanum. Tree discussion renderer (already designed generically), custom
-branch-to-PR mapping, proprietary API.
-
-### Phase 5
-Perforce / Helix and Mercurial-based review systems. VCS detection abstraction,
-potentially non-line anchoring models.
-
-The **provider interface**, **discussion data model**, and **buffer context
-detector** are the three key abstraction points that must be designed carefully in
-Phase 1 to avoid rework in later phases.
-
----
-
 ## 10. Open Risks
 
 | Risk | Notes |
