@@ -19,3 +19,5 @@ UI:
 
 Bugs:
 - background update failure should be silent
+- too many asserts - detect_pr() must be called before
+- input window must be a buffer just under discussion buffer (split)

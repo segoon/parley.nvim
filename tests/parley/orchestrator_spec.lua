@@ -1,4 +1,4 @@
---- Tests for parley.orchestrator — end-to-end refresh orchestration.
+--- Tests for parley.services.read — end-to-end refresh orchestration.
 --- Run via: make test
 ---
 --- Every external dependency is replaced with an in-memory or recording
@@ -8,7 +8,7 @@
 ---   • parley.anchor._runner — empty diff (identity mapping)
 ---   • parley.signs.render / .clear — recorders
 ---   • parley.cache._fs — in-memory dictionary
----   • orchestrator._notify / _get_config — recorders / fixed config
+---   • read_service._notify / _get_config — recorders / fixed config
 ---
 --- No real filesystem, network, or git invocations.
 
@@ -19,7 +19,7 @@ local buffer_context = require("parley.buffer_context")
 local cache = require("parley.cache")
 local mock_provider = require("parley.mock_provider")
 local model = require("parley.model")
-local orchestrator = require("parley.orchestrator")
+local read_service = require("parley.services.read")
 local registry = require("parley.registry")
 local signs = require("parley.signs")
 
@@ -105,8 +105,8 @@ local function save_seams()
   saved.signs_render = signs.render
   saved.signs_clear = signs.clear
   saved.cache_fs = cache._fs
-  saved.notify = orchestrator._notify
-  saved.get_config = orchestrator._get_config
+  saved.notify = read_service._notify
+  saved.get_config = read_service._get_config
 end
 
 local function restore_seams()
@@ -116,8 +116,8 @@ local function restore_seams()
   signs.render = saved.signs_render
   signs.clear = saved.signs_clear
   cache._fs = saved.cache_fs
-  orchestrator._notify = saved.notify
-  orchestrator._get_config = saved.get_config
+  read_service._notify = saved.notify
+  read_service._get_config = saved.get_config
 end
 
 --- Wire seams for a test.
@@ -183,18 +183,21 @@ local function setup(o)
 
   -- Notify recorder.
   local notify_calls = {}
-  orchestrator._notify = function(msg, level)
+  read_service._notify = function(msg, level)
     table.insert(notify_calls, { msg = msg, level = level })
   end
 
   -- Config.
-  orchestrator._get_config = function()
+  read_service._get_config = function()
     return o.config or SAMPLE_CONFIG
   end
 
   -- Reentrancy guard: clear any state from previous tests.
-  for k in pairs(orchestrator._in_flight) do
-    orchestrator._in_flight[k] = nil
+  for k in pairs(read_service._in_flight) do
+    read_service._in_flight[k] = nil
+  end
+  for k in pairs(read_service._pending_force) do
+    read_service._pending_force[k] = nil
   end
 
   -- Provider via the registry.
@@ -236,7 +239,7 @@ end
 -- Suites
 -- ---------------------------------------------------------------------------
 
-async_tests.describe("parley.orchestrator refresh", function()
+async_tests.describe("parley.services.read refresh", function()
   async_tests.before_each(function()
     save_seams()
   end)
@@ -261,7 +264,7 @@ async_tests.describe("parley.orchestrator refresh", function()
       },
     })
 
-    orchestrator.refresh(1)
+    read_service.refresh(1)
 
     assert.equals(1, #s.render_calls, "expected exactly one render call")
     local rc = s.render_calls[1]
@@ -270,7 +273,7 @@ async_tests.describe("parley.orchestrator refresh", function()
     assert.equals("src/foo.lua", rc.discussions[1].file)
     assert.equals("src/foo.lua", rc.discussions[2].file)
 
-    local state = orchestrator.get_buffer_state(1)
+    local state = read_service.get_buffer_state(1)
     assert.is_not_nil(state)
     assert.equals(2, #state.discussions)
     assert.equals(10, state.mappings["1"].local_line)
@@ -279,7 +282,7 @@ async_tests.describe("parley.orchestrator refresh", function()
   async_tests.it("calls detect_pr and fetch_discussions on the provider", function()
     local s = setup({ pr = SAMPLE_PR, discussions = {} })
 
-    orchestrator.refresh(1)
+    read_service.refresh(1)
 
     assert.equals(1, #s.provider.calls.detect_pr)
     assert.equals(1, #s.provider.calls.fetch_discussions)
@@ -294,17 +297,17 @@ async_tests.describe("parley.orchestrator refresh", function()
   async_tests.it("clears signs when detect_pr returns nil (no PR for branch)", function()
     local s = setup({ pr = nil })
 
-    orchestrator._buffer_state[1] = {
+    read_service._buffer_state[1] = {
       discussions = { make_discussion(99, "src/foo.lua", 5, "stale") },
       mappings = { ["99"] = { local_line = 5, stale = false, confidence = 1.0 } },
     }
 
-    orchestrator.refresh(1)
+    read_service.refresh(1)
 
     assert.equals(0, #s.render_calls)
     assert.is_true(#s.clear_calls >= 1)
     assert.equals(1, s.clear_calls[#s.clear_calls])
-    assert.is_nil(orchestrator.get_buffer_state(1))
+    assert.is_nil(read_service.get_buffer_state(1))
   end)
 
   async_tests.it("removes the cached PR record when detect_pr returns nil", function()
@@ -320,7 +323,7 @@ async_tests.describe("parley.orchestrator refresh", function()
       "precondition: cache should hold the seeded entry"
     )
 
-    orchestrator.refresh(1)
+    read_service.refresh(1)
 
     local entry = cache.get({ provider = "github", repository = "owner/repo", subkey = "pr_branch_feature" })
     assert.is_nil(entry)
@@ -348,7 +351,7 @@ async_tests.describe("parley.orchestrator refresh", function()
       { make_discussion(99, "src/foo.lua", 5, "stale") }
     )
 
-    orchestrator.refresh(1)
+    read_service.refresh(1)
 
     -- Expect 2 renders: stale (id 99) then fresh (id 1).
     assert.equals(2, #s.render_calls)
@@ -371,7 +374,7 @@ async_tests.describe("parley.orchestrator refresh", function()
       { make_discussion(99, "src/foo.lua", 5, "stale") }
     )
 
-    orchestrator.refresh(1, { force = true })
+    read_service.refresh(1, { force = true })
 
     assert.equals(1, #s.render_calls)
     assert.equals("1", s.render_calls[1].discussions[1].id)
@@ -398,7 +401,7 @@ async_tests.describe("parley.orchestrator refresh", function()
       { make_discussion(99, "src/foo.lua", 5, "stale") }
     )
 
-    orchestrator.refresh(1)
+    read_service.refresh(1)
 
     -- Stale render happened.
     assert.equals(1, #s.render_calls)
@@ -407,7 +410,30 @@ async_tests.describe("parley.orchestrator refresh", function()
     assert.equals(1, #s.notify_calls)
     assert.equals(vim.log.levels.WARN, s.notify_calls[1].level)
     assert.is_not_nil(s.notify_calls[1].msg:find("parley"))
-    assert.equals("99", orchestrator.get_buffer_state(1).discussions[1].id)
+    assert.equals("99", read_service.get_buffer_state(1).discussions[1].id)
+  end)
+
+  async_tests.it("stays silent for background refresh failures when notify_errors=false", function()
+    local s = setup({
+      pr = SAMPLE_PR,
+      discussions = {},
+      provider_error = { method = "fetch_discussions", msg = "network down" },
+    })
+
+    cache.set(
+      { provider = "github", repository = "owner/repo", subkey = "pr_branch_feature" },
+      { id = "42", head_sha = "deadbeef" }
+    )
+    cache.set(
+      { provider = "github", repository = "owner/repo", subkey = "discussions_42" },
+      { make_discussion(99, "src/foo.lua", 5, "stale") }
+    )
+
+    read_service.refresh(1, { notify_errors = false })
+
+    assert.equals(1, #s.render_calls)
+    assert.equals(0, #s.notify_calls)
+    assert.equals("99", read_service.get_buffer_state(1).discussions[1].id)
   end)
 
   async_tests.it("clears buffer state when the current file has no discussions", function()
@@ -417,15 +443,15 @@ async_tests.describe("parley.orchestrator refresh", function()
       discussions = { make_discussion(1, "src/bar.lua", 10, "for bar") },
     })
 
-    orchestrator._buffer_state[1] = {
+    read_service._buffer_state[1] = {
       discussions = { make_discussion(99, "src/foo.lua", 5, "stale") },
       mappings = { ["99"] = { local_line = 5, stale = false, confidence = 1.0 } },
     }
 
-    orchestrator.refresh(1)
+    read_service.refresh(1)
 
     assert.equals(1, #s.clear_calls)
-    assert.is_nil(orchestrator.get_buffer_state(1))
+    assert.is_nil(read_service.get_buffer_state(1))
   end)
 
   -- -------------------------------------------------------------------------
@@ -436,14 +462,28 @@ async_tests.describe("parley.orchestrator refresh", function()
     local s = setup({ pr = SAMPLE_PR, discussions = {} })
 
     -- Simulate an in-flight call.
-    orchestrator._in_flight[1] = true
+    read_service._in_flight[1] = true
 
-    orchestrator.refresh(1)
+    read_service.refresh(1)
 
     assert.equals(0, #s.provider.calls.detect_pr)
     assert.equals(0, #s.render_calls)
 
-    orchestrator._in_flight[1] = nil
+    read_service._in_flight[1] = nil
+  end)
+
+  async_tests.it("queues a forced rerun when force=true arrives during an in-flight refresh", function()
+    local s = setup({ pr = SAMPLE_PR, discussions = {} })
+
+    read_service._in_flight[1] = true
+
+    read_service.refresh(1, { force = true })
+
+    assert.is_true(read_service._pending_force[1])
+    assert.equals(0, #s.provider.calls.detect_pr)
+
+    read_service._in_flight[1] = nil
+    read_service._pending_force[1] = nil
   end)
 
   -- -------------------------------------------------------------------------
@@ -456,7 +496,7 @@ async_tests.describe("parley.orchestrator refresh", function()
       pr = SAMPLE_PR,
     })
 
-    orchestrator.refresh(1)
+    read_service.refresh(1)
 
     assert.equals(0, #s.render_calls)
     assert.equals(0, #s.clear_calls)
@@ -469,7 +509,7 @@ async_tests.describe("parley.orchestrator refresh", function()
       pr = SAMPLE_PR,
     })
 
-    orchestrator.refresh(1)
+    read_service.refresh(1)
 
     assert.equals(0, #s.render_calls)
     assert.equals(0, #s.clear_calls)
@@ -482,7 +522,7 @@ async_tests.describe("parley.orchestrator refresh", function()
       pr = SAMPLE_PR,
     })
 
-    orchestrator.refresh(1)
+    read_service.refresh(1)
 
     assert.equals(0, #s.render_calls)
     assert.equals(0, #s.clear_calls)
@@ -495,7 +535,7 @@ async_tests.describe("parley.orchestrator refresh", function()
       pr = SAMPLE_PR,
     })
 
-    orchestrator.refresh(1)
+    read_service.refresh(1)
 
     assert.equals(0, #s.render_calls)
     assert.equals(0, #s.provider.calls.detect_pr)
@@ -512,7 +552,7 @@ async_tests.describe("parley.orchestrator refresh", function()
       pr = SAMPLE_PR,
     })
 
-    orchestrator.refresh(1)
+    read_service.refresh(1)
 
     assert.equals(0, #s.provider.calls.detect_pr)
   end)
@@ -522,7 +562,7 @@ end)
 -- refresh_async — sync wrapper
 -- ---------------------------------------------------------------------------
 
-describe("parley.orchestrator refresh_async", function()
+describe("parley.services.read refresh_async", function()
   before_each(function()
     save_seams()
   end)
@@ -535,7 +575,7 @@ describe("parley.orchestrator refresh_async", function()
   it("invokes refresh inside an async coroutine", function()
     local s = setup({ pr = SAMPLE_PR, discussions = {} })
 
-    orchestrator.refresh_async(1)
+    read_service.refresh_async(1)
     -- async.run schedules; let plenary's scheduler drain.
     -- A tiny vim.wait suffices because all our seams are synchronous.
     vim.wait(50, function()

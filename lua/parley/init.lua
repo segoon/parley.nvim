@@ -3,7 +3,7 @@
 
 local cache = require("parley.cache")
 local nav = require("parley.nav")
-local orchestrator = require("parley.orchestrator")
+local read_service = require("parley.services.read")
 local registry = require("parley.registry")
 local signs = require("parley.signs")
 
@@ -66,7 +66,7 @@ M.config = nil
 
 --- @type table<string, string[]>
 local PARLEY_GROUPS = {
-  discussion = { "open", "close", "toggle" },
+  discussion = { "open", "close", "toggle", "new", "reply" },
   nav = { "next", "prev" },
 }
 
@@ -117,7 +117,9 @@ end
 --- Dispatch parsed `:Parley` arguments for `bufnr`.
 --- @param fargs string[]
 --- @param bufnr integer
-function M._dispatch_parley(fargs, bufnr)
+--- @param cmd_opts? table
+function M._dispatch_parley(fargs, bufnr, cmd_opts)
+  cmd_opts = cmd_opts or {}
   local group = fargs[1]
   local action = fargs[2]
 
@@ -127,6 +129,9 @@ function M._dispatch_parley(fargs, bufnr)
 
   if group == "discussion" then
     local discussion_window = require("parley.discussion_window")
+    if action == nil or action == "" then
+      error("parley: expected a discussion action", 0)
+    end
     if action == "open" then
       discussion_window.open_current_line(bufnr)
       return
@@ -139,11 +144,26 @@ function M._dispatch_parley(fargs, bufnr)
       discussion_window.toggle_current_line(bufnr)
       return
     end
+    if action == "new" then
+      require("parley.services.write").open_new_comment_input(discussion_window.resolve_source_bufnr(bufnr), {
+        range = cmd_opts.range,
+        line1 = cmd_opts.line1,
+        line2 = cmd_opts.line2,
+      })
+      return
+    end
+    if action == "reply" then
+      discussion_window.reply_current_line(bufnr)
+      return
+    end
     error("parley: unknown discussion action: " .. tostring(action), 0)
   end
 
   if group == "nav" then
     local nav_mod = require("parley.nav")
+    if action == nil or action == "" then
+      error("parley: expected a nav action", 0)
+    end
     if action == "next" then
       nav_mod.next(bufnr)
       return
@@ -206,7 +226,7 @@ function M.setup(opts)
     end, { desc = "Jump to previous Parley comment" })
   end
 
-  -- BufEnter triggers a refresh; the orchestrator's classify step decides
+  -- BufEnter triggers a refresh; the read service's classify step decides
   -- whether the buffer actually warrants a fetch (regular file in a VCS repo
   -- whose remote matches a registered provider).
   local augroup = vim.api.nvim_create_augroup("parley", { clear = true })
@@ -216,15 +236,16 @@ function M.setup(opts)
   vim.api.nvim_create_autocmd("BufEnter", {
     group = augroup,
     callback = function(args)
-      orchestrator.refresh_async(args.buf)
+      read_service.refresh_async(args.buf, { notify_errors = false })
     end,
     desc = "Parley: refresh PR discussions on buffer enter",
   })
 
   vim.api.nvim_create_user_command("Parley", function(cmd_opts)
-    M._dispatch_parley(cmd_opts.fargs, vim.api.nvim_get_current_buf())
+    M._dispatch_parley(cmd_opts.fargs, vim.api.nvim_get_current_buf(), cmd_opts)
   end, {
     nargs = "*",
+    range = true,
     complete = function(arg_lead, cmd_line, _cursor_pos)
       return M._complete_parley(arg_lead, cmd_line)
     end,
@@ -232,7 +253,7 @@ function M.setup(opts)
   })
 
   vim.api.nvim_create_user_command("ParleyRefresh", function()
-    orchestrator.refresh_async(vim.api.nvim_get_current_buf(), { force = true })
+    read_service.refresh_async(vim.api.nvim_get_current_buf(), { force = true })
   end, { desc = "Re-fetch PR discussions for the current buffer" })
 
   vim.api.nvim_create_autocmd("BufWipeout", {
@@ -240,7 +261,7 @@ function M.setup(opts)
     callback = function(args)
       local discussion_window = require("parley.discussion_window")
       discussion_window.close(args.buf)
-      orchestrator.clear_buffer_state(args.buf)
+      read_service.clear_buffer_state(args.buf)
     end,
     desc = "Parley: clean up discussion state on buffer wipeout",
   })

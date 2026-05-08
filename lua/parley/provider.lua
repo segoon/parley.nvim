@@ -22,6 +22,7 @@ local M = {}
 --- always invoke methods from within a plenary async context.
 ---
 --- @class parley.Provider
+--- @alias parley.LineRange integer|[integer, integer]
 ---
 --- Return the authentication token for API calls.
 --- @field auth fun(self: parley.Provider): string
@@ -33,14 +34,15 @@ local M = {}
 --- Fetch all discussions for a PR.
 --- @field fetch_discussions fun(self: parley.Provider, pr: parley.PR): parley.Discussion[]
 ---
---- Post a new top-level comment anchored to a file/line.
+--- Post a new top-level comment anchored to a file/line or line range.
 --- Returns the newly created Comment.
---- @field post_comment fun(self: parley.Provider, pr: parley.PR, file: string, line: integer,
+--- @field post_top_level_comment fun(self: parley.Provider, pr: parley.PR, file: string, line: parley.LineRange,
 ---   body: parley.Body): parley.Comment
 ---
 --- Post a reply to an existing discussion.
 --- Returns the newly created Comment.
---- @field reply fun(self: parley.Provider, pr: parley.PR, discussion_id: string, body: parley.Body): parley.Comment
+--- @field reply fun(self: parley.Provider, pr: parley.PR, discussion_id: string,
+---   parent_comment_id: string, body: parley.Body): parley.Comment
 ---
 --- Mark a discussion as resolved.
 --- @field resolve fun(self: parley.Provider, pr: parley.PR, discussion_id: string)
@@ -72,7 +74,7 @@ M.METHOD_NAMES = {
   "auth",
   "detect_pr",
   "fetch_discussions",
-  "post_comment",
+  "post_top_level_comment",
   "reply",
   "resolve",
   "unresolve",

@@ -82,6 +82,26 @@ local function deep_copy(t)
   return copy
 end
 
+--- Normalize a provider line/range value.
+--- @param line parley.LineRange
+--- @return integer, integer|nil
+local function normalize_line(line)
+  if type(line) == "number" then
+    assert(line > 0, "line must be > 0")
+    return line, nil
+  end
+
+  assert(type(line) == "table", "line must be an integer or { start, end } range")
+  assert(#line == 2, "line range must contain exactly two integers")
+  local first = assert(tonumber(line[1]), "line range start must be a number")
+  local second = assert(tonumber(line[2]), "line range end must be a number")
+  assert(first > 0 and second > 0, "line range values must be > 0")
+  if first <= second then
+    return first, second
+  end
+  return second, first
+end
+
 -- ---------------------------------------------------------------------------
 -- Constructor
 -- ---------------------------------------------------------------------------
@@ -193,18 +213,20 @@ function M.new(opts)
   end
 
   --------------------------------------------------------------------------
-  -- post_comment
+  -- post_top_level_comment
   --------------------------------------------------------------------------
 
   ---@param self table
   ---@param pr parley.PR
   ---@param file string
-  ---@param line integer
+  ---@param line parley.LineRange
   ---@param body parley.Body
   ---@return parley.Comment
-  function mock:post_comment(pr, file, line, body)
-    check_error(self, "post_comment")
-    table.insert(self.calls.post_comment, { pr = pr, file = file, line = line, body = body })
+  function mock:post_top_level_comment(pr, file, line, body)
+    check_error(self, "post_top_level_comment")
+    table.insert(self.calls.post_top_level_comment, { pr = pr, file = file, line = deep_copy(line), body = body })
+
+    local start_line, end_line = normalize_line(line)
 
     local comment_id = next_id(self)
     local comment = model.new_comment({
@@ -220,12 +242,45 @@ function M.new(opts)
     local discussion = model.new_discussion({
       id = discussion_id,
       file = file,
-      line = line,
+      line = start_line,
+      end_line = end_line,
       comments = { comment },
     })
 
     table.insert(self.state.discussions, discussion)
     return deep_copy(comment)
+  end
+
+  ---@param self table
+  ---@param pr parley.PR
+  ---@param file string
+  ---@param line parley.LineRange
+  ---@param body parley.Body
+  ---@param callback fun(result: { ok: boolean, comment?: parley.Comment, err?: string, cancelled?: boolean }): nil
+  ---@return { cancel: fun(): nil }
+  function mock:begin_post_top_level_comment(pr, file, line, body, callback)
+    local cancelled = false
+    vim.schedule(function()
+      if cancelled then
+        callback({ ok = false, cancelled = true })
+        return
+      end
+
+      local ok, result = pcall(function()
+        return self:post_top_level_comment(pr, file, line, body)
+      end)
+      if ok then
+        callback({ ok = true, comment = result })
+      else
+        callback({ ok = false, err = tostring(result) })
+      end
+    end)
+
+    return {
+      cancel = function()
+        cancelled = true
+      end,
+    }
   end
 
   --------------------------------------------------------------------------
@@ -235,19 +290,25 @@ function M.new(opts)
   ---@param self table
   ---@param pr parley.PR
   ---@param discussion_id string
+  ---@param parent_comment_id string
   ---@param body parley.Body
   ---@return parley.Comment
-  function mock:reply(pr, discussion_id, body)
+  function mock:reply(pr, discussion_id, parent_comment_id, body)
     check_error(self, "reply")
-    table.insert(self.calls.reply, { pr = pr, discussion_id = discussion_id, body = body })
+    table.insert(
+      self.calls.reply,
+      { pr = pr, discussion_id = discussion_id, parent_comment_id = parent_comment_id, body = body }
+    )
 
     local discussion = find_discussion(self.state.discussions, discussion_id)
     if not discussion then
       error("discussion not found: " .. discussion_id, 2)
     end
 
-    -- The reply's parent is the first (root) comment of the discussion.
-    local root_id = discussion.comments[1] and discussion.comments[1].id or nil
+    local parent = find_comment({ discussion }, parent_comment_id)
+    if not parent then
+      error("parent comment not found: " .. parent_comment_id, 2)
+    end
 
     local comment_id = next_id(self)
     local comment = model.new_comment({
@@ -257,11 +318,43 @@ function M.new(opts)
       created_at = "2024-01-01T00:00:00Z",
       updated_at = "2024-01-01T00:00:00Z",
       is_own = true,
-      parent_comment_id = root_id,
+      parent_comment_id = parent_comment_id,
     })
 
     table.insert(discussion.comments, comment)
     return deep_copy(comment)
+  end
+
+  ---@param self table
+  ---@param pr parley.PR
+  ---@param discussion_id string
+  ---@param parent_comment_id string
+  ---@param body parley.Body
+  ---@param callback fun(result: { ok: boolean, comment?: parley.Comment, err?: string, cancelled?: boolean }): nil
+  ---@return { cancel: fun(): nil }
+  function mock:begin_reply(pr, discussion_id, parent_comment_id, body, callback)
+    local cancelled = false
+    vim.schedule(function()
+      if cancelled then
+        callback({ ok = false, cancelled = true })
+        return
+      end
+
+      local ok, result = pcall(function()
+        return self:reply(pr, discussion_id, parent_comment_id, body)
+      end)
+      if ok then
+        callback({ ok = true, comment = result })
+      else
+        callback({ ok = false, err = tostring(result) })
+      end
+    end)
+
+    return {
+      cancel = function()
+        cancelled = true
+      end,
+    }
   end
 
   --------------------------------------------------------------------------

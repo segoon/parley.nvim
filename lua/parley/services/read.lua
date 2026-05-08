@@ -1,4 +1,4 @@
---- parley.orchestrator — End-to-end refresh of PR signs for a buffer.
+--- parley.services.read — Read-side refresh pipeline for a buffer.
 ---
 --- Glue layer that wires together every Step 1–12 module so opening a file
 --- in a checked-out PR branch causes real GitHub discussions to appear as
@@ -38,12 +38,19 @@ local M = {}
 --- @type table<integer, true>
 M._in_flight = {}
 
+--- Buffered force-refresh requests that arrived while a refresh was already in flight.
+--- @type table<integer, true>
+M._pending_force = {}
+
 --- Latest per-buffer discussion snapshot, used by the discussion window.
 --- @type table<integer, {
 ---   discussions: parley.Discussion[],
 ---   mappings: table<string, parley.anchor.Mapping>,
 ---   pr: parley.PR|nil,
 ---   head_sha: string,
+---   provider: parley.Provider|nil,
+---   vcs_info: parley.VcsInfo|nil,
+---   rel_path: string|nil,
 --- }>
 M._buffer_state = {}
 
@@ -112,7 +119,9 @@ end
 --- @param head_sha     string
 --- @param file_discs   parley.Discussion[]
 --- @param render_opts  { signs: parley.SignsConfig, virtual_text: parley.VirtualTextConfig }
-local function map_and_render(bufnr, root, head_sha, file_discs, render_opts)
+--- @param state_opts?  { provider?: parley.Provider, vcs_info?: parley.VcsInfo, rel_path?: string, pr?: parley.PR }
+local function map_and_render(bufnr, root, head_sha, file_discs, render_opts, state_opts)
+  state_opts = state_opts or {}
   if #file_discs == 0 then
     M._buffer_state[bufnr] = nil
     signs.clear(bufnr)
@@ -122,8 +131,11 @@ local function map_and_render(bufnr, root, head_sha, file_discs, render_opts)
   M._buffer_state[bufnr] = {
     discussions = file_discs,
     mappings = mappings,
-    pr = nil,
+    pr = state_opts.pr,
     head_sha = head_sha,
+    provider = state_opts.provider,
+    vcs_info = state_opts.vcs_info,
+    rel_path = state_opts.rel_path,
   }
   signs.render(bufnr, file_discs, mappings, render_opts)
 end
@@ -156,6 +168,9 @@ end
 ---   mappings: table<string, parley.anchor.Mapping>,
 ---   pr: parley.PR|nil,
 ---   head_sha: string,
+---   provider: parley.Provider|nil,
+---   vcs_info: parley.VcsInfo|nil,
+---   rel_path: string|nil,
 --- }|nil
 function M.get_buffer_state(bufnr)
   return M._buffer_state[bufnr]
@@ -167,17 +182,32 @@ function M.clear_buffer_state(bufnr)
   M._buffer_state[bufnr] = nil
 end
 
+--- Return whether another forced refresh is queued for `bufnr`.
+--- Clears the queued flag when present.
+--- @param bufnr integer
+--- @return boolean
+local function consume_pending_force(bufnr)
+  if not M._pending_force[bufnr] then
+    return false
+  end
+  M._pending_force[bufnr] = nil
+  return true
+end
+
 --- Refresh signs for `bufnr` from the configured provider.
 ---
 --- Must be called inside a plenary.async coroutine.  Use M.refresh_async
 --- from sync call sites (autocmds, user commands).
 ---
 --- @param bufnr integer
---- @param opts? { force?: boolean }  force=true bypasses the stale render shortcut
+--- @param opts? { force?: boolean, notify_errors?: boolean }  force=true bypasses the stale render shortcut
 function M.refresh(bufnr, opts)
   opts = opts or {}
 
   if M._in_flight[bufnr] then
+    if opts.force then
+      M._pending_force[bufnr] = true
+    end
     return
   end
 
@@ -226,7 +256,10 @@ function M.refresh(bufnr, opts)
         local stale_head_sha = pr_entry.data.head_sha or ""
         local file_discs = filter_for_file(disc_entry.data, rel_path)
         if stale_head_sha ~= "" then
-          pcall(map_and_render, bufnr, ctx.vcs_info.root, stale_head_sha, file_discs, render_opts)
+          pcall(map_and_render, bufnr, ctx.vcs_info.root, stale_head_sha, file_discs, render_opts, {
+            vcs_info = ctx.vcs_info,
+            rel_path = rel_path,
+          })
         end
       end
     end
@@ -257,23 +290,28 @@ function M.refresh(bufnr, opts)
     cache.set(discussions_cache_key(provider_opts, pr.id), discussions)
 
     local file_discs = filter_for_file(discussions, rel_path)
-    map_and_render(bufnr, ctx.vcs_info.root, head_sha, file_discs, render_opts)
-    local state = M._buffer_state[bufnr]
-    if state then
-      state.pr = pr
-    end
+    map_and_render(bufnr, ctx.vcs_info.root, head_sha, file_discs, render_opts, {
+      pr = pr,
+      provider = provider,
+      vcs_info = ctx.vcs_info,
+      rel_path = rel_path,
+    })
   end)
   M._in_flight[bufnr] = nil
 
-  if not ok then
+  if not ok and opts.notify_errors ~= false then
     M._notify("parley: refresh failed: " .. tostring(err), vim.log.levels.WARN)
+  end
+
+  if consume_pending_force(bufnr) then
+    return M.refresh(bufnr, { force = true })
   end
 end
 
 --- Sync-callable wrapper around M.refresh.  Use from autocmds / user commands.
 ---
 --- @param bufnr integer
---- @param opts? { force?: boolean }
+--- @param opts? { force?: boolean, notify_errors?: boolean }
 function M.refresh_async(bufnr, opts)
   async.run(function()
     M.refresh(bufnr, opts)

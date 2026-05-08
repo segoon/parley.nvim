@@ -585,10 +585,10 @@ async_tests.describe("parley.providers.github.provider — fetch_discussions", f
 end)
 
 -- ---------------------------------------------------------------------------
--- Suite: post_comment
+-- Suite: post_top_level_comment
 -- ---------------------------------------------------------------------------
 
-async_tests.describe("parley.providers.github.provider — post_comment", function()
+async_tests.describe("parley.providers.github.provider — post_top_level_comment", function()
   --- Helper: provider with pr already cached.
   local function primed_provider(runner_fn)
     local p = make_provider(runner_fn)
@@ -602,7 +602,7 @@ async_tests.describe("parley.providers.github.provider — post_comment", functi
     end)
     local p = primed_provider(runner.fn)
     local body = model.new_body({ text = "hello", format = "markdown" })
-    p:post_comment(SAMPLE_PR, "src/foo.lua", 15, body)
+    p:post_top_level_comment(SAMPLE_PR, "src/foo.lua", 15, body)
 
     local cmd = runner._calls[1]
     -- Must contain --method POST
@@ -624,7 +624,7 @@ async_tests.describe("parley.providers.github.provider — post_comment", functi
     })
     local p = primed_provider(runner.fn)
     local body = model.new_body({ text = "New comment", format = "markdown" })
-    local comment = p:post_comment(SAMPLE_PR, "src/foo.lua", 15, body)
+    local comment = p:post_top_level_comment(SAMPLE_PR, "src/foo.lua", 15, body)
 
     assert.equals("3001", comment.id)
     assert.equals("alice", comment.author)
@@ -636,8 +636,21 @@ async_tests.describe("parley.providers.github.provider — post_comment", functi
     local p = make_provider(runner.fn)
     local body = model.new_body({ text = "x", format = "markdown" })
     assert.has_error(function()
-      p:post_comment(SAMPLE_PR, "src/foo.lua", 1, body)
+      p:post_top_level_comment(SAMPLE_PR, "src/foo.lua", 1, body)
     end)
+  end)
+
+  async_tests.it("sends start_line and line for ranges", function()
+    local runner = make_runner(function(_cmd)
+      return ok(POST_COMMENT_RESP_JSON)
+    end)
+    local p = primed_provider(runner.fn)
+    local body = model.new_body({ text = "hello", format = "markdown" })
+    p:post_top_level_comment(SAMPLE_PR, "src/foo.lua", { 12, 18 }, body)
+
+    local cmd = runner._calls[1]
+    assert.is_not_nil(vim.tbl_contains(cmd, "start_line=12"))
+    assert.is_not_nil(vim.tbl_contains(cmd, "line=18"))
   end)
 end)
 
@@ -646,19 +659,19 @@ end)
 -- ---------------------------------------------------------------------------
 
 async_tests.describe("parley.providers.github.provider — reply", function()
-  async_tests.it("sends in_reply_to equal to the discussion_id", function()
+  async_tests.it("sends in_reply_to equal to the explicit parent_comment_id", function()
     local runner = make_runner(function(_cmd)
       return ok(POST_COMMENT_RESP_JSON)
     end)
     local p = make_provider(runner.fn)
     p._pr_cache["42"] = { head_sha = "abc123def456", number = 42 }
     local body = model.new_body({ text = "reply text", format = "markdown" })
-    p:reply(SAMPLE_PR, "1001", body)
+    p:reply(SAMPLE_PR, "1001", "1002", body)
 
     local cmd = runner._calls[1]
     local has_reply_to = false
     for i, v in ipairs(cmd) do
-      if (v == "-F" or v == "-f") and cmd[i + 1] and cmd[i + 1]:find("in_reply_to=1001", 1, true) then
+      if (v == "-F" or v == "-f") and cmd[i + 1] and cmd[i + 1]:find("in_reply_to=1002", 1, true) then
         has_reply_to = true
         break
       end
@@ -673,7 +686,7 @@ async_tests.describe("parley.providers.github.provider — reply", function()
     local p = make_provider(runner.fn)
     p._pr_cache["42"] = { head_sha = "abc123def456", number = 42 }
     local body = model.new_body({ text = "reply", format = "markdown" })
-    local comment = p:reply(SAMPLE_PR, "1001", body)
+    local comment = p:reply(SAMPLE_PR, "1001", "1002", body)
     assert.equals("3001", comment.id)
   end)
 end)

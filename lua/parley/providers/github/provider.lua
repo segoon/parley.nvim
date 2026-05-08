@@ -37,6 +37,7 @@ local M = {}
 --- @field _repo         string
 --- @field _api_base     string
 --- @field _runner       fun(cmd: string[]): {code: integer, stdout: string, stderr: string}
+--- @field _spawn        fun(cmd: string[], callback: fun(result: {code: integer, stdout: string, stderr: string})): vim.SystemObj|nil
 --- @field _auth         table
 --- @field _pr_cache     table<string, parley.github.PrCache>
 --- @field _viewer_login string|nil
@@ -145,6 +146,64 @@ local function map_rest_comment(raw, viewer)
   })
 end
 
+--- Normalize a line/range value into start/end lines.
+--- @param line parley.LineRange
+--- @return integer, integer|nil
+local function normalize_line(line)
+  if type(line) == "number" then
+    assert(line > 0, "parley.github: line must be > 0")
+    return line, nil
+  end
+
+  assert(type(line) == "table", "parley.github: line must be an integer or { start, end } range")
+  assert(#line == 2, "parley.github: line range must contain exactly two integers")
+
+  local first = assert(tonumber(line[1]), "parley.github: line range start must be a number")
+  local second = assert(tonumber(line[2]), "parley.github: line range end must be a number")
+  assert(first > 0 and second > 0, "parley.github: line range values must be > 0")
+
+  if first <= second then
+    return first, second
+  end
+  return second, first
+end
+
+--- Build form fields for a top-level comment anchor.
+--- @param file string
+--- @param line parley.LineRange
+--- @param body parley.Body
+--- @param commit_id string
+--- @return string[]
+local function build_top_level_fields(file, line, body, commit_id)
+  local start_line, end_line = normalize_line(line)
+  local fields = {
+    "-f",
+    "body=" .. body.text,
+    "-f",
+    "commit_id=" .. commit_id,
+    "-f",
+    "path=" .. file,
+    "-f",
+    "side=RIGHT",
+  }
+
+  if end_line and end_line ~= start_line then
+    fields[#fields + 1] = "-F"
+    fields[#fields + 1] = "start_line=" .. tostring(start_line)
+    fields[#fields + 1] = "-f"
+    fields[#fields + 1] = "start_side=RIGHT"
+    fields[#fields + 1] = "-F"
+    fields[#fields + 1] = "line=" .. tostring(end_line)
+  else
+    fields[#fields + 1] = "-F"
+    fields[#fields + 1] = "line=" .. tostring(start_line)
+    fields[#fields + 1] = "-f"
+    fields[#fields + 1] = "subject_type=line"
+  end
+
+  return fields
+end
+
 --- Group a flat list of REST review comments into parley.Discussion[].
 ---
 --- Grouping rules:
@@ -230,6 +289,63 @@ local function gh_run(self, cmd)
   return decoded
 end
 
+--- Start a cancellable gh CLI request.
+--- @param self parley.github.Provider
+--- @param cmd string[]
+--- @param callback fun(result: { ok: boolean, data?: table, err?: string, cancelled?: boolean }): nil
+--- @return { cancel: fun(): nil }
+local function gh_start(self, cmd, callback)
+  local completed = false
+  local cancelled = false
+  local handle = self._spawn(cmd, function(result)
+    if completed then
+      return
+    end
+    completed = true
+
+    if cancelled then
+      callback({ ok = false, cancelled = true })
+      return
+    end
+
+    if result.code ~= 0 then
+      callback({
+        ok = false,
+        err = string.format("parley.github: gh command failed (exit %d): %s", result.code, result.stderr or ""),
+      })
+      return
+    end
+
+    local stdout = result.stdout or ""
+    if stdout == "" then
+      callback({ ok = true, data = nil })
+      return
+    end
+
+    local ok_decode, decoded = pcall(vim.json.decode, stdout)
+    if not ok_decode then
+      callback({ ok = false, err = string.format("parley.github: failed to decode JSON response: %s", stdout) })
+      return
+    end
+
+    callback({ ok = true, data = decoded })
+  end)
+
+  return {
+    cancel = function()
+      if completed or cancelled then
+        return
+      end
+      cancelled = true
+      if handle and handle.kill then
+        pcall(function()
+          handle:kill(15)
+        end)
+      end
+    end,
+  }
+end
+
 --- Build the base REST path prefix for this repo.
 --- @param self parley.github.Provider
 --- @return string  e.g. "/repos/owner/repo"
@@ -264,12 +380,21 @@ function M.new(opts)
     end)
   end, 2)
 
+  local default_spawn = function(cmd, callback)
+    return vim.system(cmd, { text = true }, function(result)
+      vim.schedule(function()
+        callback({ code = result.code, stdout = result.stdout or "", stderr = result.stderr or "" })
+      end)
+    end)
+  end
+
   local self = setmetatable({
     _host = host,
     _owner = opts.owner,
     _repo = opts.repo,
     _api_base = opts.api_base or api_base_for_host(host),
     _runner = opts._runner or default_runner,
+    _spawn = opts._spawn or default_spawn,
     _auth = opts._auth or require("parley.providers.github.auth"),
     _pr_cache = {},
     _viewer_login = nil,
@@ -372,33 +497,43 @@ end
 --- @param self parley.github.Provider
 --- @param pr   parley.PR
 --- @param file string
---- @param line integer
+--- @param line parley.LineRange
 --- @param body parley.Body
 --- @return parley.Comment
-function GitHubProvider:post_comment(pr, file, line, body)
+function GitHubProvider:post_top_level_comment(pr, file, line, body)
   local cached = self._pr_cache[pr.id]
-  assert(cached, "parley.github: detect_pr must be called before post_comment (pr not in cache)")
+  assert(cached, "parley.github: detect_pr must be called before post_top_level_comment (pr not in cache)")
 
   local url = repo_path(self) .. "/pulls/" .. cached.number .. "/comments"
-  local raw = gh_run(self, {
-    "gh",
-    "api",
-    "--method",
-    "POST",
-    url,
-    "-f",
-    "body=" .. body.text,
-    "-f",
-    "commit_id=" .. cached.head_sha,
-    "-f",
-    "path=" .. file,
-    "-F",
-    "line=" .. tostring(line),
-    "-f",
-    "subject_type=line",
-  })
+  local cmd = { "gh", "api", "--method", "POST", url }
+  vim.list_extend(cmd, build_top_level_fields(file, line, body, cached.head_sha))
+  local raw = gh_run(self, cmd)
 
   return map_rest_comment(raw, self._viewer_login or "")
+end
+
+--- Start a cancellable top-level comment request.
+--- @param self parley.github.Provider
+--- @param pr parley.PR
+--- @param file string
+--- @param line parley.LineRange
+--- @param body parley.Body
+--- @param callback fun(result: { ok: boolean, comment?: parley.Comment, err?: string, cancelled?: boolean }): nil
+--- @return { cancel: fun(): nil }
+function GitHubProvider:begin_post_top_level_comment(pr, file, line, body, callback)
+  local cached = self._pr_cache[pr.id]
+  assert(cached, "parley.github: detect_pr must be called before post_top_level_comment (pr not in cache)")
+
+  local url = repo_path(self) .. "/pulls/" .. cached.number .. "/comments"
+  local cmd = { "gh", "api", "--method", "POST", url }
+  vim.list_extend(cmd, build_top_level_fields(file, line, body, cached.head_sha))
+  return gh_start(self, cmd, function(result)
+    if not result.ok then
+      callback(result)
+      return
+    end
+    callback({ ok = true, comment = map_rest_comment(result.data, self._viewer_login or "") })
+  end)
 end
 
 --- Post a reply to an existing discussion.
@@ -407,13 +542,15 @@ end
 --- @param self          parley.github.Provider
 --- @param pr            parley.PR
 --- @param discussion_id string  Root comment database id
+--- @param parent_comment_id string
 --- @param body          parley.Body
 --- @return parley.Comment
-function GitHubProvider:reply(pr, discussion_id, body)
+function GitHubProvider:reply(pr, discussion_id, parent_comment_id, body)
   local cached = self._pr_cache[pr.id]
   assert(cached, "parley.github: detect_pr must be called before reply (pr not in cache)")
 
   local url = repo_path(self) .. "/pulls/" .. cached.number .. "/comments"
+  local _ = discussion_id
   local raw = gh_run(self, {
     "gh",
     "api",
@@ -425,10 +562,45 @@ function GitHubProvider:reply(pr, discussion_id, body)
     "-f",
     "commit_id=" .. cached.head_sha,
     "-F",
-    "in_reply_to=" .. discussion_id,
+    "in_reply_to=" .. parent_comment_id,
   })
 
   return map_rest_comment(raw, self._viewer_login or "")
+end
+
+--- Start a cancellable reply request.
+--- @param self parley.github.Provider
+--- @param pr parley.PR
+--- @param discussion_id string
+--- @param parent_comment_id string
+--- @param body parley.Body
+--- @param callback fun(result: { ok: boolean, comment?: parley.Comment, err?: string, cancelled?: boolean }): nil
+--- @return { cancel: fun(): nil }
+function GitHubProvider:begin_reply(pr, discussion_id, parent_comment_id, body, callback)
+  local cached = self._pr_cache[pr.id]
+  assert(cached, "parley.github: detect_pr must be called before reply (pr not in cache)")
+
+  local url = repo_path(self) .. "/pulls/" .. cached.number .. "/comments"
+  local _ = discussion_id
+  return gh_start(self, {
+    "gh",
+    "api",
+    "--method",
+    "POST",
+    url,
+    "-f",
+    "body=" .. body.text,
+    "-f",
+    "commit_id=" .. cached.head_sha,
+    "-F",
+    "in_reply_to=" .. parent_comment_id,
+  }, function(result)
+    if not result.ok then
+      callback(result)
+      return
+    end
+    callback({ ok = true, comment = map_rest_comment(result.data, self._viewer_login or "") })
+  end)
 end
 
 --- Resolve a discussion thread.

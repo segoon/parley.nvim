@@ -4,7 +4,7 @@
 --- current cursor line. The content is written as Markdown so users with
 --- render-markdown.nvim installed get rich rendering automatically.
 
-local orchestrator = require("parley.orchestrator")
+local read_service = require("parley.services.read")
 
 local M = {}
 
@@ -318,6 +318,8 @@ local function resolve_source_bufnr(bufnr)
   return bufnr
 end
 
+M.resolve_source_bufnr = resolve_source_bufnr
+
 --- @param src_bufnr integer
 --- @param instance {
 ---   bufnr: integer,
@@ -342,6 +344,10 @@ local function write_lines(src_bufnr, instance, lines)
   vim.keymap.set("n", "q", function()
     M.close(src_bufnr)
   end, { buffer = instance.bufnr, silent = true, nowait = true, desc = "Close Parley discussion" })
+
+  vim.keymap.set("n", "r", function()
+    M.reply_current_line(src_bufnr)
+  end, { buffer = instance.bufnr, silent = true, nowait = true, desc = "Reply in Parley discussion" })
 
   vim.api.nvim_create_autocmd("WinLeave", {
     buffer = instance.bufnr,
@@ -418,7 +424,7 @@ end
 --- @param bufnr integer
 --- @return boolean  true when a window was opened or updated
 function M.open_current_line(bufnr)
-  local state = orchestrator.get_buffer_state(bufnr)
+  local state = read_service.get_buffer_state(bufnr)
   local cursor_line = vim.api.nvim_win_get_cursor(0)[1]
 
   if not state then
@@ -443,6 +449,51 @@ function M.open_current_line(bufnr)
   local lines = render_lines(discussions, state.mappings)
   local instance = ensure_instance(bufnr, lines, float_cfg)
   write_lines(bufnr, instance, lines)
+  return true
+end
+
+--- Return the first discussion for the current source buffer line.
+--- @param bufnr integer
+--- @return parley.Discussion|nil
+function M.current_discussion(bufnr)
+  bufnr = resolve_source_bufnr(bufnr)
+  local state = read_service.get_buffer_state(bufnr)
+  if not state then
+    return nil
+  end
+
+  local source_winid = vim.api.nvim_get_current_win()
+  local instance = live_instance(bufnr)
+  if
+    instance
+    and instance.bufnr == vim.api.nvim_get_current_buf()
+    and vim.api.nvim_win_is_valid(instance.source_winid)
+  then
+    source_winid = instance.source_winid
+  end
+  local cursor_line = vim.api.nvim_win_get_cursor(source_winid)[1]
+  local discussions = discussions_for_line(state, cursor_line)
+  return discussions[1]
+end
+
+--- Open the reply input for the first discussion on the current line.
+--- @param bufnr integer
+--- @return boolean
+function M.reply_current_line(bufnr)
+  bufnr = resolve_source_bufnr(bufnr)
+  local discussion = M.current_discussion(bufnr)
+  if not discussion then
+    M._notify("No Parley discussions on this line", vim.log.levels.INFO)
+    return false
+  end
+
+  local parent = discussion.comments[#discussion.comments]
+  if not parent then
+    M._notify("Cannot reply to an empty Parley discussion", vim.log.levels.WARN)
+    return false
+  end
+
+  require("parley.services.write").open_reply_input(bufnr, discussion.id, parent.id)
   return true
 end
 
