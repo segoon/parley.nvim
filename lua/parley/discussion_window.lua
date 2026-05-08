@@ -51,9 +51,22 @@ local REACTION_EMOJI = {
   eyes = "👀",
 }
 
+local REACTION_CHOICES = {
+  { reaction = "+1", emoji = "👍", label = "+1" },
+  { reaction = "-1", emoji = "👎", label = "-1" },
+  { reaction = "laugh", emoji = "😄", label = "laugh" },
+  { reaction = "confused", emoji = "😕", label = "confused" },
+  { reaction = "heart", emoji = "❤️", label = "heart" },
+  { reaction = "hooray", emoji = "🎉", label = "hooray" },
+  { reaction = "rocket", emoji = "🚀", label = "rocket" },
+  { reaction = "eyes", emoji = "👀", label = "eyes" },
+}
+
 --- Active window instances keyed by source buffer number.
 ---@type table<integer, parley.DiscussionWindowInstance>
 M._instances = {}
+
+local live_instance
 
 --- Notify hook; replace in tests.
 --- @type fun(msg: string, level: integer)
@@ -89,6 +102,17 @@ end
 --- @type fun(fmt: string, value: string): integer|nil
 M._strptime = function(fmt, value)
   return vim.fn.strptime(fmt, value)
+end
+
+--- Reaction picker hook; replace in tests.
+--- @type fun(items: table[], on_choice: fun(item: table|nil): nil): nil
+M._select_reaction = function(items, on_choice)
+  vim.ui.select(items, {
+    prompt = "Add reaction",
+    format_item = function(item)
+      return string.format("%s %s", item.emoji, item.label)
+    end,
+  }, on_choice)
 end
 
 --- @param text string
@@ -321,6 +345,75 @@ local function highlight_parent_comment(instance, comment_id)
 end
 
 --- @param instance table
+--- @param line integer
+--- @return string|nil
+local function comment_id_for_line(instance, line)
+  local next_comment_id = nil
+  local last_comment_id = nil
+  for comment_id, range in pairs(instance.comment_ranges) do
+    if line >= range.start_line and line <= range.end_line then
+      return comment_id
+    end
+    if range.start_line > line then
+      if next_comment_id == nil or range.start_line < instance.comment_ranges[next_comment_id].start_line then
+        next_comment_id = comment_id
+      end
+    elseif last_comment_id == nil or range.end_line > instance.comment_ranges[last_comment_id].end_line then
+      last_comment_id = comment_id
+    end
+  end
+  return next_comment_id or last_comment_id
+end
+
+--- @param source_bufnr integer
+--- @return parley.Discussion|nil, parley.Comment|nil, integer|nil
+local function current_selection(source_bufnr)
+  local instance = live_instance(source_bufnr)
+  local discussion = M.current_discussion(source_bufnr)
+  if not instance or not discussion then
+    return discussion, nil, nil
+  end
+
+  local cursor = vim.api.nvim_win_get_cursor(instance.winid)
+  local comment_id = comment_id_for_line(instance, cursor[1])
+  if not comment_id then
+    return discussion, nil, cursor[1]
+  end
+
+  for _, comment in ipairs(discussion.comments) do
+    if comment.id == comment_id then
+      return discussion, comment, cursor[1]
+    end
+  end
+  return discussion, nil, cursor[1]
+end
+
+--- @param source_bufnr integer
+local function sync_selected_comment(source_bufnr)
+  local instance = live_instance(source_bufnr)
+  local discussion, comment = current_selection(source_bufnr)
+  if not instance then
+    return
+  end
+
+  clear_parent_highlight(instance)
+  if not discussion or not comment then
+    discussion_ui_state.patch(source_bufnr, { selected_comment_id = nil })
+    return
+  end
+
+  local range = instance.comment_ranges[comment.id]
+  if range then
+    vim.api.nvim_buf_set_extmark(instance.bufnr, HIGHLIGHT_NS, range.start_line - 1, 0, {
+      end_row = range.end_line,
+      hl_group = "Visual",
+      hl_eol = true,
+    })
+  end
+  discussion_ui_state.patch(source_bufnr, { selected_comment_id = comment.id })
+end
+
+--- @param instance table
 local function focus_discussion(instance)
   if vim.api.nvim_win_is_valid(instance.winid) then
     vim.api.nvim_set_current_win(instance.winid)
@@ -390,6 +483,7 @@ local function hide_input(instance, force)
     vim.api.nvim_buf_set_lines(instance.input_bufnr, 0, -1, false, {})
   end
   focus_discussion(instance)
+  sync_selected_comment(source_bufnr)
   return true
 end
 
@@ -440,6 +534,18 @@ local function setup_input_keymaps(src_bufnr, instance)
       end)
     end,
     desc = "Parley: protect embedded draft window",
+  })
+end
+
+--- @param src_bufnr integer
+--- @param instance parley.DiscussionWindowInstance
+local function setup_discussion_autocmds(src_bufnr, instance)
+  vim.api.nvim_create_autocmd("CursorMoved", {
+    buffer = instance.bufnr,
+    callback = function()
+      sync_selected_comment(src_bufnr)
+    end,
+    desc = "Parley: highlight selected discussion comment",
   })
 end
 
@@ -610,7 +716,7 @@ end
 
 --- @param bufnr integer
 --- @return table|nil
-local function live_instance(bufnr)
+live_instance = function(bufnr)
   local instance = M._instances[bufnr]
   if not instance then
     return nil
@@ -662,6 +768,15 @@ local function write_lines(src_bufnr, instance, lines)
   vim.keymap.set("n", "r", function()
     M.reply_current_line(src_bufnr)
   end, { buffer = instance.bufnr, silent = true, nowait = true, desc = "Reply in Parley discussion" })
+  vim.keymap.set("n", "R", function()
+    M.react_current_comment(src_bufnr)
+  end, { buffer = instance.bufnr, silent = true, nowait = true, desc = "React to Parley comment" })
+  vim.keymap.set("n", "e", function()
+    M.edit_current_comment(src_bufnr)
+  end, { buffer = instance.bufnr, silent = true, nowait = true, desc = "Edit Parley comment" })
+  vim.keymap.set("n", "d", function()
+    M.delete_current_comment(src_bufnr)
+  end, { buffer = instance.bufnr, silent = true, nowait = true, desc = "Delete Parley comment" })
 end
 
 --- @param bufnr integer
@@ -694,6 +809,7 @@ local function ensure_instance(bufnr, lines, float_cfg, source_winid, source_lin
   instance = create_instance(lines, float_cfg, source_winid, source_line)
   instance.source_bufnr = bufnr
   M._instances[bufnr] = instance
+  setup_discussion_autocmds(bufnr, instance)
   return instance
 end
 
@@ -785,8 +901,10 @@ function M.open_current_line(bufnr, opts)
     current_discussion_id = discussions[1].id,
     current_source_line = cursor_line,
     highlighted_parent_comment_id = nil,
+    selected_comment_id = nil,
     input_visible = instance.input_state ~= "hidden",
   })
+  sync_selected_comment(bufnr)
   return true
 end
 
@@ -808,6 +926,15 @@ function M.current_discussion(bufnr)
   return nil
 end
 
+--- Return the currently selected comment for the discussion float.
+--- @param bufnr integer
+--- @return parley.Comment|nil
+function M.current_comment(bufnr)
+  bufnr = resolve_source_bufnr(bufnr)
+  local _, comment = current_selection(bufnr)
+  return comment
+end
+
 --- Open the reply input for the first discussion on the current line.
 --- @param bufnr integer
 --- @return boolean
@@ -826,6 +953,75 @@ function M.reply_current_line(bufnr)
   end
 
   require("parley.services.write").open_reply_input(bufnr, discussion.id, parent.id)
+  return true
+end
+
+--- React to the currently selected comment.
+--- @param bufnr integer
+--- @return boolean
+function M.react_current_comment(bufnr)
+  bufnr = resolve_source_bufnr(bufnr)
+  local ui_state = discussion_ui_state.get(bufnr)
+  local discussion, comment = current_selection(bufnr)
+  if not discussion or not comment then
+    M._notify("Open a Parley discussion before reacting", vim.log.levels.INFO)
+    return false
+  end
+
+  M._select_reaction(REACTION_CHOICES, function(item)
+    if not item then
+      return
+    end
+    require("parley.services.write").react_comment(
+      bufnr,
+      ui_state and ui_state.current_source_line or nil,
+      comment.id,
+      item.reaction
+    )
+  end)
+  return true
+end
+
+--- Edit the currently selected comment.
+--- @param bufnr integer
+--- @return boolean
+function M.edit_current_comment(bufnr)
+  bufnr = resolve_source_bufnr(bufnr)
+  local discussion, comment = current_selection(bufnr)
+  if not discussion or not comment then
+    M._notify("Open a Parley discussion before editing", vim.log.levels.INFO)
+    return false
+  end
+  if not comment.is_own then
+    M._notify("You can only edit your own Parley comments", vim.log.levels.WARN)
+    return false
+  end
+
+  require("parley.services.write").open_edit_input(bufnr, discussion.id, comment.id, comment.body.text)
+  return true
+end
+
+--- Delete the currently selected comment.
+--- @param bufnr integer
+--- @return boolean
+function M.delete_current_comment(bufnr)
+  bufnr = resolve_source_bufnr(bufnr)
+  local ui_state = discussion_ui_state.get(bufnr)
+  local discussion, comment = current_selection(bufnr)
+  if not discussion or not comment then
+    M._notify("Open a Parley discussion before deleting", vim.log.levels.INFO)
+    return false
+  end
+  if not comment.is_own then
+    M._notify("You can only delete your own Parley comments", vim.log.levels.WARN)
+    return false
+  end
+
+  local ok =
+    require("parley.services.write").delete_comment(bufnr, ui_state and ui_state.current_source_line or nil, comment.id)
+  if ok == false then
+    return false
+  end
   return true
 end
 
@@ -877,6 +1073,7 @@ function M.show_new_comment_input(bufnr, opts)
         current_discussion_id = discussions[1].id,
         current_source_line = opts.cursor_line,
         highlighted_parent_comment_id = nil,
+        selected_comment_id = nil,
         input_visible = false,
       })
     else
@@ -890,6 +1087,7 @@ function M.show_new_comment_input(bufnr, opts)
         current_discussion_id = nil,
         current_source_line = opts.cursor_line,
         highlighted_parent_comment_id = nil,
+        selected_comment_id = nil,
         input_visible = false,
       })
     end

@@ -35,6 +35,11 @@ M._get_config = function()
   return require("parley").config
 end
 
+--- @type fun(msg: string): boolean
+M._confirm_delete = function(msg)
+  return vim.fn.confirm(msg, "&Delete\n&Keep", 2) == 1
+end
+
 M._next_progress_id = 0
 
 --- @param bufnr integer
@@ -164,6 +169,56 @@ local function finish_progress(progress, bufnr, state, message)
   M._defer(function()
     progress_ui_state.remove(progress.id)
   end, progress_timeout(state))
+end
+
+--- @param bufnr integer
+--- @param cursor_line integer|nil
+--- @param starter fun(callback: fun(result: { ok: boolean, err?: string, cancelled?: boolean }): nil): { cancel: fun(): nil }
+--- @param progress_texts { running: string, refreshing: string, success: string, failed: string, cancelled: string }
+--- @return boolean
+local function run_action(bufnr, cursor_line, starter, progress_texts)
+  if M._operations[bufnr] ~= nil then
+    M._notify("Parley request already in progress for this buffer", vim.log.levels.WARN)
+    return false
+  end
+
+  local operation
+  local progress = start_progress(bufnr, progress_texts.running)
+  local request = starter(function(result)
+    if M._operations[bufnr] ~= operation then
+      return
+    end
+
+    M._operations[bufnr] = nil
+
+    if result.cancelled then
+      finish_progress(progress, bufnr, "cancelled", progress_texts.cancelled)
+      refresh_after_write(bufnr, function() end)
+      return
+    end
+
+    if not result.ok then
+      finish_progress(progress, bufnr, "failed", progress_texts.failed)
+      M._notify(result.err or "parley: request failed", vim.log.levels.WARN)
+      return
+    end
+
+    update_progress(progress, bufnr, "running", progress_texts.refreshing)
+    refresh_after_write(bufnr, function()
+      finish_progress(progress, bufnr, "success", progress_texts.success)
+      if vim.api.nvim_buf_is_valid(bufnr) then
+        local discussion_window = require("parley.discussion_window")
+        pcall(discussion_window.open_current_line, bufnr, { cursor_line = cursor_line })
+      end
+    end)
+  end)
+
+  operation = {
+    cancel = request.cancel,
+    progress = progress,
+  }
+  M._operations[bufnr] = operation
+  return true
 end
 
 --- @param bufnr integer
@@ -366,6 +421,157 @@ function M.open_reply_input(bufnr, discussion_id, parent_comment_id)
         { cursor_line = target_line }
       )
     end,
+  })
+end
+
+--- Open an input window for editing an existing comment.
+--- @param bufnr integer
+--- @param discussion_id string
+--- @param comment_id string
+--- @param initial_text string
+function M.open_edit_input(bufnr, discussion_id, comment_id, initial_text)
+  assert(type(comment_id) == "string" and comment_id ~= "", "parley: comment_id is required")
+  assert(type(initial_text) == "string", "parley: initial_text must be a string")
+  local provider, pr = resolve_write_context(bufnr)
+  local review_snapshot = review_repository.get(bufnr)
+  local target_line = review_snapshot
+      and review_snapshot.mappings
+      and review_snapshot.mappings[discussion_id]
+      and review_snapshot.mappings[discussion_id].local_line
+    or nil
+  composer_ui_state.set(bufnr, {
+    mode = "edit",
+    visible = true,
+    submit_state = "idle",
+    target_discussion_id = discussion_id,
+    target_comment_id = comment_id,
+    draft = initial_text,
+  })
+
+  require("parley.discussion_window").show_reply_input(bufnr, {
+    parent_comment_id = comment_id,
+    initial_text = initial_text,
+    status = "Editing comment. Press <C-s> to save, or <Esc>s in normal mode. q closes.",
+    on_submit = function(instance, text)
+      local body = model.new_body({ text = text, format = "markdown" })
+      return run_submit(
+        bufnr,
+        instance,
+        function(callback)
+          local cancelled = false
+          async.run(function()
+            local ok, result = pcall(function()
+              return provider:edit(pr, comment_id, body)
+            end)
+            vim.schedule(function()
+              if cancelled then
+                callback({ ok = false, cancelled = true })
+              elseif ok then
+                callback({ ok = true, comment = result })
+              else
+                callback({ ok = false, err = tostring(result) })
+              end
+            end)
+          end)
+          return {
+            cancel = function()
+              cancelled = true
+            end,
+          }
+        end,
+        "Saving edit... Press C to cancel request.",
+        {
+          running = "Saving edit",
+          refreshing = "Refreshing discussion",
+          success = "Comment updated",
+          failed = "Edit failed",
+          cancelled = "Edit cancelled",
+        },
+        { cursor_line = target_line }
+      )
+    end,
+  })
+end
+
+--- Toggle a reaction on an existing comment and refresh the discussion.
+--- @param bufnr integer
+--- @param cursor_line integer|nil
+--- @param comment_id string
+--- @param reaction string
+--- @return boolean
+function M.react_comment(bufnr, cursor_line, comment_id, reaction)
+  assert(type(comment_id) == "string" and comment_id ~= "", "parley: comment_id is required")
+  assert(type(reaction) == "string" and reaction ~= "", "parley: reaction is required")
+  local provider, pr = resolve_write_context(bufnr)
+  return run_action(bufnr, cursor_line, function(callback)
+    local cancelled = false
+    async.run(function()
+      local ok, result = pcall(function()
+        provider:react(pr, comment_id, reaction)
+      end)
+      vim.schedule(function()
+        if cancelled then
+          callback({ ok = false, cancelled = true })
+        elseif ok then
+          callback({ ok = true })
+        else
+          callback({ ok = false, err = tostring(result) })
+        end
+      end)
+    end)
+    return {
+      cancel = function()
+        cancelled = true
+      end,
+    }
+  end, {
+    running = "Updating reaction",
+    refreshing = "Refreshing discussion",
+    success = "Reaction updated",
+    failed = "Reaction failed",
+    cancelled = "Reaction cancelled",
+  })
+end
+
+--- Delete an existing comment and refresh the discussion.
+--- @param bufnr integer
+--- @param cursor_line integer|nil
+--- @param comment_id string
+--- @return boolean
+function M.delete_comment(bufnr, cursor_line, comment_id)
+  assert(type(comment_id) == "string" and comment_id ~= "", "parley: comment_id is required")
+  if not M._confirm_delete("Delete this comment permanently? This cannot be undone.") then
+    return false
+  end
+
+  local provider, pr = resolve_write_context(bufnr)
+  return run_action(bufnr, cursor_line, function(callback)
+    local cancelled = false
+    async.run(function()
+      local ok, result = pcall(function()
+        provider:delete(pr, comment_id)
+      end)
+      vim.schedule(function()
+        if cancelled then
+          callback({ ok = false, cancelled = true })
+        elseif ok then
+          callback({ ok = true })
+        else
+          callback({ ok = false, err = tostring(result) })
+        end
+      end)
+    end)
+    return {
+      cancel = function()
+        cancelled = true
+      end,
+    }
+  end, {
+    running = "Deleting comment",
+    refreshing = "Refreshing discussion",
+    success = "Comment deleted",
+    failed = "Delete failed",
+    cancelled = "Delete cancelled",
   })
 end
 

@@ -30,6 +30,7 @@ local function save_seams()
   saved.defer = write_service._defer
   saved.now = write_service._now
   saved.get_config = write_service._get_config
+  saved.confirm_delete = write_service._confirm_delete
   saved.discussion = package.loaded["parley.discussion_window"]
 end
 
@@ -41,6 +42,7 @@ local function restore_seams()
   write_service._defer = saved.defer
   write_service._now = saved.now
   write_service._get_config = saved.get_config
+  write_service._confirm_delete = saved.confirm_delete
   package.loaded["parley.discussion_window"] = saved.discussion
 end
 
@@ -85,6 +87,9 @@ describe("parley.services.write", function()
         },
       }
     end
+    write_service._confirm_delete = function(_msg)
+      return true
+    end
   end)
 
   after_each(function()
@@ -95,6 +100,30 @@ describe("parley.services.write", function()
     review_repository._entries = {}
     progress_ui_state.clear()
   end)
+
+  local function seed_context(provider, discussions, mappings)
+    context_repository._entries[1] = {
+      kind = "regular",
+      bufnr = 1,
+      path = "/repo/src/foo.lua",
+      vcs_info = { vcs = "git", root = "/repo", branch = "feature", remote_url = "git@github.com:owner/repo.git" },
+      rel_path = "src/foo.lua",
+      status = "ready",
+    }
+    provider_repository._entries[1] = {
+      status = "ready",
+      provider = provider,
+      opts = { owner = "owner", repo = "repo", host = "github.com" },
+    }
+    review_repository._entries[1] = {
+      status = "ready",
+      stale = false,
+      discussions = discussions or {},
+      mappings = mappings or {},
+      pr = SAMPLE_PR,
+      head_sha = "deadbeef",
+    }
+  end
 
   it("posts a top-level comment with a normalized range and forces a refresh", function()
     local provider = mock_provider.new({ pr = SAMPLE_PR })
@@ -316,5 +345,151 @@ describe("parley.services.write", function()
       write_service.open_reply_input(1, "d1", "c2")
     end)
     assert.is_true(ok, err)
+  end)
+
+  it("reacts to a comment and refreshes the discussion", function()
+    local comment = model.new_comment({
+      id = "c1",
+      author = "alice",
+      body = model.new_body({ text = "root", format = "markdown" }),
+      created_at = "2024-01-01T00:00:00Z",
+      updated_at = "2024-01-01T00:00:00Z",
+      reactions = {},
+    })
+    local provider = mock_provider.new({
+      pr = SAMPLE_PR,
+      discussions = {
+        model.new_discussion({ id = "d1", file = "src/foo.lua", line = 10, comments = { comment } }),
+      },
+    })
+    local refresh_calls = {}
+    local invalidate_calls = {}
+    package.loaded["parley.discussion_window"] = {
+      open_current_line = function() end,
+    }
+    seed_context(provider)
+    review_repository.invalidate = function(bufnr, opts)
+      invalidate_calls[#invalidate_calls + 1] = { bufnr = bufnr, opts = opts }
+    end
+    review_repository.refresh = function(bufnr, opts)
+      refresh_calls[#refresh_calls + 1] = { bufnr = bufnr, opts = opts }
+    end
+
+    write_service.react_comment(1, 10, "c1", "+1")
+
+    assert.is_true(vim.wait(500, function()
+      return #provider.calls.react == 1 and #refresh_calls == 1
+    end))
+    assert.equals("c1", provider.calls.react[1].comment_id)
+    assert.equals("+1", provider.calls.react[1].reaction)
+    assert.same({ bufnr = 1, opts = { preserve_snapshot = true } }, invalidate_calls[1])
+    assert.same({ bufnr = 1, opts = { force = true } }, refresh_calls[1])
+  end)
+
+  it("opens edit input prefilled with the current comment body and submits edits", function()
+    local comment = model.new_comment({
+      id = "c1",
+      author = "alice",
+      body = model.new_body({ text = "old body", format = "markdown" }),
+      created_at = "2024-01-01T00:00:00Z",
+      updated_at = "2024-01-01T00:00:00Z",
+      is_own = true,
+    })
+    local provider = mock_provider.new({
+      pr = SAMPLE_PR,
+      discussions = {
+        model.new_discussion({ id = "d1", file = "src/foo.lua", line = 10, comments = { comment } }),
+      },
+    })
+    local opened
+    seed_context(provider, {
+      model.new_discussion({ id = "d1", file = "src/foo.lua", line = 10, comments = { comment } }),
+    }, {
+      d1 = { local_line = 10, stale = false, confidence = 1.0 },
+    })
+    package.loaded["parley.discussion_window"] = {
+      show_reply_input = function(_bufnr, opts)
+        opened = { opts = opts, instance = fake_instance(101) }
+        return opened.instance
+      end,
+      open_current_line = function() end,
+    }
+    review_repository.invalidate = function(_bufnr, _opts) end
+    review_repository.refresh = function(_bufnr, _opts) end
+
+    write_service.open_edit_input(1, "d1", "c1", "old body")
+    assert.equals("old body", opened.opts.initial_text)
+    opened.opts.on_submit(opened.instance, "new body")
+
+    assert.is_true(vim.wait(500, function()
+      return #provider.calls.edit == 1
+    end))
+    assert.equals("c1", provider.calls.edit[1].comment_id)
+    assert.equals("new body", provider.calls.edit[1].body.text)
+  end)
+
+  it("asks for delete confirmation before deleting a comment", function()
+    local comment = model.new_comment({
+      id = "c1",
+      author = "alice",
+      body = model.new_body({ text = "root", format = "markdown" }),
+      created_at = "2024-01-01T00:00:00Z",
+      updated_at = "2024-01-01T00:00:00Z",
+      is_own = true,
+    })
+    local provider = mock_provider.new({
+      pr = SAMPLE_PR,
+      discussions = {
+        model.new_discussion({ id = "d1", file = "src/foo.lua", line = 10, comments = { comment } }),
+      },
+    })
+    local confirmed = {}
+    package.loaded["parley.discussion_window"] = {
+      open_current_line = function() end,
+    }
+    seed_context(provider)
+    write_service._confirm_delete = function(msg)
+      confirmed[#confirmed + 1] = msg
+      return true
+    end
+    review_repository.invalidate = function(_bufnr, _opts) end
+    review_repository.refresh = function(_bufnr, _opts) end
+
+    write_service.delete_comment(1, 10, "c1")
+
+    assert.is_true(vim.wait(500, function()
+      return #provider.calls.delete == 1
+    end))
+    assert.equals(1, #confirmed)
+    assert.equals("c1", provider.calls.delete[1].comment_id)
+  end)
+
+  it("does not delete when the user cancels confirmation", function()
+    local comment = model.new_comment({
+      id = "c1",
+      author = "alice",
+      body = model.new_body({ text = "root", format = "markdown" }),
+      created_at = "2024-01-01T00:00:00Z",
+      updated_at = "2024-01-01T00:00:00Z",
+      is_own = true,
+    })
+    local provider = mock_provider.new({
+      pr = SAMPLE_PR,
+      discussions = {
+        model.new_discussion({ id = "d1", file = "src/foo.lua", line = 10, comments = { comment } }),
+      },
+    })
+    package.loaded["parley.discussion_window"] = {
+      open_current_line = function() end,
+    }
+    seed_context(provider)
+    write_service._confirm_delete = function(_msg)
+      return false
+    end
+
+    local ok = write_service.delete_comment(1, 10, "c1")
+
+    assert.is_false(ok)
+    assert.equals(0, #provider.calls.delete)
   end)
 end)

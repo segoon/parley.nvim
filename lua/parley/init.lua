@@ -105,10 +105,11 @@ M.config = nil
 --- @type table<string, string[]>
 local PARLEY_GROUPS = {
   discussion = { "open", "close", "toggle", "new", "reply" },
+  comment = { "react", "edit", "delete" },
   nav = { "next", "prev" },
 }
 
-local PARLEY_GROUP_NAMES = { "discussion", "nav" }
+local PARLEY_GROUP_NAMES = { "discussion", "comment", "nav" }
 
 --- @param items string[]
 --- @param prefix string
@@ -211,6 +212,26 @@ function M._dispatch_parley(fargs, bufnr, cmd_opts)
       return
     end
     error("parley: unknown nav action: " .. tostring(action), 0)
+  end
+
+  if group == "comment" then
+    local discussion_window = require("parley.discussion_window")
+    if action == nil or action == "" then
+      error("parley: expected a comment action", 0)
+    end
+    if action == "react" then
+      discussion_window.react_current_comment(bufnr)
+      return
+    end
+    if action == "edit" then
+      discussion_window.edit_current_comment(bufnr)
+      return
+    end
+    if action == "delete" then
+      discussion_window.delete_current_comment(bufnr)
+      return
+    end
+    error("parley: unknown comment action: " .. tostring(action), 0)
   end
 
   error("parley: unknown command group: " .. tostring(group), 0)

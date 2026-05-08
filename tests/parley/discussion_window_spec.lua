@@ -34,6 +34,7 @@ local function make_comment(opts)
     created_at = opts.created_at or "2024-01-01T10:00:00Z",
     updated_at = opts.updated_at or "2024-01-01T10:00:00Z",
     reactions = opts.reactions or {},
+    is_own = opts.is_own or false,
     parent_comment_id = opts.parent_comment_id,
   })
 end
@@ -63,6 +64,8 @@ local function save_seams()
   saved.date = discussion_window._date
   saved.strptime = discussion_window._strptime
   saved.confirm_discard = discussion_window._confirm_discard
+  saved.select = discussion_window._select_reaction
+  saved.write = package.loaded["parley.services.write"]
 end
 
 local function restore_seams()
@@ -72,6 +75,8 @@ local function restore_seams()
   discussion_window._date = saved.date
   discussion_window._strptime = saved.strptime
   discussion_window._confirm_discard = saved.confirm_discard
+  discussion_window._select_reaction = saved.select
+  package.loaded["parley.services.write"] = saved.write
 end
 
 describe("parley.discussion_window", function()
@@ -109,6 +114,9 @@ describe("parley.discussion_window", function()
         return values[epoch]
       end
       error("unexpected date format in test: " .. tostring(fmt))
+    end
+    discussion_window._select_reaction = function(_items, on_choice)
+      on_choice(nil)
     end
     for bufnr in pairs(discussion_window._instances) do
       discussion_window.close(bufnr)
@@ -338,6 +346,173 @@ describe("parley.discussion_window", function()
       {}
     )
     assert.is_true(#highlights >= 1)
+  end)
+
+  it("tracks and highlights the comment under the float cursor", function()
+    local bufnr = scratch(10)
+    vim.api.nvim_win_set_cursor(0, { 3, 0 })
+
+    review_repository._entries[bufnr] = {
+      status = "ready",
+      stale = false,
+      discussions = {
+        make_discussion({
+          line = 3,
+          comments = {
+            make_comment({ id = "c1", text = "Parent comment" }),
+            make_comment({ id = "c2", text = "Child comment", parent_comment_id = "c1" }),
+          },
+        }),
+      },
+      mappings = {
+        d1 = { local_line = 3, stale = false, confidence = 1.0 },
+      },
+    }
+
+    discussion_window.open_current_line(bufnr)
+    local instance = discussion_window._instances[bufnr]
+    vim.api.nvim_win_set_cursor(instance.winid, { 1, 0 })
+    vim.api.nvim_exec_autocmds("CursorMoved", { modeline = false })
+
+    assert.equals("c1", discussion_window.current_comment(bufnr).id)
+    assert.equals("c1", discussion_ui_state.get(bufnr).selected_comment_id)
+
+    vim.api.nvim_win_set_cursor(instance.winid, { 5, 0 })
+    vim.api.nvim_exec_autocmds("CursorMoved", { modeline = false })
+
+    assert.equals("c2", discussion_window.current_comment(bufnr).id)
+    assert.equals("c2", discussion_ui_state.get(bufnr).selected_comment_id)
+  end)
+
+  it("reacts to the selected comment from the float", function()
+    local bufnr = scratch(10)
+    vim.api.nvim_win_set_cursor(0, { 3, 0 })
+    local calls = {}
+
+    review_repository._entries[bufnr] = {
+      status = "ready",
+      stale = false,
+      discussions = {
+        make_discussion({
+          line = 3,
+          comments = {
+            make_comment({ id = "c1", text = "Parent comment" }),
+          },
+        }),
+      },
+      mappings = {
+        d1 = { local_line = 3, stale = false, confidence = 1.0 },
+      },
+    }
+    package.loaded["parley.services.write"] = {
+      react_comment = function(src_bufnr, cursor_line, comment_id, reaction)
+        calls[#calls + 1] =
+          { bufnr = src_bufnr, cursor_line = cursor_line, comment_id = comment_id, reaction = reaction }
+      end,
+    }
+    discussion_window._select_reaction = function(_items, on_choice)
+      on_choice({ reaction = "heart" })
+    end
+
+    discussion_window.open_current_line(bufnr)
+    assert.is_true(discussion_window.react_current_comment(bufnr))
+    assert.same({ { bufnr = bufnr, cursor_line = 3, comment_id = "c1", reaction = "heart" } }, calls)
+  end)
+
+  it("opens edit for the selected own comment", function()
+    local bufnr = scratch(10)
+    vim.api.nvim_win_set_cursor(0, { 3, 0 })
+    local calls = {}
+
+    review_repository._entries[bufnr] = {
+      status = "ready",
+      stale = false,
+      discussions = {
+        make_discussion({
+          line = 3,
+          comments = {
+            make_comment({ id = "c1", text = "Editable", is_own = true }),
+          },
+        }),
+      },
+      mappings = {
+        d1 = { local_line = 3, stale = false, confidence = 1.0 },
+      },
+    }
+    package.loaded["parley.services.write"] = {
+      open_edit_input = function(src_bufnr, discussion_id, comment_id, text)
+        calls[#calls + 1] = { bufnr = src_bufnr, discussion_id = discussion_id, comment_id = comment_id, text = text }
+      end,
+    }
+
+    discussion_window.open_current_line(bufnr)
+    assert.is_true(discussion_window.edit_current_comment(bufnr))
+    assert.same({ { bufnr = bufnr, discussion_id = "d1", comment_id = "c1", text = "Editable" } }, calls)
+  end)
+
+  it("requires ownership before editing or deleting", function()
+    local bufnr = scratch(10)
+    vim.api.nvim_win_set_cursor(0, { 3, 0 })
+
+    review_repository._entries[bufnr] = {
+      status = "ready",
+      stale = false,
+      discussions = {
+        make_discussion({
+          line = 3,
+          comments = {
+            make_comment({ id = "c1", text = "Not yours", is_own = false }),
+          },
+        }),
+      },
+      mappings = {
+        d1 = { local_line = 3, stale = false, confidence = 1.0 },
+      },
+    }
+    package.loaded["parley.services.write"] = {
+      open_edit_input = function()
+        error("should not edit")
+      end,
+      delete_comment = function()
+        error("should not delete")
+      end,
+    }
+
+    discussion_window.open_current_line(bufnr)
+    assert.is_false(discussion_window.edit_current_comment(bufnr))
+    assert.is_false(discussion_window.delete_current_comment(bufnr))
+    assert.equals(2, #notify_calls)
+  end)
+
+  it("deletes the selected own comment through the write service", function()
+    local bufnr = scratch(10)
+    vim.api.nvim_win_set_cursor(0, { 3, 0 })
+    local calls = {}
+
+    review_repository._entries[bufnr] = {
+      status = "ready",
+      stale = false,
+      discussions = {
+        make_discussion({
+          line = 3,
+          comments = {
+            make_comment({ id = "c1", text = "Delete me", is_own = true }),
+          },
+        }),
+      },
+      mappings = {
+        d1 = { local_line = 3, stale = false, confidence = 1.0 },
+      },
+    }
+    package.loaded["parley.services.write"] = {
+      delete_comment = function(src_bufnr, cursor_line, comment_id)
+        calls[#calls + 1] = { bufnr = src_bufnr, cursor_line = cursor_line, comment_id = comment_id }
+      end,
+    }
+
+    discussion_window.open_current_line(bufnr)
+    assert.is_true(discussion_window.delete_current_comment(bufnr))
+    assert.same({ { bufnr = bufnr, cursor_line = 3, comment_id = "c1" } }, calls)
   end)
 
   it("submits through the composer handle instead of the raw window instance", function()

@@ -10,12 +10,17 @@ local progress_popup = require("parley.progress_popup")
 describe("parley command completion", function()
   it("returns top-level groups for the first argument", function()
     local items = parley._complete_parley("", ":Parley ")
-    assert.same({ "discussion", "nav" }, items)
+    assert.same({ "discussion", "comment", "nav" }, items)
   end)
 
   it("returns discussion actions for the second argument", function()
     local items = parley._complete_parley("", ":Parley discussion ")
     assert.same({ "open", "close", "toggle", "new", "reply" }, items)
+  end)
+
+  it("returns comment actions for the second argument", function()
+    local items = parley._complete_parley("", ":Parley comment ")
+    assert.same({ "react", "edit", "delete" }, items)
   end)
 
   it("returns nav actions for the second argument", function()
@@ -102,7 +107,7 @@ describe("parley command dispatch", function()
     package.loaded["parley.services.write"] = saved_write
   end)
 
-  it("dispatches discussion open/close/toggle/new/reply", function()
+  it("dispatches discussion and comment actions", function()
     local calls = {}
     package.loaded["parley.discussion_window"] = {
       resolve_source_bufnr = function(bufnr)
@@ -121,6 +126,15 @@ describe("parley command dispatch", function()
       reply_current_line = function(bufnr)
         calls[#calls + 1] = { action = "reply", bufnr = bufnr }
       end,
+      react_current_comment = function(bufnr)
+        calls[#calls + 1] = { action = "react", bufnr = bufnr }
+      end,
+      edit_current_comment = function(bufnr)
+        calls[#calls + 1] = { action = "edit", bufnr = bufnr }
+      end,
+      delete_current_comment = function(bufnr)
+        calls[#calls + 1] = { action = "delete", bufnr = bufnr }
+      end,
     }
     package.loaded["parley.services.write"] = {
       open_new_comment_input = function(bufnr, opts)
@@ -133,6 +147,9 @@ describe("parley command dispatch", function()
     parley._dispatch_parley({ "discussion", "toggle" }, 13)
     parley._dispatch_parley({ "discussion", "new" }, 14, { range = 2, line1 = 3, line2 = 5 })
     parley._dispatch_parley({ "discussion", "reply" }, 15)
+    parley._dispatch_parley({ "comment", "react" }, 16)
+    parley._dispatch_parley({ "comment", "edit" }, 17)
+    parley._dispatch_parley({ "comment", "delete" }, 18)
 
     assert.same({
       { action = "open", bufnr = 11 },
@@ -141,6 +158,9 @@ describe("parley command dispatch", function()
       { action = "resolve", bufnr = 14 },
       { action = "new", bufnr = 114, opts = { range = 2, line1 = 3, line2 = 5 } },
       { action = "reply", bufnr = 15 },
+      { action = "react", bufnr = 16 },
+      { action = "edit", bufnr = 17 },
+      { action = "delete", bufnr = 18 },
     }, calls)
   end)
 
@@ -180,6 +200,18 @@ describe("parley command dispatch", function()
     assert.has_error(function()
       parley._dispatch_parley({ "discussion" }, 1)
     end, "parley: expected a discussion action")
+  end)
+
+  it("errors on an unknown comment action", function()
+    assert.has_error(function()
+      parley._dispatch_parley({ "comment", "nope" }, 1)
+    end, "parley: unknown comment action: nope")
+  end)
+
+  it("errors when comment action is missing", function()
+    assert.has_error(function()
+      parley._dispatch_parley({ "comment" }, 1)
+    end, "parley: expected a comment action")
   end)
 
   it("errors on an unknown nav action", function()
