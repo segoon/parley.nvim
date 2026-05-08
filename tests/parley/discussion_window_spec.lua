@@ -65,6 +65,7 @@ local function save_seams()
   saved.strptime = discussion_window._strptime
   saved.confirm_discard = discussion_window._confirm_discard
   saved.select = discussion_window._select_reaction
+  saved.reaction_picker_window = package.loaded["parley.reaction_picker_window"]
   saved.write = package.loaded["parley.services.write"]
 end
 
@@ -76,6 +77,7 @@ local function restore_seams()
   discussion_window._strptime = saved.strptime
   discussion_window._confirm_discard = saved.confirm_discard
   discussion_window._select_reaction = saved.select
+  package.loaded["parley.reaction_picker_window"] = saved.reaction_picker_window
   package.loaded["parley.services.write"] = saved.write
 end
 
@@ -417,6 +419,25 @@ describe("parley.discussion_window", function()
     discussion_window.open_current_line(bufnr)
     assert.is_true(discussion_window.react_current_comment(bufnr))
     assert.same({ { bufnr = bufnr, cursor_line = 3, comment_id = "c1", reaction = "heart" } }, calls)
+  end)
+
+  it("uses the reaction picker window by default", function()
+    local calls = {}
+    discussion_window._select_reaction = saved.select
+    package.loaded["parley.reaction_picker_window"] = {
+      open = function(items, opts, on_choice)
+        calls[#calls + 1] = { items = items, opts = opts }
+        on_choice(items[1])
+      end,
+    }
+
+    discussion_window._select_reaction({ { reaction = "+1", emoji = "👍", label = "+1" } }, function(item)
+      calls[#calls + 1] = { selected = item }
+    end)
+
+    assert.equals(2, #calls)
+    assert.same({ reaction = "+1", emoji = "👍", label = "+1" }, calls[2].selected)
+    assert.equals("Add reaction", calls[1].opts.prompt)
   end)
 
   it("opens edit for the selected own comment", function()

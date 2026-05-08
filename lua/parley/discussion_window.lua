@@ -107,11 +107,9 @@ end
 --- Reaction picker hook; replace in tests.
 --- @type fun(items: table[], on_choice: fun(item: table|nil): nil): nil
 M._select_reaction = function(items, on_choice)
-  vim.ui.select(items, {
+  require("parley.reaction_picker_window").open(items, {
     prompt = "Add reaction",
-    format_item = function(item)
-      return string.format("%s %s", item.emoji, item.label)
-    end,
+    source_winid = vim.api.nvim_get_current_win(),
   }, on_choice)
 end
 
@@ -139,6 +137,25 @@ local function reaction_summary(reactions)
     parts[#parts + 1] = string.format("%s%s%s", emoji, count, suffix)
   end
   return table.concat(parts, ", ")
+end
+
+---@param comment parley.Comment
+---@return table[]
+local function reaction_picker_items(comment)
+  local by_type = {}
+  for _, reaction in ipairs(comment.reactions or {}) do
+    by_type[reaction.type] = reaction
+  end
+
+  local items = {}
+  for _, choice in ipairs(REACTION_CHOICES) do
+    local reaction = by_type[choice.reaction]
+    items[#items + 1] = vim.tbl_extend("force", choice, {
+      count = reaction and reaction.count or 0,
+      viewer_reacted = reaction and reaction.viewer_reacted or false,
+    })
+  end
+  return items
 end
 
 --- @param timestamp string
@@ -968,7 +985,7 @@ function M.react_current_comment(bufnr)
     return false
   end
 
-  M._select_reaction(REACTION_CHOICES, function(item)
+  M._select_reaction(reaction_picker_items(comment), function(item)
     if not item then
       return
     end
