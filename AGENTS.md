@@ -16,7 +16,7 @@
 - stylua
 - luacheck
 - luacats annotations (**MANDATORY**)
-- make test
+- make test + make format
 
 **Requirements**
 - `plenary.async`. No synchronous HTTP anywhere.
