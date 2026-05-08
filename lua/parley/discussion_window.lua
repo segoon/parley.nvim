@@ -171,7 +171,8 @@ local function render_discussion(discussion, mapping, out)
 
     local reactions = reaction_summary(comment.reactions)
     if reactions then
-      out[#out + 1] = string.format("%s  Reactions: %s", indent, reactions)
+      out[#out + 1] = string.format("%s  ---", indent)
+      out[#out + 1] = string.format("%s  %s", indent, reactions)
     end
     out[#out + 1] = ""
   end
