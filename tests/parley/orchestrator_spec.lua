@@ -269,6 +269,11 @@ async_tests.describe("parley.orchestrator refresh", function()
     assert.equals(2, #rc.discussions, "should filter out src/bar.lua discussion")
     assert.equals("src/foo.lua", rc.discussions[1].file)
     assert.equals("src/foo.lua", rc.discussions[2].file)
+
+    local state = orchestrator.get_buffer_state(1)
+    assert.is_not_nil(state)
+    assert.equals(2, #state.discussions)
+    assert.equals(10, state.mappings["1"].local_line)
   end)
 
   async_tests.it("calls detect_pr and fetch_discussions on the provider", function()
@@ -289,11 +294,17 @@ async_tests.describe("parley.orchestrator refresh", function()
   async_tests.it("clears signs when detect_pr returns nil (no PR for branch)", function()
     local s = setup({ pr = nil })
 
+    orchestrator._buffer_state[1] = {
+      discussions = { make_discussion(99, "src/foo.lua", 5, "stale") },
+      mappings = { ["99"] = { local_line = 5, stale = false, confidence = 1.0 } },
+    }
+
     orchestrator.refresh(1)
 
     assert.equals(0, #s.render_calls)
     assert.is_true(#s.clear_calls >= 1)
     assert.equals(1, s.clear_calls[#s.clear_calls])
+    assert.is_nil(orchestrator.get_buffer_state(1))
   end)
 
   async_tests.it("removes the cached PR record when detect_pr returns nil", function()
@@ -396,6 +407,25 @@ async_tests.describe("parley.orchestrator refresh", function()
     assert.equals(1, #s.notify_calls)
     assert.equals(vim.log.levels.WARN, s.notify_calls[1].level)
     assert.is_not_nil(s.notify_calls[1].msg:find("parley"))
+    assert.equals("99", orchestrator.get_buffer_state(1).discussions[1].id)
+  end)
+
+  async_tests.it("clears buffer state when the current file has no discussions", function()
+    local s = setup({
+      path = "/repo/src/foo.lua",
+      pr = SAMPLE_PR,
+      discussions = { make_discussion(1, "src/bar.lua", 10, "for bar") },
+    })
+
+    orchestrator._buffer_state[1] = {
+      discussions = { make_discussion(99, "src/foo.lua", 5, "stale") },
+      mappings = { ["99"] = { local_line = 5, stale = false, confidence = 1.0 } },
+    }
+
+    orchestrator.refresh(1)
+
+    assert.equals(1, #s.clear_calls)
+    assert.is_nil(orchestrator.get_buffer_state(1))
   end)
 
   -- -------------------------------------------------------------------------

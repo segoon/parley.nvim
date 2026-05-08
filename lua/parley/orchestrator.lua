@@ -38,6 +38,15 @@ local M = {}
 --- @type table<integer, true>
 M._in_flight = {}
 
+--- Latest per-buffer discussion snapshot, used by the discussion window.
+--- @type table<integer, {
+---   discussions: parley.Discussion[],
+---   mappings: table<string, parley.anchor.Mapping>,
+---   pr: parley.PR|nil,
+---   head_sha: string,
+--- }>
+M._buffer_state = {}
+
 -- ---------------------------------------------------------------------------
 -- Internal helpers
 -- ---------------------------------------------------------------------------
@@ -105,10 +114,17 @@ end
 --- @param render_opts  { signs: parley.SignsConfig, virtual_text: parley.VirtualTextConfig }
 local function map_and_render(bufnr, root, head_sha, file_discs, render_opts)
   if #file_discs == 0 then
+    M._buffer_state[bufnr] = nil
     signs.clear(bufnr)
     return
   end
   local mappings = anchor.map_discussions(root, head_sha, file_discs)
+  M._buffer_state[bufnr] = {
+    discussions = file_discs,
+    mappings = mappings,
+    pr = nil,
+    head_sha = head_sha,
+  }
   signs.render(bufnr, file_discs, mappings, render_opts)
 end
 
@@ -132,6 +148,24 @@ end
 -- ---------------------------------------------------------------------------
 -- Public API
 -- ---------------------------------------------------------------------------
+
+--- Return the latest discussion snapshot for `bufnr`, or nil.
+--- @param bufnr integer
+--- @return {
+---   discussions: parley.Discussion[],
+---   mappings: table<string, parley.anchor.Mapping>,
+---   pr: parley.PR|nil,
+---   head_sha: string,
+--- }|nil
+function M.get_buffer_state(bufnr)
+  return M._buffer_state[bufnr]
+end
+
+--- Clear the latest discussion snapshot for `bufnr`.
+--- @param bufnr integer
+function M.clear_buffer_state(bufnr)
+  M._buffer_state[bufnr] = nil
+end
 
 --- Refresh signs for `bufnr` from the configured provider.
 ---
@@ -205,6 +239,7 @@ function M.refresh(bufnr, opts)
 
     if pr == nil then
       -- No open PR for this branch: silently deactivate.
+      M.clear_buffer_state(bufnr)
       signs.clear(bufnr)
       cache.invalidate(pr_cache_key(provider_opts, branch))
       return
@@ -223,6 +258,10 @@ function M.refresh(bufnr, opts)
 
     local file_discs = filter_for_file(discussions, rel_path)
     map_and_render(bufnr, ctx.vcs_info.root, head_sha, file_discs, render_opts)
+    local state = M._buffer_state[bufnr]
+    if state then
+      state.pr = pr
+    end
   end)
   M._in_flight[bufnr] = nil
 

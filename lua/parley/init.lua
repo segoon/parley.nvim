@@ -64,6 +64,100 @@ local defaults = {
 --- @type parley.Config | nil
 M.config = nil
 
+--- @type table<string, string[]>
+local PARLEY_GROUPS = {
+  discussion = { "open", "close", "toggle" },
+  nav = { "next", "prev" },
+}
+
+local PARLEY_GROUP_NAMES = { "discussion", "nav" }
+
+--- @param items string[]
+--- @param prefix string
+--- @return string[]
+local function filter_prefix(items, prefix)
+  local out = {}
+  for _, item in ipairs(items) do
+    if prefix == "" or vim.startswith(item, prefix) then
+      out[#out + 1] = item
+    end
+  end
+  return out
+end
+
+--- Completion callback for `:Parley`.
+--- @param arg_lead string
+--- @param cmd_line string
+--- @return string[]
+function M._complete_parley(arg_lead, cmd_line)
+  local args = {}
+  for token in cmd_line:gmatch("%S+") do
+    args[#args + 1] = token
+  end
+  if args[1] and args[1]:match("^:?Parley$") then
+    table.remove(args, 1)
+  end
+
+  local trailing_space = cmd_line:match("%s$") ~= nil
+  if #args == 0 then
+    return filter_prefix(PARLEY_GROUP_NAMES, arg_lead)
+  end
+  if #args == 1 then
+    if trailing_space then
+      return PARLEY_GROUPS[args[1]] or {}
+    end
+    return filter_prefix(PARLEY_GROUP_NAMES, arg_lead)
+  end
+  if #args == 2 and not trailing_space then
+    return filter_prefix(PARLEY_GROUPS[args[1]] or {}, arg_lead)
+  end
+  return {}
+end
+
+--- Dispatch parsed `:Parley` arguments for `bufnr`.
+--- @param fargs string[]
+--- @param bufnr integer
+function M._dispatch_parley(fargs, bufnr)
+  local group = fargs[1]
+  local action = fargs[2]
+
+  if group == nil or group == "" then
+    error("parley: expected a command group", 0)
+  end
+
+  if group == "discussion" then
+    local discussion_window = require("parley.discussion_window")
+    if action == "open" then
+      discussion_window.open_current_line(bufnr)
+      return
+    end
+    if action == "close" then
+      discussion_window.close(bufnr)
+      return
+    end
+    if action == "toggle" then
+      discussion_window.toggle_current_line(bufnr)
+      return
+    end
+    error("parley: unknown discussion action: " .. tostring(action), 0)
+  end
+
+  if group == "nav" then
+    local nav_mod = require("parley.nav")
+    if action == "next" then
+      nav_mod.next(bufnr)
+      return
+    end
+    if action == "prev" then
+      nav_mod.prev(bufnr)
+      return
+    end
+    error("parley: unknown nav action: " .. tostring(action), 0)
+  end
+
+  error("parley: unknown command group: " .. tostring(group), 0)
+end
+
 --- Set up parley.nvim.
 ---
 --- Call this once from your Neovim config:
@@ -116,6 +210,9 @@ function M.setup(opts)
   -- whether the buffer actually warrants a fetch (regular file in a VCS repo
   -- whose remote matches a registered provider).
   local augroup = vim.api.nvim_create_augroup("parley", { clear = true })
+  pcall(vim.api.nvim_del_user_command, "Parley")
+  pcall(vim.api.nvim_del_user_command, "ParleyRefresh")
+
   vim.api.nvim_create_autocmd("BufEnter", {
     group = augroup,
     callback = function(args)
@@ -124,12 +221,38 @@ function M.setup(opts)
     desc = "Parley: refresh PR discussions on buffer enter",
   })
 
-  -- :ParleyRefresh — manual re-fetch that bypasses the stale-cache shortcut.
+  vim.api.nvim_create_user_command("Parley", function(cmd_opts)
+    M._dispatch_parley(cmd_opts.fargs, vim.api.nvim_get_current_buf())
+  end, {
+    nargs = "*",
+    complete = function(arg_lead, cmd_line, _cursor_pos)
+      return M._complete_parley(arg_lead, cmd_line)
+    end,
+    desc = "Parley commands",
+  })
+
   vim.api.nvim_create_user_command("ParleyRefresh", function()
     orchestrator.refresh_async(vim.api.nvim_get_current_buf(), { force = true })
   end, { desc = "Re-fetch PR discussions for the current buffer" })
 
-  -- TODO: register statusline component
+  vim.api.nvim_create_autocmd("BufLeave", {
+    group = augroup,
+    callback = function(args)
+      local discussion_window = require("parley.discussion_window")
+      discussion_window.close(args.buf)
+    end,
+    desc = "Parley: close discussion window on buffer leave",
+  })
+
+  vim.api.nvim_create_autocmd("BufWipeout", {
+    group = augroup,
+    callback = function(args)
+      local discussion_window = require("parley.discussion_window")
+      discussion_window.close(args.buf)
+      orchestrator.clear_buffer_state(args.buf)
+    end,
+    desc = "Parley: clean up discussion state on buffer wipeout",
+  })
 end
 
 return M
