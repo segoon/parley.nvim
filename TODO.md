@@ -12,6 +12,7 @@
 - :Telescope discussions|issues|comments? vcs_issues?
 - mark comment as stale (outdated position)
 - ]c, [c for the discussion buffer
+- multiple buffers with different repositories
 
 UI:
 - virtual lines below the commented line, not right to it

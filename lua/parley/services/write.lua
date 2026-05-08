@@ -1,7 +1,6 @@
 --- parley.services.write — Write-side discussion workflows.
 
 local async = require("plenary.async")
-local input_window = require("parley.input_window")
 local model = require("parley.model")
 local read_service = require("parley.services.read")
 
@@ -55,10 +54,10 @@ end
 --- @param instance parley.input_window.Instance
 --- @param callback fun(): nil
 local function close_input(instance, callback)
+  instance.close(true)
   if callback then
     callback()
   end
-  instance.close(true)
 end
 
 --- @param bufnr integer
@@ -74,7 +73,9 @@ end
 --- @param instance parley.input_window.Instance
 --- @param starter fun(callback: fun(result: { ok: boolean, comment?: parley.Comment, err?: string, cancelled?: boolean }): nil): { cancel: fun(): nil }
 --- @param status_text string
-local function run_submit(bufnr, instance, starter, status_text)
+--- @param success_opts? { cursor_line?: integer }
+local function run_submit(bufnr, instance, starter, status_text, success_opts)
+  success_opts = success_opts or {}
   if M._operations[bufnr] ~= nil then
     M._notify("Parley request already in progress for this buffer", vim.log.levels.WARN)
     return false
@@ -107,7 +108,7 @@ local function run_submit(bufnr, instance, starter, status_text)
       close_input(instance, function()
         if vim.api.nvim_buf_is_valid(bufnr) then
           local discussion_window = require("parley.discussion_window")
-          pcall(discussion_window.open_current_line, bufnr)
+          pcall(discussion_window.open_current_line, bufnr, { cursor_line = success_opts.cursor_line })
         end
       end)
     end)
@@ -134,12 +135,11 @@ function M.open_new_comment_input(bufnr, opts)
   opts = opts or {}
   local provider, pr, rel_path = resolve_write_context(bufnr)
   local line = resolve_line_range(opts.line, opts.range, opts.line1, opts.line2)
+  local target_line = type(line) == "table" and line[1] or line
 
-  input_window.open({
-    kind = "new",
-    title = "New comment",
+  require("parley.discussion_window").show_new_comment_input(bufnr, {
+    cursor_line = target_line,
     status = "Drafting top-level comment. Press <C-s> to send, or <Esc>s in normal mode. q closes.",
-    source_bufnr = bufnr,
     on_submit = function(instance, text)
       local body = model.new_body({ text = text, format = "markdown" })
       return run_submit(bufnr, instance, function(callback)
@@ -167,7 +167,7 @@ function M.open_new_comment_input(bufnr, opts)
             cancelled = true
           end,
         }
-      end, "Sending request... Press C to cancel request.")
+      end, "Sending request... Press C to cancel request.", { cursor_line = target_line })
     end,
   })
 end
@@ -179,12 +179,16 @@ end
 function M.open_reply_input(bufnr, discussion_id, parent_comment_id)
   assert(type(parent_comment_id) == "string" and parent_comment_id ~= "", "parley: parent_comment_id is required")
   local provider, pr = resolve_write_context(bufnr)
+  local state = read_service.get_buffer_state(bufnr)
+  local target_line = state
+      and state.mappings
+      and state.mappings[discussion_id]
+      and state.mappings[discussion_id].local_line
+    or nil
 
-  input_window.open({
-    kind = "reply",
-    title = "Reply",
+  require("parley.discussion_window").show_reply_input(bufnr, {
+    parent_comment_id = parent_comment_id,
     status = "Drafting reply. Press <C-s> to send, or <Esc>s in normal mode. q closes.",
-    source_bufnr = bufnr,
     on_submit = function(instance, text)
       local body = model.new_body({ text = text, format = "markdown" })
       return run_submit(bufnr, instance, function(callback)
@@ -212,7 +216,7 @@ function M.open_reply_input(bufnr, discussion_id, parent_comment_id)
             cancelled = true
           end,
         }
-      end, "Sending request... Press C to cancel request.")
+      end, "Sending request... Press C to cancel request.", { cursor_line = target_line })
     end,
   })
 end

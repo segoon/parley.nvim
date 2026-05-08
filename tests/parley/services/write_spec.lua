@@ -1,6 +1,5 @@
 --- tests/parley/services/write_spec.lua — Write-side workflows (Step 14)
 
-local input_window = require("parley.input_window")
 local mock_provider = require("parley.mock_provider")
 local model = require("parley.model")
 local read_service = require("parley.services.read")
@@ -20,15 +19,15 @@ local SAMPLE_PR = model.new_pr({
 local saved = {}
 
 local function save_seams()
-  saved.input_open = input_window.open
   saved.refresh = read_service.refresh
   saved.notify = write_service._notify
+  saved.discussion = package.loaded["parley.discussion_window"]
 end
 
 local function restore_seams()
-  input_window.open = saved.input_open
   read_service.refresh = saved.refresh
   write_service._notify = saved.notify
+  package.loaded["parley.discussion_window"] = saved.discussion
 end
 
 local function fake_instance(bufnr)
@@ -81,10 +80,13 @@ describe("parley.services.write", function()
       rel_path = "src/foo.lua",
     }
 
-    input_window.open = function(opts)
-      opened = { opts = opts, instance = fake_instance(99) }
-      return opened.instance
-    end
+    package.loaded["parley.discussion_window"] = {
+      show_new_comment_input = function(_bufnr, opts)
+        opened = { opts = opts, instance = fake_instance(99) }
+        return opened.instance
+      end,
+      open_current_line = function() end,
+    }
     read_service.refresh = function(bufnr, opts)
       refresh_calls[#refresh_calls + 1] = { bufnr = bufnr, opts = opts }
     end
@@ -140,10 +142,13 @@ describe("parley.services.write", function()
       rel_path = "src/foo.lua",
     }
 
-    input_window.open = function(opts)
-      opened = { opts = opts, instance = fake_instance(100) }
-      return opened.instance
-    end
+    package.loaded["parley.discussion_window"] = {
+      show_reply_input = function(_bufnr, opts)
+        opened = { opts = opts, instance = fake_instance(100) }
+        return opened.instance
+      end,
+      open_current_line = function() end,
+    }
     read_service.refresh = function(_bufnr, _opts) end
 
     write_service.open_reply_input(1, "d1", "c2")
@@ -168,9 +173,12 @@ describe("parley.services.write", function()
       rel_path = "src/foo.lua",
     }
 
-    input_window.open = function(opts)
-      return fake_instance(101)
-    end
+    package.loaded["parley.discussion_window"] = {
+      show_reply_input = function(_bufnr, _opts)
+        return fake_instance(101)
+      end,
+      open_current_line = function() end,
+    }
 
     local ok, err = pcall(function()
       write_service.open_reply_input(1, "d1", "c2")

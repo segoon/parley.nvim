@@ -57,6 +57,7 @@ local function save_seams()
   saved.now = discussion_window._now
   saved.date = discussion_window._date
   saved.strptime = discussion_window._strptime
+  saved.confirm_discard = discussion_window._confirm_discard
 end
 
 local function restore_seams()
@@ -65,6 +66,7 @@ local function restore_seams()
   discussion_window._now = saved.now
   discussion_window._date = saved.date
   discussion_window._strptime = saved.strptime
+  discussion_window._confirm_discard = saved.confirm_discard
 end
 
 describe("parley.discussion_window", function()
@@ -274,13 +276,50 @@ describe("parley.discussion_window", function()
     assert.is_false(vim.tbl_contains(lines, "Second discussion"))
   end)
 
-  it("closes the discussion window when focus leaves it", function()
+  it("shows an embedded reply input and highlights the parent comment", function()
     local bufnr = scratch(10)
-    vim.cmd("vsplit")
-    local other_winid = vim.api.nvim_get_current_win()
-    vim.cmd("wincmd p")
-    local source_winid = vim.api.nvim_get_current_win()
-    vim.api.nvim_win_set_cursor(source_winid, { 3, 0 })
+    vim.api.nvim_win_set_cursor(0, { 3, 0 })
+
+    read_service._buffer_state[bufnr] = {
+      discussions = {
+        make_discussion({
+          line = 3,
+          comments = {
+            make_comment({ id = "c1", text = "Parent comment" }),
+            make_comment({ id = "c2", text = "Child comment", parent_comment_id = "c1" }),
+          },
+        }),
+      },
+      mappings = {
+        d1 = { local_line = 3, stale = false, confidence = 1.0 },
+      },
+    }
+
+    discussion_window.open_current_line(bufnr)
+    local composer = discussion_window.show_reply_input(bufnr, {
+      parent_comment_id = "c1",
+      status = "Reply draft",
+      on_submit = function() end,
+    })
+    local instance = discussion_window._instances[bufnr]
+
+    assert.is_not_nil(composer)
+    assert.is_not_nil(instance.input_winid)
+    assert.is_true(vim.api.nvim_win_is_valid(instance.input_winid))
+
+    local highlights = vim.api.nvim_buf_get_extmarks(
+      instance.bufnr,
+      vim.api.nvim_create_namespace("parley.discussion_window"),
+      0,
+      -1,
+      {}
+    )
+    assert.is_true(#highlights >= 1)
+  end)
+
+  it("hides the embedded input pane on discard and keeps discussion visible", function()
+    local bufnr = scratch(10)
+    vim.api.nvim_win_set_cursor(0, { 3, 0 })
 
     read_service._buffer_state[bufnr] = {
       discussions = { make_discussion({ line = 3, text = "Focused discussion" }) },
@@ -290,15 +329,21 @@ describe("parley.discussion_window", function()
     }
 
     discussion_window.open_current_line(bufnr)
-    assert.equal(discussion_window._instances[bufnr].winid, vim.api.nvim_get_current_win())
+    discussion_window._confirm_discard = function(_msg)
+      return true
+    end
+    local composer = discussion_window.show_new_comment_input(bufnr, {
+      cursor_line = 3,
+      status = "New comment draft",
+      on_submit = function() end,
+    })
+    local instance = discussion_window._instances[bufnr]
 
-    vim.api.nvim_set_current_win(other_winid)
-    vim.wait(50, function()
-      return not discussion_window.is_open(bufnr)
-    end)
+    vim.api.nvim_buf_set_lines(instance.input_bufnr, 1, -1, false, { "draft body" })
+    assert.is_true(composer.close(false))
 
-    assert.is_false(discussion_window.is_open(bufnr))
-    assert.equal(other_winid, vim.api.nvim_get_current_win())
-    assert.is_true(vim.api.nvim_win_is_valid(source_winid))
+    assert.is_true(discussion_window.is_open(bufnr))
+    assert.is_nil(instance.input_winid)
+    assert.is_true(vim.api.nvim_win_is_valid(instance.winid))
   end)
 end)

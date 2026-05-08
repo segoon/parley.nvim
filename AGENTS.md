@@ -1,7 +1,8 @@
 ## Core documentation
 
-- @PROJECT.md - the core concept and the project goals
+- @PROJECT.md - the core concept, the project goals, user scenarios
 - @TODO.md - the plans
+- @POSTPONED.md - postponed features
 
 ## Quick Reference
 
