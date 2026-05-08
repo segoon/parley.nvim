@@ -2,6 +2,7 @@
 --- https://github.com/your-org/parley.nvim
 
 local cache = require("parley.cache")
+local nav = require("parley.nav")
 local registry = require("parley.registry")
 local signs = require("parley.signs")
 
@@ -97,8 +98,20 @@ function M.setup(opts)
     detect = gh.detect,
     factory = gh.new,
   })
+  -- Register navigation keymaps (global; act on the current buffer at call time).
+  -- An empty string disables the keymap.
+  if M.config.keymaps.next_comment ~= "" then
+    vim.keymap.set("n", M.config.keymaps.next_comment, function()
+      nav.next(vim.api.nvim_get_current_buf())
+    end, { desc = "Jump to next Parley comment" })
+  end
+  if M.config.keymaps.prev_comment ~= "" then
+    vim.keymap.set("n", M.config.keymaps.prev_comment, function()
+      nav.prev(vim.api.nvim_get_current_buf())
+    end, { desc = "Jump to previous Parley comment" })
+  end
+
   -- TODO: register autocommands (BufEnter, timer)
-  -- TODO: register keymaps
   -- TODO: register statusline component
 end
 
