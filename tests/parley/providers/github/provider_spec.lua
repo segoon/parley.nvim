@@ -1307,7 +1307,7 @@ async_tests.describe("parley.providers.github.provider — fetch_viewer_login", 
     local api_user_called = false
     local runner = make_runner(function(cmd)
       if is_config_get(cmd) then
-        return fail("could not find key \"user\"")
+        return fail('could not find key "user"')
       end
       for _, a in ipairs(cmd) do
         if a == "/user" then

@@ -18,10 +18,10 @@
 ---   • _auth:   auth module table with read_token(host)    — replace in tests.
 ---   • _parse_remote_url is a pure function exported for unit testing.
 
-local model = require("parley.model")
 local await = require("parley.runtime.await")
-local ui = require("parley.runtime.ui")
 local dbg = require("parley.debug")
+local mapping = require("parley.providers.github.mapping")
+local transport = require("parley.providers.github.transport")
 
 local M = {}
 
@@ -51,50 +51,6 @@ local M = {}
 --- @field _cache_provider string
 
 -- ---------------------------------------------------------------------------
--- Constants
--- ---------------------------------------------------------------------------
-
---- Map REST reactions object keys → internal reaction type strings.
---- The REST API response embeds counts under the emoji-name keys directly.
---- @type string[]
-local REST_REACTION_KEYS = { "+1", "-1", "laugh", "hooray", "confused", "heart", "rocket", "eyes" }
-
---- Map provider event names → GitHub review event values.
---- @type table<string, string>
-local REVIEW_EVENT_MAP = {
-  approve = "APPROVE",
-  request_changes = "REQUEST_CHANGES",
-  comment = "COMMENT",
-}
-
-local DEFAULT_TIMEOUT_MS = 5000
-local DEFAULT_RETRY_COUNT = 2
-local DEFAULT_RETRY_BASE_DELAY_MS = 250
-local DEFAULT_RETRY_MAX_DELAY_MS = 2000
-
-local RETRYABLE_ERROR_PATTERNS = {
-  "i/o timeout",
-  "tls handshake timeout",
-  "connection reset",
-  "connection refused",
-  "no such host",
-  "temporary failure in name resolution",
-  "timeout awaiting response headers",
-  "context deadline exceeded",
-  "network is unreachable",
-  "software caused connection abort",
-}
-
---- Map GitHub review states → parley.ReviewStatus values.
---- @type table<string, string>
-local GH_REVIEW_STATE_MAP = {
-  APPROVED = "approved",
-  CHANGES_REQUESTED = "changes_requested",
-  DISMISSED = "dismissed",
-  COMMENTED = "commented",
-}
-
--- ---------------------------------------------------------------------------
 -- Internal helpers
 -- ---------------------------------------------------------------------------
 
@@ -108,239 +64,11 @@ local function api_base_for_host(host)
   return "https://" .. host .. "/api/v3"
 end
 
----@param self parley.github.Provider
----@return { timeout_ms: integer, retry_count: integer, retry_base_delay_ms: integer, retry_max_delay_ms: integer }
-local function transport_config(self)
-  local config = self._get_config and self._get_config() or nil
-  local github = config and config.providers and config.providers.github or {}
-  return {
-    timeout_ms = github.timeout_ms or DEFAULT_TIMEOUT_MS,
-    retry_count = github.retry_count or DEFAULT_RETRY_COUNT,
-    retry_base_delay_ms = github.retry_base_delay_ms or DEFAULT_RETRY_BASE_DELAY_MS,
-    retry_max_delay_ms = github.retry_max_delay_ms or DEFAULT_RETRY_MAX_DELAY_MS,
-  }
-end
-
----@param attempt integer
----@param cfg { retry_base_delay_ms: integer, retry_max_delay_ms: integer }
----@return integer
-local function retry_delay_ms(attempt, cfg)
-  return math.min(cfg.retry_base_delay_ms * (2 ^ math.max(0, attempt - 1)), cfg.retry_max_delay_ms)
-end
-
----@param stderr string|nil
----@return boolean
-local function is_retryable_error(stderr)
-  local text = (stderr or ""):lower()
-  for _, pattern in ipairs(RETRYABLE_ERROR_PATTERNS) do
-    if text:find(pattern, 1, true) then
-      return true
-    end
-  end
-  return false
-end
-
----@param result { code: integer, stderr: string|nil }
----@return boolean
-local function is_retryable_failure(result)
-  return result.code == 124 or is_retryable_error(result.stderr)
-end
-
---- Compute review_status from a list of GitHub review objects.
---- Takes the last non-PENDING entry (reviews are in chronological order).
---- @param reviews table[]
---- @return parley.ReviewStatus
-local function compute_review_status(reviews)
-  local status = "pending"
-  for _, r in ipairs(reviews) do
-    local mapped = GH_REVIEW_STATE_MAP[r.state]
-    if mapped then
-      status = mapped
-    end
-  end
-  return status
-end
-
---- Map the REST reactions object (embedded in a comment) to parley.Reaction[].
---- The REST API embeds counts as `{"+1": N, "-1": N, ...}` under `reactions`.
---- Only includes reaction types with count > 0.
---- @param raw table  the `reactions` sub-object from a REST review comment
---- @return parley.Reaction[]
-local function map_rest_reactions(raw)
-  if not raw then
-    return {}
-  end
-  local result = {}
-  for _, key in ipairs(REST_REACTION_KEYS) do
-    local count = raw[key]
-    if type(count) == "number" and count > 0 then
-      table.insert(
-        result,
-        model.new_reaction({
-          type = key,
-          count = count,
-          -- REST comment reactions do not expose per-viewer state;
-          -- viewer_reacted is determined lazily in react() via a separate call.
-          viewer_reacted = false,
-        })
-      )
-    end
-  end
-  return result
-end
-
---- Map a single raw REST review comment to a parley.Comment.
---- @param raw    table   Raw GitHub review comment object
---- @param viewer string  Authenticated viewer's login (for is_own)
---- @return parley.Comment
-local function map_rest_comment(raw, viewer)
-  local parent_id = nil
-  if raw.in_reply_to_id and raw.in_reply_to_id ~= vim.NIL then
-    parent_id = tostring(raw.in_reply_to_id)
-  end
-  return model.new_comment({
-    id = tostring(raw.id),
-    author = raw.user and raw.user.login or "",
-    body = model.new_body({ text = raw.body or "", format = "markdown" }),
-    created_at = raw.created_at or "",
-    updated_at = raw.updated_at or "",
-    reactions = map_rest_reactions(raw.reactions),
-    is_own = (raw.user and raw.user.login == viewer) or false,
-    parent_comment_id = parent_id,
-  })
-end
-
---- Build form fields for a top-level comment anchor.
---- @param file string
---- @param anchor parley.Anchor
---- @param body parley.Body
---- @param write_context parley.github.WriteContext
---- @return string[]
-local function build_top_level_fields(file, anchor, body, write_context)
-  local start_line = anchor.start_line
-  local end_line = anchor.end_line
-  local fields = {
-    "-f",
-    "body=" .. body.text,
-    "-f",
-    "commit_id=" .. write_context.head_sha,
-    "-f",
-    "path=" .. file,
-    "-f",
-    "side=RIGHT",
-  }
-
-  if end_line and end_line ~= start_line then
-    fields[#fields + 1] = "-F"
-    fields[#fields + 1] = "start_line=" .. tostring(start_line)
-    fields[#fields + 1] = "-f"
-    fields[#fields + 1] = "start_side=RIGHT"
-    fields[#fields + 1] = "-F"
-    fields[#fields + 1] = "line=" .. tostring(end_line)
-  else
-    fields[#fields + 1] = "-F"
-    fields[#fields + 1] = "line=" .. tostring(start_line)
-    fields[#fields + 1] = "-f"
-    fields[#fields + 1] = "subject_type=line"
-  end
-
-  return fields
-end
-
---- Group a flat list of REST review comments into parley.Discussion[].
----
---- Grouping rules:
----   • A comment with no in_reply_to_id is a root → new Discussion.
----   • A comment with in_reply_to_id belongs to the Discussion whose id equals
----     that value (GitHub always points replies at the root, not a direct parent).
----
---- @param comments table[]  Raw GitHub review comment objects (ordered by created_at)
---- @param viewer   string   Authenticated viewer's login
---- @return parley.Discussion[]
-local function group_comments_into_discussions(comments, viewer)
-  --- @type table<string, parley.Discussion>
-  local by_root = {}
-  --- @type string[]  Insertion-order list of root ids (for stable output order)
-  local order = {}
-
-  for _, raw in ipairs(comments) do
-    local is_root = not raw.in_reply_to_id or raw.in_reply_to_id == vim.NIL
-    local comment = map_rest_comment(raw, viewer)
-
-    if is_root then
-      local root_id = tostring(raw.id)
-      local line = raw.line
-      if not line or line == vim.NIL then
-        line = raw.original_line or 0
-      end
-      local disc = model.new_discussion({
-        id = root_id,
-        file = raw.path or "",
-        line = line,
-        end_line = (raw.start_line and raw.start_line ~= vim.NIL) and raw.line or nil,
-        resolved = false, -- GraphQL required; see POSTPONED.md
-        comments = { comment },
-      })
-      by_root[root_id] = disc
-      table.insert(order, root_id)
-    else
-      local root_id = tostring(raw.in_reply_to_id)
-      local disc = by_root[root_id]
-      if disc then
-        table.insert(disc.comments, comment)
-      end
-      -- If root not seen yet (shouldn't happen with GitHub's ordering), skip.
-    end
-  end
-
-  local result = {}
-  for _, root_id in ipairs(order) do
-    table.insert(result, by_root[root_id])
-  end
-  return result
-end
-
--- ---------------------------------------------------------------------------
--- Provider object
--- ---------------------------------------------------------------------------
-
---- @type parley.github.Provider
-local GitHubProvider = {}
-GitHubProvider.__index = GitHubProvider
-
---- Run a gh CLI command and return parsed JSON.
---- Raises on non-zero exit or JSON parse failure.
---- Returns nil (not an error) when stdout is empty (e.g. DELETE 204).
----
---- @param self  parley.github.Provider
---- @param cmd   string[]
---- @return table|nil
-local function gh_run(self, cmd)
-  local runner = self._runner
-  local cfg = transport_config(self)
-  local attempts = cfg.retry_count + 1
-  local result
-
-  for attempt = 1, attempts do
-    result = runner(cmd)
-    if result.code == 0 then
-      break
-    end
-    if attempt >= attempts or not is_retryable_failure(result) then
-      error(string.format("parley.github: gh command failed (exit %d): %s", result.code, result.stderr or ""), 0)
-    end
-    self._sleep(retry_delay_ms(attempt, cfg))
-  end
-
-  local stdout = result.stdout or ""
-  if stdout == "" then
-    return nil
-  end
-  local ok_decode, decoded = pcall(vim.json.decode, stdout)
-  if not ok_decode then
-    error(string.format("parley.github: failed to decode JSON response: %s", stdout), 0)
-  end
-  return decoded
+--- Build the base REST path prefix for this repo.
+--- @param self parley.github.Provider
+--- @return string  e.g. "/repos/owner/repo"
+local function repo_path(self)
+  return "/repos/" .. self._owner .. "/" .. self._repo
 end
 
 --- Resolve and cache the authenticated user's GitHub login.
@@ -376,7 +104,7 @@ local function fetch_viewer_login(self)
     return
   end
   -- Slow path: gh api /user (one API call)
-  local ok, user = pcall(gh_run, self, { "gh", "api", "/user" })
+  local ok, user = pcall(transport.gh_run, self, { "gh", "api", "/user" })
   dbg.trace(
     "github.provider",
     "fetch_viewer_login: gh api /user → ok="
@@ -390,121 +118,13 @@ local function fetch_viewer_login(self)
   dbg.trace("github.provider", "fetch_viewer_login: final _viewer_login=" .. vim.inspect(self._viewer_login))
 end
 
---- Start a cancellable gh CLI request.
---- @param self parley.github.Provider
---- @param cmd string[]
---- @param callback fun(result: { ok: boolean, data?: table, err?: string, cancelled?: boolean }): nil
---- @return { cancel: fun(): nil }
-local function gh_start(self, cmd, callback)
-  local completed = false
-  local cancelled = false
-  local handle = nil
-  local retry_timer = nil
-  local cfg = transport_config(self)
-  local attempts = cfg.retry_count + 1
-  local attempt = 0
+-- ---------------------------------------------------------------------------
+-- Provider object
+-- ---------------------------------------------------------------------------
 
-  local function clear_retry_timer()
-    if not retry_timer then
-      return
-    end
-    if retry_timer.stop then
-      pcall(function()
-        retry_timer:stop()
-      end)
-    end
-    if retry_timer.close then
-      pcall(function()
-        retry_timer:close()
-      end)
-    end
-    retry_timer = nil
-  end
-
-  local function finish(result)
-    if completed then
-      return
-    end
-    completed = true
-    clear_retry_timer()
-    ui.dispatch(function()
-      callback(result)
-    end)
-  end
-
-  local function start_attempt()
-    attempt = attempt + 1
-    handle = self._spawn(cmd, function(result)
-      handle = nil
-      if completed then
-        return
-      end
-
-      if cancelled then
-        finish({ ok = false, cancelled = true })
-        return
-      end
-
-      if result.code ~= 0 then
-        if attempt < attempts and is_retryable_failure(result) then
-          retry_timer = self._defer(function()
-            retry_timer = nil
-            if completed or cancelled then
-              return
-            end
-            start_attempt()
-          end, retry_delay_ms(attempt, cfg))
-          return
-        end
-        finish({
-          ok = false,
-          err = string.format("parley.github: gh command failed (exit %d): %s", result.code, result.stderr or ""),
-        })
-        return
-      end
-
-      local stdout = result.stdout or ""
-      if stdout == "" then
-        finish({ ok = true, data = nil })
-        return
-      end
-
-      local ok_decode, decoded = pcall(vim.json.decode, stdout)
-      if not ok_decode then
-        finish({ ok = false, err = string.format("parley.github: failed to decode JSON response: %s", stdout) })
-        return
-      end
-
-      finish({ ok = true, data = decoded })
-    end)
-  end
-
-  start_attempt()
-
-  return {
-    cancel = function()
-      if completed or cancelled then
-        return
-      end
-      cancelled = true
-      clear_retry_timer()
-      if handle and handle.kill then
-        pcall(function()
-          handle:kill(15)
-        end)
-        return
-      end
-      finish({ ok = false, cancelled = true })
-    end,
-  }
-end
-
---- Build the base REST path prefix for this repo.
---- @param self parley.github.Provider
---- @return string  e.g. "/repos/owner/repo"
-local function repo_path(self)
-  return "/repos/" .. self._owner .. "/" .. self._repo
-end
+--- @type parley.github.Provider
+local GitHubProvider = {}
+GitHubProvider.__index = GitHubProvider
 
 -- ---------------------------------------------------------------------------
 -- Constructor
@@ -542,14 +162,16 @@ function M.new(opts)
   local system = opts._system or vim.system
 
   local default_runner = function(cmd)
-    local result = await.system(cmd, { text = true, timeout = transport_config(self).timeout_ms, _system = system })
+    local result =
+      await.system(cmd, { text = true, timeout = transport.transport_config(self).timeout_ms, _system = system })
     return { code = result.code, stdout = result.stdout or "", stderr = result.stderr or "" }
   end
 
   local default_spawn = function(cmd, callback)
+    local ui = require("parley.runtime.ui")
     return system(
       cmd,
-      { text = true, timeout = transport_config(self).timeout_ms },
+      { text = true, timeout = transport.transport_config(self).timeout_ms },
       ui.wrap(function(result)
         callback({ code = result.code, stdout = result.stdout or "", stderr = result.stderr or "" })
       end)
@@ -600,9 +222,10 @@ end
 --- @param branch     string
 --- @return parley.DetectedReview|nil
 function GitHubProvider:detect_pr(_repo_root, branch)
+  local model = require("parley.model")
   local pulls_url = repo_path(self) .. "/pulls?head=" .. self._owner .. ":" .. branch .. "&state=open&per_page=1"
 
-  local pulls = gh_run(self, { "gh", "api", pulls_url })
+  local pulls = transport.gh_run(self, { "gh", "api", pulls_url })
   if not pulls or #pulls == 0 then
     return nil
   end
@@ -612,9 +235,9 @@ function GitHubProvider:detect_pr(_repo_root, branch)
 
   -- Fetch reviews to determine review_status.
   local reviews_url = repo_path(self) .. "/pulls/" .. pr_number .. "/reviews"
-  local reviews = gh_run(self, { "gh", "api", reviews_url }) or {}
+  local reviews = transport.gh_run(self, { "gh", "api", reviews_url }) or {}
 
-  local review_status = compute_review_status(reviews)
+  local review_status = mapping.compute_review_status(reviews)
 
   local pr = model.new_pr({
     id = tostring(pr_number),
@@ -648,12 +271,9 @@ function GitHubProvider:fetch_discussions(review)
   local pr_number = review.write_context and review.write_context.number or tonumber(review.pr.id)
   local url = repo_path(self) .. "/pulls/" .. pr_number .. "/comments"
 
-  local comments = gh_run(self, { "gh", "api", "--paginate", url }) or {}
+  local comments = transport.gh_run(self, { "gh", "api", "--paginate", url }) or {}
 
   -- Resolve viewer login for is_own detection.
-  -- fetch_viewer_login uses gh directly (handles keyring, env-var, and
-  -- hosts.yml auth transparently) and silences its own errors, so no
-  -- Lua-level auth guard is needed here.
   fetch_viewer_login(self)
   local viewer = self._viewer_login or ""
   dbg.trace(
@@ -661,7 +281,7 @@ function GitHubProvider:fetch_discussions(review)
     "fetch_discussions: viewer=" .. vim.inspect(viewer) .. " #comments=" .. tostring(#comments)
   )
 
-  local discussions = group_comments_into_discussions(comments, viewer)
+  local discussions = mapping.group_comments_into_discussions(comments, viewer)
   local own_count = 0
   for _, d in ipairs(discussions) do
     for _, c in ipairs(d.comments) do
@@ -689,10 +309,10 @@ function GitHubProvider:post_top_level_comment(review, file, anchor, body)
   local write_context = review.write_context
   local url = repo_path(self) .. "/pulls/" .. write_context.number .. "/comments"
   local cmd = { "gh", "api", "--method", "POST", url }
-  vim.list_extend(cmd, build_top_level_fields(file, anchor, body, write_context))
-  local raw = gh_run(self, cmd)
+  vim.list_extend(cmd, mapping.build_top_level_fields(file, anchor, body, write_context))
+  local raw = transport.gh_run(self, cmd)
 
-  return map_rest_comment(raw, self._viewer_login or "")
+  return mapping.map_rest_comment(raw, self._viewer_login or "")
 end
 
 --- Start a cancellable top-level comment request.
@@ -707,13 +327,13 @@ function GitHubProvider:begin_post_top_level_comment(review, file, anchor, body,
   local write_context = review.write_context
   local url = repo_path(self) .. "/pulls/" .. write_context.number .. "/comments"
   local cmd = { "gh", "api", "--method", "POST", url }
-  vim.list_extend(cmd, build_top_level_fields(file, anchor, body, write_context))
-  return gh_start(self, cmd, function(result)
+  vim.list_extend(cmd, mapping.build_top_level_fields(file, anchor, body, write_context))
+  return transport.gh_start(self, cmd, function(result)
     if not result.ok then
       callback(result)
       return
     end
-    callback({ ok = true, comment = map_rest_comment(result.data, self._viewer_login or "") })
+    callback({ ok = true, comment = mapping.map_rest_comment(result.data, self._viewer_login or "") })
   end)
 end
 
@@ -730,7 +350,7 @@ function GitHubProvider:reply(review, discussion, parent_comment, body)
   local write_context = review.write_context
   local url = repo_path(self) .. "/pulls/" .. write_context.number .. "/comments"
   local _ = discussion
-  local raw = gh_run(self, {
+  local raw = transport.gh_run(self, {
     "gh",
     "api",
     "--method",
@@ -744,7 +364,7 @@ function GitHubProvider:reply(review, discussion, parent_comment, body)
     "in_reply_to=" .. parent_comment.id,
   })
 
-  return map_rest_comment(raw, self._viewer_login or "")
+  return mapping.map_rest_comment(raw, self._viewer_login or "")
 end
 
 --- Start a cancellable reply request.
@@ -759,7 +379,7 @@ function GitHubProvider:begin_reply(review, discussion, parent_comment, body, ca
   local write_context = review.write_context
   local url = repo_path(self) .. "/pulls/" .. write_context.number .. "/comments"
   local _ = discussion
-  return gh_start(self, {
+  return transport.gh_start(self, {
     "gh",
     "api",
     "--method",
@@ -776,7 +396,7 @@ function GitHubProvider:begin_reply(review, discussion, parent_comment, body, ca
       callback(result)
       return
     end
-    callback({ ok = true, comment = map_rest_comment(result.data, self._viewer_login or "") })
+    callback({ ok = true, comment = mapping.map_rest_comment(result.data, self._viewer_login or "") })
   end)
 end
 
@@ -819,7 +439,7 @@ function GitHubProvider:react(_review, comment_id, reaction)
   local base_url = repo_path(self) .. "/pulls/comments/" .. comment_id .. "/reactions"
 
   -- Fetch existing reactions of this type.
-  local reactions = gh_run(self, {
+  local reactions = transport.gh_run(self, {
     "gh",
     "api",
     base_url .. "?content=" .. reaction .. "&per_page=100",
@@ -836,7 +456,7 @@ function GitHubProvider:react(_review, comment_id, reaction)
 
   if existing_id then
     -- Remove reaction.
-    gh_run(self, {
+    transport.gh_run(self, {
       "gh",
       "api",
       "--method",
@@ -845,7 +465,7 @@ function GitHubProvider:react(_review, comment_id, reaction)
     })
   else
     -- Add reaction.
-    gh_run(self, {
+    transport.gh_run(self, {
       "gh",
       "api",
       "--method",
@@ -866,7 +486,7 @@ end
 --- @return parley.Comment
 function GitHubProvider:edit(_review, comment_id, body)
   local url = repo_path(self) .. "/pulls/comments/" .. comment_id
-  local raw = gh_run(self, {
+  local raw = transport.gh_run(self, {
     "gh",
     "api",
     "--method",
@@ -875,7 +495,7 @@ function GitHubProvider:edit(_review, comment_id, body)
     "-f",
     "body=" .. body.text,
   })
-  return map_rest_comment(raw, self._viewer_login or "")
+  return mapping.map_rest_comment(raw, self._viewer_login or "")
 end
 
 --- Delete a comment.
@@ -885,7 +505,7 @@ end
 --- @param comment_id string
 function GitHubProvider:delete(_review, comment_id)
   local url = repo_path(self) .. "/pulls/comments/" .. comment_id
-  gh_run(self, { "gh", "api", "--method", "DELETE", url })
+  transport.gh_run(self, { "gh", "api", "--method", "DELETE", url })
 end
 
 --- Submit a PR-level review.
@@ -896,12 +516,12 @@ end
 --- @param event string
 --- @param body  parley.Body
 function GitHubProvider:submit_review(review, event, body)
-  local gh_event = REVIEW_EVENT_MAP[event]
+  local gh_event = mapping.REVIEW_EVENT_MAP[event]
   assert(gh_event, string.format("parley.github: unknown review event: %q", event))
 
   local write_context = review.write_context
   local url = repo_path(self) .. "/pulls/" .. write_context.number .. "/reviews"
-  gh_run(self, {
+  transport.gh_run(self, {
     "gh",
     "api",
     "--method",
