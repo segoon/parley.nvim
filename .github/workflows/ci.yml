@@ -57,3 +57,6 @@ jobs:
 
       - name: Run tests
         run: make test
+
+      - name: Check generated docs are up to date
+        run: make check-doc

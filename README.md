@@ -91,43 +91,28 @@ If no matching PR is found, Parley stays silent and inactive.
 | Command | Description |
 | --- | --- |
 | `:ParleyRefresh` | Force a refresh for the current buffer |
-| `:Parley discussion open` | Open the discussion window for the current line |
-| `:Parley discussion close` | Close the discussion window |
 | `:Parley discussion toggle` | Toggle the discussion window |
-| `:Parley discussion new` | Open a draft for a new top-level comment |
-| `:'<,'>Parley discussion new` | Create a new comment for the selected line range |
-| `:Parley discussion reply` | Reply to the selected or current comment thread |
-| `:Parley comment react` | Add or remove a reaction on the selected comment |
+| `:Parley discussion new` | Open a draft for a new comment |
+| `:Parley discussion reply` | Reply to the current thread |
+| `:Parley comment react` | React to the selected comment |
 | `:Parley comment edit` | Edit the selected comment |
 | `:Parley comment delete` | Delete the selected comment |
-| `:Parley nav next` | Jump to the next commented line |
-| `:Parley nav prev` | Jump to the previous commented line |
 
-### Default keymaps
+See `:help parley-commands` for the full list.
 
-| Key | Description |
-| --- | --- |
-| `]c` | Jump to next commented line |
-| `[c` | Jump to previous commented line |
+### Keymaps
 
-### Discussion window keys
+| Key | Context | Description |
+| --- | --- | --- |
+| `]c` / `[c` | global | Jump between commented lines |
+| `q` | discussion | Close window |
+| `r` | discussion | Reply |
+| `R` | discussion | React |
+| `e` | discussion | Edit comment |
+| `d` | discussion | Delete comment |
+| `s` / `<C-s>` | draft | Submit |
 
-| Key | Description |
-| --- | --- |
-| `q` | Close discussion window |
-| `r` | Reply |
-| `R` | React |
-| `e` | Edit selected comment |
-| `d` | Delete selected comment |
-
-### Draft window keys
-
-| Key | Description |
-| --- | --- |
-| `q` | Close draft |
-| `s` | Submit draft in normal mode |
-| `<C-s>` | Submit draft in insert mode |
-| `C` | Cancel in-flight request |
+See `:help parley-keymaps` for the full reference.
 
 ## Telescope
 
@@ -170,52 +155,28 @@ When Parley is inactive for the current buffer, the component returns an empty s
 
 ## Configuration
 
+All options have sensible defaults. A minimal setup needs no arguments:
+
+```lua
+require("parley").setup({})
+```
+
+Common options:
+
 ```lua
 require("parley").setup({
-  refresh_interval = 300,
-  cache_dir = vim.fn.stdpath("cache") .. "/parley",
-  telescope = true,
-  signs = {
-    enabled = true,
-    text = "▐",
-  },
-  virtual_text = {
-    enabled = true,
-    max_width = 60,
-  },
-  float = {
-    border = "rounded",
-    max_width = 80,
-    max_height = 30,
-  },
-  progress = {
-    enabled = true,
-    border = "rounded",
-    max_width = 60,
-    max_height = 8,
-    success_timeout = 1200,
-    failed_timeout = 2500,
-    cancelled_timeout = 1200,
-    margin_bottom = 1,
-    margin_right = 2,
-    spinner_interval = 100,
-  },
+  refresh_interval = 120,          -- seconds (0 = disabled)
+  telescope = false,               -- disable Telescope extensions
   keymaps = {
-    next_comment = "]c",
+    next_comment = "]c",           -- "" to disable
     prev_comment = "[c",
-  },
-  providers = {
-    github = {
-      timeout_ms = 5000,
-      retry_count = 2,
-      retry_base_delay_ms = 250,
-      retry_max_delay_ms = 2000,
-    },
   },
 })
 ```
 
-GitHub authentication is resolved through the standard `gh` CLI configuration and environment variables.
+See `:help parley-configuration` for the full reference with all defaults.
+
+GitHub authentication is resolved through the standard `gh` CLI configuration and environment variables. See `:help parley-providers` for details.
 
 ## Health Check
 
@@ -235,6 +196,14 @@ This checks:
 - whether the current buffer is in a supported repository
 - whether GitHub authentication can be resolved
 
+## Documentation
+
+Full reference documentation is available inside Neovim:
+
+```vim
+:help parley.nvim
+```
+
 ## Current Limitations
 
 - GitHub is the only built-in provider today
@@ -251,7 +220,6 @@ This checks:
 - additional providers
 - real thread resolved state for GitHub via GraphQL
 - PR-level review actions
-- broader docs and vim help
 
 ## Why Parley?
 

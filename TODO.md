@@ -13,8 +13,7 @@ quality:
 - lua-language-server type warnings, but not in linter
 
 documentation:
-- vim help
-- vim help for providers (auto generate?)
+- vim help for additional providers as they are added
 
 UI:
 - configure comment preview layout in setup(...)

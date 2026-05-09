@@ -1,4 +1,4 @@
-.PHONY: all lint format format-check test ci
+.PHONY: all lint format format-check test ci doc helptags check-doc
 
 # Directories
 LUA_DIRS := lua/ plugin/ tests/
@@ -42,8 +42,19 @@ test:
 	if [ $$exit_code -eq 0 ]; then echo "OK"; else printf '%s\n' "$$output"; fi; \
 	exit $$exit_code
 
+# ─── Documentation ────────────────────────────────────────────────────────────
+
+doc:
+	$(NEOVIM) --headless -l scripts/gendoc.lua
+
+helptags:
+	$(NEOVIM) --headless -c "helptags doc/" -c "qa!"
+
+check-doc:
+	$(NEOVIM) --headless -l scripts/gendoc.lua --check
+
 # ─── Aggregate ────────────────────────────────────────────────────────────────
 
-ci: lint format-check test
+ci: lint format-check test check-doc
 
 all: ci
