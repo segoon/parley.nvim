@@ -656,7 +656,10 @@ function GitHubProvider:fetch_discussions(review)
   -- Lua-level auth guard is needed here.
   fetch_viewer_login(self)
   local viewer = self._viewer_login or ""
-  dbg.trace("github.provider", "fetch_discussions: viewer=" .. vim.inspect(viewer) .. " #comments=" .. tostring(#comments))
+  dbg.trace(
+    "github.provider",
+    "fetch_discussions: viewer=" .. vim.inspect(viewer) .. " #comments=" .. tostring(#comments)
+  )
 
   local discussions = group_comments_into_discussions(comments, viewer)
   local own_count = 0
@@ -667,7 +670,10 @@ function GitHubProvider:fetch_discussions(review)
       end
     end
   end
-  dbg.trace("github.provider", "fetch_discussions: #discussions=" .. tostring(#discussions) .. " is_own_count=" .. tostring(own_count))
+  dbg.trace(
+    "github.provider",
+    "fetch_discussions: #discussions=" .. tostring(#discussions) .. " is_own_count=" .. tostring(own_count)
+  )
   return discussions
 end
 

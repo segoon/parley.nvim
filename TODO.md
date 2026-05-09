@@ -21,5 +21,4 @@ documentation:
 
 Bugs:
 - multiple buffers with different repositories
-- no autocompletion on :'<,'>
 - tests isolation (pending callbacks, subscriptions)
