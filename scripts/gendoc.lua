@@ -1,26 +1,27 @@
---- scripts/gendoc.lua — Generate vimdoc sections from LuaCATS annotations.
+--- scripts/gendoc.lua — Generate vimdoc from LuaCATS annotations.
 ---
---- Parses @class / @field / @param / @return annotations from Lua source and
---- injects formatted vimdoc into doc/parley.nvim.txt between marker lines.
+--- Reads the template `doc/parley.nvim.txt.in` (hand-written prose with
+--- empty markers), parses @class / @field / @param / @return annotations
+--- from Lua source, and writes the complete `doc/parley.nvim.txt` with
+--- generated sections filled in.
 ---
 --- Usage:
----   nvim --headless -l scripts/gendoc.lua            # update in-place
+---   nvim --headless -l scripts/gendoc.lua            # generate
 ---   nvim --headless -l scripts/gendoc.lua --check     # exit 1 if stale
 ---
---- Markers in the help file:
+--- Markers in the template:
 ---   <parley-configuration-start>
----   ... generated content ...
 ---   <parley-configuration-end>
 ---
 ---   <parley-api-start>
----   ... generated content ...
 ---   <parley-api-end>
 
 -- ---------------------------------------------------------------------------
 -- Paths (relative to repo root)
 -- ---------------------------------------------------------------------------
 
-local HELP_FILE = "doc/parley.nvim.txt"
+local TEMPLATE_FILE = "doc/parley.nvim.txt.in"
+local OUTPUT_FILE = "doc/parley.nvim.txt"
 local INIT_FILE = "lua/parley/init.lua"
 
 -- ---------------------------------------------------------------------------
@@ -510,7 +511,7 @@ end
 
 local function main()
   local init_source = read_file(INIT_FILE)
-  local help_text = read_file(HELP_FILE)
+  local template = read_file(TEMPLATE_FILE)
 
   -- Parse annotations and defaults.
   local classes = parse_classes(init_source)
@@ -549,13 +550,14 @@ local function main()
   -- Generate API section.
   local api_lines = fmt_functions(funcs)
 
-  -- Replace marker regions.
-  local result = help_text
+  -- Fill marker regions in the template to produce the output.
+  local result = template
   result = replace_region(result, "<parley-configuration-start>", "<parley-configuration-end>", full_config)
   result = replace_region(result, "<parley-api-start>", "<parley-api-end>", api_lines)
 
   if check_mode then
-    if result == help_text then
+    local existing = read_file(OUTPUT_FILE)
+    if result == existing then
       print("doc/parley.nvim.txt is up to date")
       os.exit(0)
     else
@@ -563,8 +565,8 @@ local function main()
       os.exit(1)
     end
   else
-    write_file(HELP_FILE, result)
-    print("Updated " .. HELP_FILE)
+    write_file(OUTPUT_FILE, result)
+    print("Updated " .. OUTPUT_FILE)
   end
 end
 

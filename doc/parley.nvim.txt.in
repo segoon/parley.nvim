@@ -1,0 +1,321 @@
+*parley.nvim.txt*	Inline pull request discussions for Neovim
+
+Author: segoon
+License: MIT
+
+==============================================================================
+TABLE OF CONTENTS                                        *parley-contents*
+
+    1. Introduction .......................... |parley-introduction|
+    2. Requirements .......................... |parley-requirements|
+    3. Setup ................................. |parley-setup|
+    4. Commands .............................. |parley-commands|
+    5. Keymaps ............................... |parley-keymaps|
+    6. Telescope ............................. |parley-telescope|
+    7. Statusline ............................ |parley-statusline|
+    8. Configuration ......................... |parley-configuration|
+    9. Highlights ............................ |parley-highlights|
+   10. Providers ............................. |parley-providers|
+   11. Health Check .......................... |parley-health|
+   12. Lua API ............................... |parley-api|
+
+==============================================================================
+1. INTRODUCTION                                      *parley-introduction*
+
+Parley lets you read and act on pull request review threads directly from
+your buffer. Signs and virtual text mark commented lines, a floating window
+shows the full discussion, and you can reply, edit, delete, and react
+without leaving Neovim.
+
+Parley is intentionally narrow: it focuses on line-level code review inside
+the editing flow. For full GitHub clients (issues, PR metadata, repo
+browsing), see |octo.nvim| or |gh.nvim|.
+
+Current state: ~
+
+  - GitHub is the only built-in provider
+  - Regular file buffers are supported
+  - diffview.nvim integration is planned
+
+==============================================================================
+2. REQUIREMENTS                                      *parley-requirements*
+
+  - Neovim >= 0.10
+  - git
+  - gh (GitHub CLI, https://cli.github.com)
+  - plenary.nvim (https://github.com/nvim-lua/plenary.nvim)
+
+Optional: ~
+
+  - telescope.nvim — for discussion pickers (|parley-telescope|)
+  - render-markdown.nvim — for rendered markdown in the discussion float
+
+==============================================================================
+3. SETUP                                             *parley-setup*
+
+Call `require("parley").setup()` once from your Neovim config. All options
+are optional; the defaults are shown in |parley-configuration|.
+
+Minimal setup: >lua
+    require("parley").setup({})
+<
+
+With lazy.nvim: >lua
+    {
+      "segoon/parley.nvim",
+      dependencies = {
+        "nvim-lua/plenary.nvim",
+        -- Optional:
+        -- "nvim-telescope/telescope.nvim",
+        -- "MeanderingProgrammer/render-markdown.nvim",
+      },
+      opts = {},
+    }
+<
+
+Quick start: ~
+
+  1. Install the plugin and call `setup()`.
+  2. Authenticate GitHub CLI: `gh auth login`.
+  3. Open a file in a git repo whose current branch has an open PR.
+  4. Run |:ParleyRefresh| or re-enter the buffer.
+  5. Navigate with `]c` / `[c` (|parley-keymaps|).
+  6. Toggle the discussion window with `:Parley discussion toggle`.
+
+If no matching PR is found, Parley stays silent and inactive.
+
+==============================================================================
+4. COMMANDS                                          *parley-commands*
+
+All Parley commands support tab completion.
+
+:ParleyRefresh                                       *:ParleyRefresh*
+    Force a re-fetch of PR discussions for the current buffer. Shows a
+    progress popup while the request is in flight.
+
+:Parley discussion open                              *:Parley-discussion-open*
+    Open the discussion window for the current line.
+
+:Parley discussion close                             *:Parley-discussion-close*
+    Close the discussion window.
+
+:Parley discussion toggle                            *:Parley-discussion-toggle*
+    Toggle the discussion window for the current line.
+
+:Parley discussion new                               *:Parley-discussion-new*
+    Open a draft for a new top-level comment on the cursor line.
+
+:'<,'>Parley discussion new                          *:Parley-discussion-new-range*
+    Open a draft for a new comment spanning the visual selection.
+
+:Parley discussion reply                             *:Parley-discussion-reply*
+    Reply to the selected or current comment thread.
+
+:Parley comment react                                *:Parley-comment-react*
+    Open the reaction picker for the selected comment. Toggles: adds
+    the reaction if absent, removes it if present.
+
+:Parley comment edit                                 *:Parley-comment-edit*
+    Edit the selected comment. Only works on your own comments.
+
+:Parley comment delete                               *:Parley-comment-delete*
+    Delete the selected comment with a confirmation prompt.
+    Only works on your own comments.
+
+:Parley nav next                                     *:Parley-nav-next*
+    Jump to the next commented line. Wraps around at the end.
+
+:Parley nav prev                                     *:Parley-nav-prev*
+    Jump to the previous commented line. Wraps around at the start.
+
+==============================================================================
+5. KEYMAPS                                           *parley-keymaps*
+
+Global keymaps (registered in setup): ~
+
+    Key      Action
+    `]c`       Jump to the next commented line
+    `[c`       Jump to the previous commented line
+
+    Both are configurable via |parley-config-keymaps|. Set to `""` to
+    disable.
+
+Discussion window keymaps: ~
+
+    Key      Action
+    `q`        Close the discussion window
+    `r`        Reply to the current thread
+    `R`        React to the selected comment
+    `e`        Edit the selected comment
+    `d`        Delete the selected comment
+
+Draft/input window keymaps: ~
+
+    Key      Mode    Action
+    `q`        n       Close draft (prompts if non-empty)
+    `s`        n       Submit the draft
+    `<C-s>`    i       Submit the draft
+    `C`        n       Cancel the in-flight request
+
+Reaction picker keymaps: ~
+
+    Key        Action
+    `q` / `<Esc>`  Cancel
+    `<CR>`       Confirm selection
+    `j` / `<Down>` Next item
+    `k` / `<Up>`   Previous item
+
+==============================================================================
+6. TELESCOPE                                         *parley-telescope*
+
+When `telescope = true` (the default) and telescope.nvim is installed,
+Parley registers two extensions on setup:
+
+  `parley_discussions`       All discussions in the current PR.
+  `parley_discussions_file`  Discussions for the current file only.
+
+Usage: >lua
+    require("telescope").extensions.parley_discussions.parley_discussions()
+    require("telescope").extensions.parley_discussions_file.parley_discussions_file()
+<
+
+Selecting an entry opens the file, refreshes Parley state, navigates to the
+discussed line, and opens the discussion window.
+
+If you do not use Telescope, disable the extension loading: >lua
+    require("parley").setup({ telescope = false })
+<
+
+==============================================================================
+7. STATUSLINE                                        *parley-statusline*
+
+Parley exposes a statusline component via |parley.statusline()|.
+
+When the current buffer has an active PR, it returns a string like: >
+    GitHub PR #42 . approved . 3 unresolved
+<
+
+When inactive, it returns an empty string, so it can be safely included
+unconditionally.
+
+With lualine: >lua
+    {
+      "nvim-lualine/lualine.nvim",
+      opts = function(_, opts)
+        table.insert(opts.sections.lualine_c, function()
+          return require("parley").statusline()
+        end)
+      end,
+    }
+<
+
+With the built-in statusline: >vim
+    set statusline+=%{%v:lua.require('parley').statusline()%}
+<
+
+==============================================================================
+8. CONFIGURATION                                     *parley-configuration*
+
+<parley-configuration-start>
+<parley-configuration-end>
+
+==============================================================================
+9. HIGHLIGHTS                                        *parley-highlights*
+
+All highlight groups are defined with `default = true`, so your colorscheme
+or manual `vim.api.nvim_set_hl()` calls take precedence.
+
+ParleySign                                           *hl-ParleySign*
+    Gutter sign for commented lines.
+    Default link: `DiagnosticSignInfo`
+
+ParleyStaleSign                                      *hl-ParleyStaleSign*
+    Gutter sign for lines whose anchor has diverged (stale).
+    Default link: `Comment`
+
+ParleyVirtualTextMeta                                *hl-ParleyVirtualTextMeta*
+    Author and timestamp text below commented lines.
+    Default link: `DiagnosticVirtualTextHint`
+
+ParleyStaleVirtualTextMeta                           *hl-ParleyStaleVirtualTextMeta*
+    Author and timestamp text for stale comments.
+    Default link: `Comment`
+
+ParleyVirtualText                                    *hl-ParleyVirtualText*
+    Comment body text below commented lines.
+    Default link: `DiagnosticVirtualTextInfo`
+
+ParleyStaleVirtualText                               *hl-ParleyStaleVirtualText*
+    Comment body text for stale comments.
+    Default link: `Comment`
+
+Example override: >lua
+    vim.api.nvim_set_hl(0, "ParleySign", { fg = "#e0af68" })
+<
+
+==============================================================================
+10. PROVIDERS                                        *parley-providers*
+
+Parley uses a provider abstraction to support multiple hosting platforms.
+
+GitHub                                               *parley-provider-github*
+
+The built-in GitHub provider uses the `gh` CLI for API calls and supports
+both github.com and GitHub Enterprise Server (GHES) instances.
+
+Authentication: ~
+
+Tokens are resolved in the following order:
+
+  1. Environment variables:
+     - `GH_TOKEN` / `GITHUB_TOKEN` (for github.com and *.ghe.com)
+     - `GH_ENTERPRISE_TOKEN` / `GITHUB_ENTERPRISE_TOKEN` (for GHES)
+  2. The `oauth_token` field in `~/.config/gh/hosts.yml`
+
+Run `gh auth login` to set up authentication.
+
+Provider options: ~
+
+GitHub-specific options live under `providers.github` in the setup call.
+See |parley-configuration|.
+
+Custom providers: ~
+
+After calling `setup()`, you can register additional providers: >lua
+    local registry = require("parley.registry")
+    registry.register({
+      name = "MyProvider",
+      detect = function(vcs_info) ... end,
+      factory = function(opts) ... end,
+    })
+<
+
+The provider must implement all methods defined in `parley.Provider`.
+See `lua/parley/provider.lua` for the full interface.
+
+==============================================================================
+11. HEALTH CHECK                                     *parley-health*
+
+Run: >vim
+    :checkhealth parley
+<
+
+The health check verifies:
+
+  - Neovim version (>= 0.10)
+  - `git` and `gh` executables
+  - `plenary.async` availability
+  - Configuration state (whether `setup()` was called, cache directory)
+  - Optional integrations (telescope.nvim, render-markdown.nvim)
+  - Current buffer context (git repo, branch, remote, provider match, auth)
+
+Note: PR detection is not probed during checkhealth because it requires a
+live API call.
+
+==============================================================================
+12. LUA API                                          *parley-api*
+
+<parley-api-start>
+<parley-api-end>
+
+ vim:tw=78:ts=8:ft=help:norl:

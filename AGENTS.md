@@ -35,10 +35,7 @@
 ## Documentation
 
 - `doc/parley.nvim.txt` — the vim help file (`:help parley.nvim`)
-- Configuration and Lua API sections are **generated** from LuaCATS annotations via `scripts/gendoc.lua`
-- Run `make doc` after changing `@class`/`@field`/`@param`/`@return` annotations in `lua/parley/init.lua`
-- Run `make check-doc` to verify the help file is up to date (also runs in CI)
-- Any PR that adds or changes commands, keymaps, config options, or public API **must** update `doc/parley.nvim.txt`
+- Any PR that adds or changes commands, keymaps, config options, or public API **must** update `doc/parley.nvim.txt.in` (the template)
 
 ## User interaction
 
