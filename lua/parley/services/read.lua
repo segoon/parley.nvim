@@ -142,6 +142,10 @@ function M.refresh_async(bufnr, opts, callback)
     local provider_snapshot = provider_repository.get(bufnr)
     local review_key = review_repository.make_key(provider_snapshot, ctx)
     local has_data = review_key and review_repository.has_review(review_key) or false
+    if not has_data and review_key then
+      has_data =
+        review_repository.has_cached_review(provider_snapshot.provider, provider_snapshot.opts, ctx.vcs_info.branch)
+    end
     local silent = not opts.progress and has_data
 
     -- Capture the snapshot in a closure so the callback always receives it even

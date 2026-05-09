@@ -19,6 +19,7 @@ local function save_seams()
   saved.prov_get = provider_repository.get
   saved.review_refresh = review_repository.refresh
   saved.review_has = review_repository.has_review
+  saved.review_has_cached = review_repository.has_cached_review
   saved.review_make_key = review_repository.make_key
 end
 
@@ -32,6 +33,7 @@ local function restore_seams()
   provider_repository.get = saved.prov_get
   review_repository.refresh = saved.review_refresh
   review_repository.has_review = saved.review_has
+  review_repository.has_cached_review = saved.review_has_cached
   review_repository.make_key = saved.review_make_key
 end
 
@@ -85,6 +87,10 @@ local function seed_vcs_context()
   end
   review_repository.make_key = function(_ps, _ctx)
     return "test/owner/repo/feature"
+  end
+  -- Default: no disk cache. Tests that simulate warm disk cache override this.
+  review_repository.has_cached_review = function(_provider, _opts, _branch)
+    return false
   end
 end
 
@@ -307,6 +313,34 @@ describe("parley.services.read", function()
 
       read_service.refresh_async(1, { progress = true })
       assert.is_false(captured_silent)
+
+      async_operation.new = orig_new
+    end)
+
+    it("silent = true when disk cache is warm but in-memory is cold (restart)", function()
+      use_sync_async()
+      seed_vcs_context()
+      -- In-memory: no review data
+      review_repository.has_review = function(_key)
+        return false
+      end
+      -- Disk cache: warm
+      review_repository.has_cached_review = function(_provider, _opts, _branch)
+        return true
+      end
+      review_repository.refresh = function(_bufnr, _opts)
+        return nil
+      end
+
+      local captured_silent = nil
+      local orig_new = async_operation.new
+      async_operation.new = function(opts)
+        captured_silent = opts.silent
+        return orig_new(opts)
+      end
+
+      read_service.refresh_async(1)
+      assert.is_true(captured_silent)
 
       async_operation.new = orig_new
     end)

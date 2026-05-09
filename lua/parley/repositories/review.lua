@@ -303,11 +303,22 @@ function M.make_key(provider_snapshot, ctx)
   return name .. "/" .. opts.owner .. "/" .. opts.repo .. "/" .. ctx.vcs_info.branch
 end
 
---- Check whether shared review data exists for the given key.
+--- Check whether shared review data exists for the given key (in-memory).
 --- @param review_key string
 --- @return boolean
 function M.has_review(review_key)
   return M._reviews[review_key] ~= nil
+end
+
+--- Check whether the on-disk cache has PR data for this branch.
+--- Must be called from within a plenary.async coroutine.
+--- @param provider parley.Provider
+--- @param opts table
+--- @param branch string
+--- @return boolean
+function M.has_cached_review(provider, opts, branch)
+  local entry = cache.get_async(pr_cache_key(provider, opts, branch))
+  return entry ~= nil and entry.data ~= nil
 end
 
 --- Get the composite snapshot for a buffer. Returns nil if the buffer has no
