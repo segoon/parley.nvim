@@ -3,6 +3,7 @@
 # Directories
 LUA_DIRS := lua/ plugin/ tests/
 
+
 # ─── Linting ──────────────────────────────────────────────────────────────────
 
 lint:
@@ -26,6 +27,7 @@ PLENARY_PATH := .tests/plenary.nvim
 NEOVIM       ?= nvim
 
 deps:
+
 	@mkdir -p .tests
 	@if [ ! -d "$(PLENARY_PATH)" ]; then \
 		git clone --depth=1 https://github.com/nvim-lua/plenary.nvim $(PLENARY_PATH); \
