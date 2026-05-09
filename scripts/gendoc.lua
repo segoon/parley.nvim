@@ -566,7 +566,7 @@ local function main()
     end
   else
     write_file(OUTPUT_FILE, result)
-    print("Updated " .. OUTPUT_FILE)
+    print("Updated " .. OUTPUT_FILE .. "\n")
   end
 end
 
