@@ -82,33 +82,19 @@ local function deep_copy(t)
   return copy
 end
 
---- Normalize a provider line/range value.
---- @param line parley.LineRange
---- @return integer, integer|nil
-local function normalize_line(line)
-  if type(line) == "number" then
-    assert(line > 0, "line must be > 0")
-    return line, nil
-  end
-
-  assert(type(line) == "table", "line must be an integer or { start, end } range")
-  assert(#line == 2, "line range must contain exactly two integers")
-  local first = assert(tonumber(line[1]), "line range start must be a number")
-  local second = assert(tonumber(line[2]), "line range end must be a number")
-  assert(first > 0 and second > 0, "line range values must be > 0")
-  if first <= second then
-    return first, second
-  end
-  return second, first
-end
-
 -- ---------------------------------------------------------------------------
 -- Constructor
 -- ---------------------------------------------------------------------------
 
 --- Create a new mock provider.
 ---
---- @param opts { token?: string, pr?: parley.PR, discussions?: parley.Discussion[] }
+--- @param opts {
+---   token?: string,
+---   pr?: parley.PR,
+---   discussions?: parley.Discussion[],
+---   head_sha?: string,
+---   write_context?: table,
+--- }
 --- @return table  A mock that satisfies parley.Provider
 function M.new(opts)
   opts = opts or {}
@@ -117,6 +103,8 @@ function M.new(opts)
   --- @class parley.MockState
   --- @field token       string
   --- @field pr          parley.PR|nil
+  --- @field head_sha    string
+  --- @field write_context table|nil
   --- @field discussions parley.Discussion[]
 
   local mock = {
@@ -124,6 +112,8 @@ function M.new(opts)
     state = {
       token = opts.token or "",
       pr = opts.pr and deep_copy(opts.pr) or nil,
+      head_sha = opts.head_sha or "",
+      write_context = opts.write_context and deep_copy(opts.write_context) or nil,
       discussions = opts.discussions and deep_copy(opts.discussions) or {},
     },
 
@@ -192,11 +182,18 @@ function M.new(opts)
   ---@param self table
   ---@param repo_root string
   ---@param branch string
-  ---@return parley.PR|nil
+  ---@return parley.DetectedReview|nil
   function mock:detect_pr(repo_root, branch)
     check_error(self, "detect_pr")
     table.insert(self.calls.detect_pr, { repo_root = repo_root, branch = branch })
-    return self.state.pr and deep_copy(self.state.pr) or nil
+    if not self.state.pr then
+      return nil
+    end
+    return {
+      pr = deep_copy(self.state.pr),
+      head_sha = self.state.head_sha,
+      write_context = deep_copy(self.state.write_context),
+    }
   end
 
   --------------------------------------------------------------------------
@@ -204,11 +201,11 @@ function M.new(opts)
   --------------------------------------------------------------------------
 
   ---@param self table
-  ---@param pr parley.PR
+  ---@param review parley.DetectedReview
   ---@return parley.Discussion[]
-  function mock:fetch_discussions(pr)
+  function mock:fetch_discussions(review)
     check_error(self, "fetch_discussions")
-    table.insert(self.calls.fetch_discussions, { pr = pr })
+    table.insert(self.calls.fetch_discussions, { review = review, pr = review and review.pr or nil })
     return deep_copy(self.state.discussions)
   end
 
@@ -217,16 +214,20 @@ function M.new(opts)
   --------------------------------------------------------------------------
 
   ---@param self table
-  ---@param pr parley.PR
+  ---@param review parley.DetectedReview
   ---@param file string
-  ---@param line parley.LineRange
+  ---@param anchor parley.Anchor
   ---@param body parley.Body
   ---@return parley.Comment
-  function mock:post_top_level_comment(pr, file, line, body)
+  function mock:post_top_level_comment(review, file, anchor, body)
     check_error(self, "post_top_level_comment")
-    table.insert(self.calls.post_top_level_comment, { pr = pr, file = file, line = deep_copy(line), body = body })
-
-    local start_line, end_line = normalize_line(line)
+    table.insert(self.calls.post_top_level_comment, {
+      review = review,
+      pr = review and review.pr or nil,
+      file = file,
+      anchor = deep_copy(anchor),
+      body = body,
+    })
 
     local comment_id = next_id(self)
     local comment = model.new_comment({
@@ -242,8 +243,8 @@ function M.new(opts)
     local discussion = model.new_discussion({
       id = discussion_id,
       file = file,
-      line = start_line,
-      end_line = end_line,
+      line = anchor.start_line,
+      end_line = anchor.end_line,
       comments = { comment },
     })
 
@@ -252,13 +253,13 @@ function M.new(opts)
   end
 
   ---@param self table
-  ---@param pr parley.PR
+  ---@param review parley.DetectedReview
   ---@param file string
-  ---@param line parley.LineRange
+  ---@param anchor parley.Anchor
   ---@param body parley.Body
   ---@param callback fun(result: { ok: boolean, comment?: parley.Comment, err?: string, cancelled?: boolean }): nil
   ---@return { cancel: fun(): nil }
-  function mock:begin_post_top_level_comment(pr, file, line, body, callback)
+  function mock:begin_post_top_level_comment(review, file, anchor, body, callback)
     local cancelled = false
     vim.schedule(function()
       if cancelled then
@@ -267,7 +268,7 @@ function M.new(opts)
       end
 
       local ok, result = pcall(function()
-        return self:post_top_level_comment(pr, file, line, body)
+        return self:post_top_level_comment(review, file, anchor, body)
       end)
       if ok then
         callback({ ok = true, comment = result })
@@ -288,26 +289,29 @@ function M.new(opts)
   --------------------------------------------------------------------------
 
   ---@param self table
-  ---@param pr parley.PR
-  ---@param discussion_id string
-  ---@param parent_comment_id string
+  ---@param review parley.DetectedReview
+  ---@param discussion parley.Discussion
+  ---@param parent_comment parley.Comment
   ---@param body parley.Body
   ---@return parley.Comment
-  function mock:reply(pr, discussion_id, parent_comment_id, body)
+  function mock:reply(review, discussion, parent_comment, body)
     check_error(self, "reply")
-    table.insert(
-      self.calls.reply,
-      { pr = pr, discussion_id = discussion_id, parent_comment_id = parent_comment_id, body = body }
-    )
+    table.insert(self.calls.reply, {
+      review = review,
+      pr = review and review.pr or nil,
+      discussion = deep_copy(discussion),
+      parent_comment = deep_copy(parent_comment),
+      body = body,
+    })
 
-    local discussion = find_discussion(self.state.discussions, discussion_id)
-    if not discussion then
-      error("discussion not found: " .. discussion_id, 2)
+    local stored_discussion = find_discussion(self.state.discussions, discussion.id)
+    if not stored_discussion then
+      error("discussion not found: " .. discussion.id, 2)
     end
 
-    local parent = find_comment({ discussion }, parent_comment_id)
+    local parent = find_comment({ stored_discussion }, parent_comment.id)
     if not parent then
-      error("parent comment not found: " .. parent_comment_id, 2)
+      error("parent comment not found: " .. parent_comment.id, 2)
     end
 
     local comment_id = next_id(self)
@@ -318,21 +322,21 @@ function M.new(opts)
       created_at = "2024-01-01T00:00:00Z",
       updated_at = "2024-01-01T00:00:00Z",
       is_own = true,
-      parent_comment_id = parent_comment_id,
+      parent_comment_id = parent_comment.id,
     })
 
-    table.insert(discussion.comments, comment)
+    table.insert(stored_discussion.comments, comment)
     return deep_copy(comment)
   end
 
   ---@param self table
-  ---@param pr parley.PR
-  ---@param discussion_id string
-  ---@param parent_comment_id string
+  ---@param review parley.DetectedReview
+  ---@param discussion parley.Discussion
+  ---@param parent_comment parley.Comment
   ---@param body parley.Body
   ---@param callback fun(result: { ok: boolean, comment?: parley.Comment, err?: string, cancelled?: boolean }): nil
   ---@return { cancel: fun(): nil }
-  function mock:begin_reply(pr, discussion_id, parent_comment_id, body, callback)
+  function mock:begin_reply(review, discussion, parent_comment, body, callback)
     local cancelled = false
     vim.schedule(function()
       if cancelled then
@@ -341,7 +345,7 @@ function M.new(opts)
       end
 
       local ok, result = pcall(function()
-        return self:reply(pr, discussion_id, parent_comment_id, body)
+        return self:reply(review, discussion, parent_comment, body)
       end)
       if ok then
         callback({ ok = true, comment = result })
@@ -362,11 +366,14 @@ function M.new(opts)
   --------------------------------------------------------------------------
 
   ---@param self table
-  ---@param pr parley.PR
+  ---@param review parley.DetectedReview
   ---@param discussion_id string
-  function mock:resolve(pr, discussion_id)
+  function mock:resolve(review, discussion_id)
     check_error(self, "resolve")
-    table.insert(self.calls.resolve, { pr = pr, discussion_id = discussion_id })
+    table.insert(
+      self.calls.resolve,
+      { review = review, pr = review and review.pr or nil, discussion_id = discussion_id }
+    )
 
     local discussion = find_discussion(self.state.discussions, discussion_id)
     if not discussion then
@@ -380,11 +387,14 @@ function M.new(opts)
   --------------------------------------------------------------------------
 
   ---@param self table
-  ---@param pr parley.PR
+  ---@param review parley.DetectedReview
   ---@param discussion_id string
-  function mock:unresolve(pr, discussion_id)
+  function mock:unresolve(review, discussion_id)
     check_error(self, "unresolve")
-    table.insert(self.calls.unresolve, { pr = pr, discussion_id = discussion_id })
+    table.insert(
+      self.calls.unresolve,
+      { review = review, pr = review and review.pr or nil, discussion_id = discussion_id }
+    )
 
     local discussion = find_discussion(self.state.discussions, discussion_id)
     if not discussion then
@@ -398,12 +408,15 @@ function M.new(opts)
   --------------------------------------------------------------------------
 
   ---@param self table
-  ---@param pr parley.PR
+  ---@param review parley.DetectedReview
   ---@param comment_id string
   ---@param reaction string
-  function mock:react(pr, comment_id, reaction)
+  function mock:react(review, comment_id, reaction)
     check_error(self, "react")
-    table.insert(self.calls.react, { pr = pr, comment_id = comment_id, reaction = reaction })
+    table.insert(
+      self.calls.react,
+      { review = review, pr = review and review.pr or nil, comment_id = comment_id, reaction = reaction }
+    )
 
     local comment = find_comment(self.state.discussions, comment_id)
     if not comment then
@@ -447,13 +460,16 @@ function M.new(opts)
   --------------------------------------------------------------------------
 
   ---@param self table
-  ---@param pr parley.PR
+  ---@param review parley.DetectedReview
   ---@param comment_id string
   ---@param body parley.Body
   ---@return parley.Comment
-  function mock:edit(pr, comment_id, body)
+  function mock:edit(review, comment_id, body)
     check_error(self, "edit")
-    table.insert(self.calls.edit, { pr = pr, comment_id = comment_id, body = body })
+    table.insert(
+      self.calls.edit,
+      { review = review, pr = review and review.pr or nil, comment_id = comment_id, body = body }
+    )
 
     local comment = find_comment(self.state.discussions, comment_id)
     if not comment then
@@ -470,11 +486,11 @@ function M.new(opts)
   --------------------------------------------------------------------------
 
   ---@param self table
-  ---@param pr parley.PR
+  ---@param review parley.DetectedReview
   ---@param comment_id string
-  function mock:delete(pr, comment_id)
+  function mock:delete(review, comment_id)
     check_error(self, "delete")
-    table.insert(self.calls.delete, { pr = pr, comment_id = comment_id })
+    table.insert(self.calls.delete, { review = review, pr = review and review.pr or nil, comment_id = comment_id })
 
     local found = false
     for _, discussion in ipairs(self.state.discussions) do
@@ -500,12 +516,15 @@ function M.new(opts)
   --------------------------------------------------------------------------
 
   ---@param self table
-  ---@param pr parley.PR
+  ---@param review parley.DetectedReview
   ---@param event string
   ---@param body parley.Body
-  function mock:submit_review(pr, event, body)
+  function mock:submit_review(review, event, body)
     check_error(self, "submit_review")
-    table.insert(self.calls.submit_review, { pr = pr, event = event, body = body })
+    table.insert(
+      self.calls.submit_review,
+      { review = review, pr = review and review.pr or nil, event = event, body = body }
+    )
 
     local new_status = REVIEW_EVENT_STATUS[event]
     if not new_status then

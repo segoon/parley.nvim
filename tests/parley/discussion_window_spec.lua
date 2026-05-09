@@ -439,9 +439,8 @@ describe("parley.discussion_window", function()
       },
     }
     package.loaded["parley.services.write"] = {
-      react_comment = function(src_bufnr, cursor_line, comment_id, reaction)
-        calls[#calls + 1] =
-          { bufnr = src_bufnr, cursor_line = cursor_line, comment_id = comment_id, reaction = reaction }
+      react_comment = function(src_bufnr, cursor_line, comment, reaction)
+        calls[#calls + 1] = { bufnr = src_bufnr, cursor_line = cursor_line, comment = comment, reaction = reaction }
       end,
     }
     discussion_window._select_reaction = function(_items, on_choice)
@@ -450,7 +449,10 @@ describe("parley.discussion_window", function()
 
     discussion_window.open_current_line(bufnr)
     assert.is_true(discussion_window.react_current_comment(bufnr))
-    assert.same({ { bufnr = bufnr, cursor_line = 3, comment_id = "c1", reaction = "heart" } }, calls)
+    assert.equals(bufnr, calls[1].bufnr)
+    assert.equals(3, calls[1].cursor_line)
+    assert.equals("c1", calls[1].comment.id)
+    assert.equals("heart", calls[1].reaction)
   end)
 
   it("uses the reaction picker window by default", function()
@@ -493,14 +495,17 @@ describe("parley.discussion_window", function()
       },
     }
     package.loaded["parley.services.write"] = {
-      open_edit_input = function(src_bufnr, discussion_id, comment_id, text)
-        calls[#calls + 1] = { bufnr = src_bufnr, discussion_id = discussion_id, comment_id = comment_id, text = text }
+      open_edit_input = function(src_bufnr, discussion, comment)
+        calls[#calls + 1] = { bufnr = src_bufnr, discussion = discussion, comment = comment }
       end,
     }
 
     discussion_window.open_current_line(bufnr)
     assert.is_true(discussion_window.edit_current_comment(bufnr))
-    assert.same({ { bufnr = bufnr, discussion_id = "d1", comment_id = "c1", text = "Editable" } }, calls)
+    assert.equals(bufnr, calls[1].bufnr)
+    assert.equals("d1", calls[1].discussion.id)
+    assert.equals("c1", calls[1].comment.id)
+    assert.equals("Editable", calls[1].comment.body.text)
   end)
 
   it("requires ownership before editing or deleting", function()
@@ -558,14 +563,16 @@ describe("parley.discussion_window", function()
       },
     }
     package.loaded["parley.services.write"] = {
-      delete_comment = function(src_bufnr, cursor_line, comment_id)
-        calls[#calls + 1] = { bufnr = src_bufnr, cursor_line = cursor_line, comment_id = comment_id }
+      delete_comment = function(src_bufnr, cursor_line, comment)
+        calls[#calls + 1] = { bufnr = src_bufnr, cursor_line = cursor_line, comment = comment }
       end,
     }
 
     discussion_window.open_current_line(bufnr)
     assert.is_true(discussion_window.delete_current_comment(bufnr))
-    assert.same({ { bufnr = bufnr, cursor_line = 3, comment_id = "c1" } }, calls)
+    assert.equals(bufnr, calls[1].bufnr)
+    assert.equals(3, calls[1].cursor_line)
+    assert.equals("c1", calls[1].comment.id)
   end)
 
   it("submits through the composer handle instead of the raw window instance", function()

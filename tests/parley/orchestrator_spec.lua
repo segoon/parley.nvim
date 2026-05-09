@@ -49,6 +49,16 @@ local SAMPLE_PR = model.new_pr({
   review_status = "pending",
 })
 
+---@param pr parley.PR
+---@return parley.DetectedReview
+local function make_review(pr)
+  return {
+    pr = pr,
+    head_sha = "deadbeef",
+    write_context = { number = tonumber(pr.id), head_sha = "deadbeef" },
+  }
+end
+
 local function make_discussion(id, file, line, text)
   return model.new_discussion({
     id = tostring(id),
@@ -217,14 +227,12 @@ local function setup(o)
   if not o.no_provider then
     provider = mock_provider.new({
       pr = o.pr,
+      head_sha = "deadbeef",
+      write_context = o.pr and { number = tonumber(o.pr.id), head_sha = "deadbeef" } or nil,
       discussions = o.discussions or {},
     })
     if o.provider_error then
       provider:set_error(o.provider_error.method, o.provider_error.msg)
-    end
-    -- Add a head_sha accessor that the orchestrator uses.
-    provider.head_sha = function(_self, _pr)
-      return "deadbeef"
     end
     registry.register({
       name = "MockGitHub",
@@ -356,7 +364,7 @@ async_tests.describe("parley.services.read refresh", function()
     -- Pre-seed the cache with a stale PR record so we can verify it goes away.
     cache.set(
       { provider = "github", repository = "owner/repo", subkey = "pr_branch_feature" },
-      { id = "old", head_sha = "deadbeef" }
+      { review = make_review(SAMPLE_PR) }
     )
     assert.is_not_nil(
       cache.get({ provider = "github", repository = "owner/repo", subkey = "pr_branch_feature" }),
@@ -384,7 +392,7 @@ async_tests.describe("parley.services.read refresh", function()
     -- Pre-seed cache (after setup so the in-memory fs is in place).
     cache.set(
       { provider = "github", repository = "owner/repo", subkey = "pr_branch_feature" },
-      { id = "42", head_sha = "deadbeef" }
+      { review = make_review(SAMPLE_PR) }
     )
     cache.set(
       { provider = "github", repository = "owner/repo", subkey = "discussions_42" },
@@ -407,7 +415,7 @@ async_tests.describe("parley.services.read refresh", function()
 
     cache.set(
       { provider = "github", repository = "owner/repo", subkey = "pr_branch_feature" },
-      { id = "42", head_sha = "deadbeef" }
+      { review = make_review(SAMPLE_PR) }
     )
     cache.set(
       { provider = "github", repository = "owner/repo", subkey = "discussions_42" },
@@ -471,7 +479,7 @@ async_tests.describe("parley.services.read refresh", function()
     -- Pre-seed cache so the stale render runs first (after setup so fake fs is in place).
     cache.set(
       { provider = "github", repository = "owner/repo", subkey = "pr_branch_feature" },
-      { id = "42", head_sha = "deadbeef" }
+      { review = make_review(SAMPLE_PR) }
     )
     cache.set(
       { provider = "github", repository = "owner/repo", subkey = "discussions_42" },
@@ -499,7 +507,7 @@ async_tests.describe("parley.services.read refresh", function()
 
     cache.set(
       { provider = "github", repository = "owner/repo", subkey = "pr_branch_feature" },
-      { id = "42", head_sha = "deadbeef" }
+      { review = make_review(SAMPLE_PR) }
     )
     cache.set(
       { provider = "github", repository = "owner/repo", subkey = "discussions_42" },

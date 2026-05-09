@@ -22,46 +22,62 @@ local M = {}
 --- always invoke methods from within a plenary async context.
 ---
 --- @class parley.Provider
---- @alias parley.LineRange integer|[integer, integer]
+--- @class parley.Anchor
+--- @field start_line integer
+--- @field end_line integer|nil
+---
+--- @class parley.DetectedReview
+--- @field pr parley.PR
+--- @field head_sha string
+--- @field write_context table|nil
 ---
 --- Return the authentication token for API calls.
 --- @field auth fun(self: parley.Provider): string
 ---
 --- Detect an open PR for the given repo root and branch.
 --- Returns nil when no PR is found (plugin should silently deactivate).
---- @field detect_pr fun(self: parley.Provider, repo_root: string, branch: string): parley.PR|nil
+--- @field detect_pr fun(self: parley.Provider, repo_root: string, branch: string): parley.DetectedReview|nil
 ---
 --- Fetch all discussions for a PR.
---- @field fetch_discussions fun(self: parley.Provider, pr: parley.PR): parley.Discussion[]
+--- @field fetch_discussions fun(self: parley.Provider, review: parley.DetectedReview): parley.Discussion[]
 ---
 --- Post a new top-level comment anchored to a file/line or line range.
 --- Returns the newly created Comment.
---- @field post_top_level_comment fun(self: parley.Provider, pr: parley.PR, file: string, line: parley.LineRange,
+--- @field post_top_level_comment fun(
+---   self: parley.Provider,
+---   review: parley.DetectedReview,
+---   file: string,
+---   anchor: parley.Anchor,
 ---   body: parley.Body): parley.Comment
 ---
 --- Post a reply to an existing discussion.
 --- Returns the newly created Comment.
---- @field reply fun(self: parley.Provider, pr: parley.PR, discussion_id: string,
----   parent_comment_id: string, body: parley.Body): parley.Comment
+--- @field reply fun(self: parley.Provider, review: parley.DetectedReview, discussion: parley.Discussion,
+---   parent_comment: parley.Comment, body: parley.Body): parley.Comment
 ---
 --- Mark a discussion as resolved.
---- @field resolve fun(self: parley.Provider, pr: parley.PR, discussion_id: string)
+--- @field resolve fun(self: parley.Provider, review: parley.DetectedReview, discussion_id: string)
 ---
 --- Mark a discussion as unresolved.
---- @field unresolve fun(self: parley.Provider, pr: parley.PR, discussion_id: string)
+--- @field unresolve fun(self: parley.Provider, review: parley.DetectedReview, discussion_id: string)
 ---
 --- Toggle a reaction on a comment (add if absent, remove if present).
---- @field react fun(self: parley.Provider, pr: parley.PR, comment_id: string, reaction: string)
+--- @field react fun(self: parley.Provider, review: parley.DetectedReview, comment_id: string, reaction: string)
 ---
 --- Edit an existing comment body. Returns the updated Comment.
---- @field edit fun(self: parley.Provider, pr: parley.PR, comment_id: string, body: parley.Body): parley.Comment
+--- @field edit fun(
+---   self: parley.Provider,
+---   review: parley.DetectedReview,
+---   comment_id: string,
+---   body: parley.Body
+--- ): parley.Comment
 ---
 --- Delete a comment.
---- @field delete fun(self: parley.Provider, pr: parley.PR, comment_id: string)
+--- @field delete fun(self: parley.Provider, review: parley.DetectedReview, comment_id: string)
 ---
 --- Submit a PR-level review.
 --- `event` is one of: "approve", "request_changes", "comment".
---- @field submit_review fun(self: parley.Provider, pr: parley.PR, event: string, body: parley.Body)
+--- @field submit_review fun(self: parley.Provider, review: parley.DetectedReview, event: string, body: parley.Body)
 
 -- ---------------------------------------------------------------------------
 -- Required method names (single source of truth)

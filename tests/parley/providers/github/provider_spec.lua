@@ -282,7 +282,17 @@ local function make_auth_err(msg)
 end
 
 --- Build a minimal provider for testing.
---- @param opts? { _runner?: fun(cmd: string[]): table, _spawn?: fun(cmd: string[], callback: fun(result: {code: integer, stdout: string, stderr: string})): vim.SystemObj|nil, _sleep?: fun(timeout_ms: integer): nil, _defer?: fun(callback: fun(), timeout_ms: integer): uv_timer_t|nil, _get_config?: fun(): table|nil, _system?: fun(cmd: string[], opts: table, callback: fun(result: vim.SystemCompleted)): vim.SystemObj }
+--- @param opts? {
+---   _runner?: fun(cmd: string[]): table,
+---   _spawn?: fun(
+---     cmd: string[],
+---     callback: fun(result: {code: integer, stdout: string, stderr: string})
+---   ): vim.SystemObj|nil,
+---   _sleep?: fun(timeout_ms: integer): nil,
+---   _defer?: fun(callback: fun(), timeout_ms: integer): uv_timer_t|nil,
+---   _get_config?: fun(): table|nil,
+---   _system?: fun(cmd: string[], opts: table, callback: fun(result: vim.SystemCompleted)): vim.SystemObj,
+--- }
 local function make_provider(opts)
   if type(opts) == "function" then
     opts = { _runner = opts }
@@ -314,6 +324,27 @@ local SAMPLE_PR = model.new_pr({
   url = "https://github.com/owner/repo/pull/42",
   review_status = "pending",
 })
+
+---@param head_sha? string
+---@param number? integer
+---@return parley.DetectedReview
+local function make_review(head_sha, number)
+  return {
+    pr = SAMPLE_PR,
+    head_sha = head_sha or "abc123def456",
+    write_context = {
+      head_sha = head_sha or "abc123def456",
+      number = number or 42,
+    },
+  }
+end
+
+---@param start_line integer
+---@param end_line? integer
+---@return parley.Anchor
+local function make_anchor(start_line, end_line)
+  return { start_line = start_line, end_line = end_line }
+end
 
 -- ---------------------------------------------------------------------------
 -- Suite: M.new / interface validation
@@ -383,9 +414,9 @@ async_tests.describe("parley.providers.github.provider — detect_pr", function(
       end,
     })
 
-    local pr = p:detect_pr("/repo/root", "feature")
+    local review = p:detect_pr("/repo/root", "feature")
 
-    assert.is_not_nil(pr)
+    assert.is_not_nil(review)
     assert.equals(250, sleeps[1])
     assert.equals(3, #runner._calls)
   end)
@@ -402,10 +433,10 @@ async_tests.describe("parley.providers.github.provider — detect_pr", function(
       end,
     })
 
-    local ok, err = pcall(function()
+    local success, err = pcall(function()
       p:detect_pr("/repo/root", "feature")
     end)
-    assert.is_false(ok)
+    assert.is_false(success)
     assert.is_not_nil(tostring(err):find("parley.github: gh command failed", 1, true))
     assert.equals(0, #sleeps)
     assert.equals(1, #runner._calls)
@@ -424,9 +455,9 @@ async_tests.describe("parley.providers.github.provider — detect_pr", function(
       end,
     })
 
-    local pr = p:detect_pr("/repo/root", "feature")
+    local review = p:detect_pr("/repo/root", "feature")
 
-    assert.is_nil(pr)
+    assert.is_nil(review)
     assert.equals(5000, timeouts[1])
   end)
 
@@ -435,8 +466,8 @@ async_tests.describe("parley.providers.github.provider — detect_pr", function(
       { pattern = "/pulls", response = ok(PR_LIST_EMPTY_JSON) },
     })
     local p = make_provider(runner.fn)
-    local pr = p:detect_pr("/repo/root", "feature")
-    assert.is_nil(pr)
+    local review = p:detect_pr("/repo/root", "feature")
+    assert.is_nil(review)
   end)
 
   async_tests.it("maps PR fields to parley.PR correctly", function()
@@ -445,16 +476,16 @@ async_tests.describe("parley.providers.github.provider — detect_pr", function(
       { pattern = "/pulls", response = ok(PR_LIST_JSON) },
     })
     local p = make_provider(runner.fn)
-    local pr = p:detect_pr("/repo/root", "feature")
+    local review = p:detect_pr("/repo/root", "feature")
 
-    assert.is_not_nil(pr)
-    assert.equals("42", pr.id)
-    assert.equals("Add feature", pr.title)
-    assert.equals("open", pr.state)
-    assert.equals("main", pr.base_branch)
-    assert.equals("feature", pr.head_branch)
-    assert.equals("alice", pr.author)
-    assert.equals("https://github.com/owner/repo/pull/42", pr.url)
+    assert.is_not_nil(review)
+    assert.equals("42", review.pr.id)
+    assert.equals("Add feature", review.pr.title)
+    assert.equals("open", review.pr.state)
+    assert.equals("main", review.pr.base_branch)
+    assert.equals("feature", review.pr.head_branch)
+    assert.equals("alice", review.pr.author)
+    assert.equals("https://github.com/owner/repo/pull/42", review.pr.url)
   end)
 
   async_tests.it("sets review_status=approved when reviews show APPROVED", function()
@@ -463,8 +494,8 @@ async_tests.describe("parley.providers.github.provider — detect_pr", function(
       { pattern = "/pulls", response = ok(PR_LIST_JSON) },
     })
     local p = make_provider(runner.fn)
-    local pr = p:detect_pr("/repo/root", "feature")
-    assert.equals("approved", pr.review_status)
+    local review = p:detect_pr("/repo/root", "feature")
+    assert.equals("approved", review.pr.review_status)
   end)
 
   async_tests.it("sets review_status=changes_requested when reviews show CHANGES_REQUESTED", function()
@@ -473,8 +504,8 @@ async_tests.describe("parley.providers.github.provider — detect_pr", function(
       { pattern = "/pulls", response = ok(PR_LIST_JSON) },
     })
     local p = make_provider(runner.fn)
-    local pr = p:detect_pr("/repo/root", "feature")
-    assert.equals("changes_requested", pr.review_status)
+    local review = p:detect_pr("/repo/root", "feature")
+    assert.equals("changes_requested", review.pr.review_status)
   end)
 
   async_tests.it("sets review_status=pending when no reviews exist", function()
@@ -483,20 +514,19 @@ async_tests.describe("parley.providers.github.provider — detect_pr", function(
       { pattern = "/pulls", response = ok(PR_LIST_JSON) },
     })
     local p = make_provider(runner.fn)
-    local pr = p:detect_pr("/repo/root", "feature")
-    assert.equals("pending", pr.review_status)
+    local review = p:detect_pr("/repo/root", "feature")
+    assert.equals("pending", review.pr.review_status)
   end)
 
-  async_tests.it("caches head_sha and pr number for later use", function()
+  async_tests.it("returns explicit write context for later use", function()
     local runner = make_route_runner({
       { pattern = "/reviews", response = ok(REVIEWS_EMPTY_JSON) },
       { pattern = "/pulls", response = ok(PR_LIST_JSON) },
     })
     local p = make_provider(runner.fn)
-    p:detect_pr("/repo/root", "feature")
-    assert.is_not_nil(p._pr_cache["42"])
-    assert.equals("abc123def456", p._pr_cache["42"].head_sha)
-    assert.equals(42, p._pr_cache["42"].number)
+    local review = p:detect_pr("/repo/root", "feature")
+    assert.equals("abc123def456", review.head_sha)
+    assert.same({ head_sha = "abc123def456", number = 42 }, review.write_context)
   end)
 
   async_tests.it("passes the branch in the query string", function()
@@ -528,7 +558,7 @@ async_tests.describe("parley.providers.github.provider — fetch_discussions", f
       { pattern = "/comments", response = ok(COMMENTS_JSON) },
     })
     local p = make_provider(runner.fn)
-    local discussions = p:fetch_discussions(SAMPLE_PR)
+    local discussions = p:fetch_discussions(make_review())
     assert.equals(1, #discussions)
   end)
 
@@ -537,7 +567,7 @@ async_tests.describe("parley.providers.github.provider — fetch_discussions", f
       { pattern = "/comments", response = ok(COMMENTS_JSON) },
     })
     local p = make_provider(runner.fn)
-    local disc = p:fetch_discussions(SAMPLE_PR)[1]
+    local disc = p:fetch_discussions(make_review())[1]
 
     assert.equals("1001", disc.id)
     assert.equals("src/foo.lua", disc.file)
@@ -550,7 +580,7 @@ async_tests.describe("parley.providers.github.provider — fetch_discussions", f
       { pattern = "/comments", response = ok(COMMENTS_JSON) },
     })
     local p = make_provider(runner.fn)
-    local disc = p:fetch_discussions(SAMPLE_PR)[1]
+    local disc = p:fetch_discussions(make_review())[1]
     assert.equals(2, #disc.comments)
   end)
 
@@ -559,7 +589,7 @@ async_tests.describe("parley.providers.github.provider — fetch_discussions", f
       { pattern = "/comments", response = ok(COMMENTS_JSON) },
     })
     local p = make_provider(runner.fn)
-    local root = p:fetch_discussions(SAMPLE_PR)[1].comments[1]
+    local root = p:fetch_discussions(make_review())[1].comments[1]
     assert.is_nil(root.parent_comment_id)
   end)
 
@@ -568,7 +598,7 @@ async_tests.describe("parley.providers.github.provider — fetch_discussions", f
       { pattern = "/comments", response = ok(COMMENTS_JSON) },
     })
     local p = make_provider(runner.fn)
-    local reply = p:fetch_discussions(SAMPLE_PR)[1].comments[2]
+    local reply = p:fetch_discussions(make_review())[1].comments[2]
     assert.equals("1001", reply.parent_comment_id)
   end)
 
@@ -577,7 +607,7 @@ async_tests.describe("parley.providers.github.provider — fetch_discussions", f
       { pattern = "/comments", response = ok(COMMENTS_JSON) },
     })
     local p = make_provider(runner.fn)
-    local root = p:fetch_discussions(SAMPLE_PR)[1].comments[1]
+    local root = p:fetch_discussions(make_review())[1].comments[1]
     assert.equals("alice", root.author)
     assert.equals("First comment", root.body.text)
     assert.equals("markdown", root.body.format)
@@ -588,7 +618,7 @@ async_tests.describe("parley.providers.github.provider — fetch_discussions", f
       { pattern = "/comments", response = ok(COMMENTS_JSON) },
     })
     local p = make_provider(runner.fn)
-    local root = p:fetch_discussions(SAMPLE_PR)[1].comments[1]
+    local root = p:fetch_discussions(make_review())[1].comments[1]
     -- root comment has total_count=1 and +1=1
     assert.equals(1, #root.reactions)
     assert.equals("+1", root.reactions[1].type)
@@ -600,7 +630,7 @@ async_tests.describe("parley.providers.github.provider — fetch_discussions", f
       { pattern = "/comments", response = ok(COMMENTS_NULL_LINE_JSON) },
     })
     local p = make_provider(runner.fn)
-    local disc = p:fetch_discussions(SAMPLE_PR)[1]
+    local disc = p:fetch_discussions(make_review())[1]
     assert.equals(5, disc.line)
   end)
 
@@ -657,7 +687,7 @@ async_tests.describe("parley.providers.github.provider — fetch_discussions", f
       { pattern = "/comments", response = ok(two_roots) },
     })
     local p = make_provider(runner.fn)
-    local discussions = p:fetch_discussions(SAMPLE_PR)
+    local discussions = p:fetch_discussions(make_review())
     assert.equals(2, #discussions)
   end)
 end)
@@ -667,20 +697,13 @@ end)
 -- ---------------------------------------------------------------------------
 
 async_tests.describe("parley.providers.github.provider — post_top_level_comment", function()
-  --- Helper: provider with pr already cached.
-  local function primed_provider(runner_fn)
-    local p = make_provider(runner_fn)
-    p._pr_cache["42"] = { head_sha = "abc123def456", number = 42 }
-    return p
-  end
-
   async_tests.it("sends the correct gh api command fields", function()
     local runner = make_runner(function(_cmd)
       return ok(POST_COMMENT_RESP_JSON)
     end)
-    local p = primed_provider(runner.fn)
+    local p = make_provider(runner.fn)
     local body = model.new_body({ text = "hello", format = "markdown" })
-    p:post_top_level_comment(SAMPLE_PR, "src/foo.lua", 15, body)
+    p:post_top_level_comment(make_review(), "src/foo.lua", make_anchor(15), body)
 
     local cmd = runner._calls[1]
     -- Must contain --method POST
@@ -700,31 +723,22 @@ async_tests.describe("parley.providers.github.provider — post_top_level_commen
     local runner = make_route_runner({
       { pattern = "/comments", response = ok(POST_COMMENT_RESP_JSON) },
     })
-    local p = primed_provider(runner.fn)
+    local p = make_provider(runner.fn)
     local body = model.new_body({ text = "New comment", format = "markdown" })
-    local comment = p:post_top_level_comment(SAMPLE_PR, "src/foo.lua", 15, body)
+    local comment = p:post_top_level_comment(make_review(), "src/foo.lua", make_anchor(15), body)
 
     assert.equals("3001", comment.id)
     assert.equals("alice", comment.author)
     assert.equals("New comment", comment.body.text)
   end)
 
-  async_tests.it("errors when pr is not in cache (detect_pr not called)", function()
-    local runner = make_route_runner({})
-    local p = make_provider(runner.fn)
-    local body = model.new_body({ text = "x", format = "markdown" })
-    assert.has_error(function()
-      p:post_top_level_comment(SAMPLE_PR, "src/foo.lua", 1, body)
-    end)
-  end)
-
   async_tests.it("sends start_line and line for ranges", function()
     local runner = make_runner(function(_cmd)
       return ok(POST_COMMENT_RESP_JSON)
     end)
-    local p = primed_provider(runner.fn)
+    local p = make_provider(runner.fn)
     local body = model.new_body({ text = "hello", format = "markdown" })
-    p:post_top_level_comment(SAMPLE_PR, "src/foo.lua", { 12, 18 }, body)
+    p:post_top_level_comment(make_review(), "src/foo.lua", make_anchor(12, 18), body)
 
     local cmd = runner._calls[1]
     assert.is_not_nil(vim.tbl_contains(cmd, "start_line=12"))
@@ -758,11 +772,24 @@ async_tests.describe("parley.providers.github.provider — reply", function()
         return nil
       end,
     })
-    p._pr_cache["42"] = { head_sha = "abc123def456", number = 42 }
     local body = model.new_body({ text = "reply", format = "markdown" })
     local result
+    local discussion = model.new_discussion({
+      id = "1001",
+      file = "src/foo.lua",
+      line = 10,
+      comments = {
+        model.new_comment({
+          id = "1002",
+          author = "bob",
+          body = model.new_body({ text = "root", format = "markdown" }),
+          created_at = "2024-01-01T00:00:00Z",
+          updated_at = "2024-01-01T00:00:00Z",
+        }),
+      },
+    })
 
-    p:begin_reply(SAMPLE_PR, "1001", "1002", body, function(value)
+    p:begin_reply(make_review(), discussion, discussion.comments[1], body, function(value)
       result = value
     end)
 
@@ -778,9 +805,22 @@ async_tests.describe("parley.providers.github.provider — reply", function()
       return ok(POST_COMMENT_RESP_JSON)
     end)
     local p = make_provider(runner.fn)
-    p._pr_cache["42"] = { head_sha = "abc123def456", number = 42 }
     local body = model.new_body({ text = "reply text", format = "markdown" })
-    p:reply(SAMPLE_PR, "1001", "1002", body)
+    local discussion = model.new_discussion({
+      id = "1001",
+      file = "src/foo.lua",
+      line = 10,
+      comments = {
+        model.new_comment({
+          id = "1002",
+          author = "bob",
+          body = model.new_body({ text = "root", format = "markdown" }),
+          created_at = "2024-01-01T00:00:00Z",
+          updated_at = "2024-01-01T00:00:00Z",
+        }),
+      },
+    })
+    p:reply(make_review(), discussion, discussion.comments[1], body)
 
     local cmd = runner._calls[1]
     local has_reply_to = false
@@ -798,9 +838,22 @@ async_tests.describe("parley.providers.github.provider — reply", function()
       { pattern = "/comments", response = ok(POST_COMMENT_RESP_JSON) },
     })
     local p = make_provider(runner.fn)
-    p._pr_cache["42"] = { head_sha = "abc123def456", number = 42 }
     local body = model.new_body({ text = "reply", format = "markdown" })
-    local comment = p:reply(SAMPLE_PR, "1001", "1002", body)
+    local discussion = model.new_discussion({
+      id = "1001",
+      file = "src/foo.lua",
+      line = 10,
+      comments = {
+        model.new_comment({
+          id = "1002",
+          author = "bob",
+          body = model.new_body({ text = "root", format = "markdown" }),
+          created_at = "2024-01-01T00:00:00Z",
+          updated_at = "2024-01-01T00:00:00Z",
+        }),
+      },
+    })
+    local comment = p:reply(make_review(), discussion, discussion.comments[1], body)
     assert.equals("3001", comment.id)
   end)
 end)
@@ -813,14 +866,14 @@ describe("parley.providers.github.provider — resolve/unresolve stubs", functio
   it("resolve raises an error mentioning GraphQL / POSTPONED", function()
     local p = make_provider(function(_) end)
     assert.has_error(function()
-      p:resolve(SAMPLE_PR, "1001")
+      p:resolve(make_review(), "1001")
     end)
   end)
 
   it("unresolve raises an error mentioning GraphQL / POSTPONED", function()
     local p = make_provider(function(_) end)
     assert.has_error(function()
-      p:unresolve(SAMPLE_PR, "1001")
+      p:unresolve(make_review(), "1001")
     end)
   end)
 end)
@@ -847,7 +900,7 @@ async_tests.describe("parley.providers.github.provider — react", function()
       return ok(REACTIONS_EMPTY_JSON)
     end)
     local p = make_provider(runner.fn)
-    p:react(SAMPLE_PR, "1001", "+1")
+    p:react(make_review(), "1001", "+1")
     assert.is_not_nil(p._viewer_login)
     assert.equals("alice", p._viewer_login)
   end)
@@ -874,7 +927,7 @@ async_tests.describe("parley.providers.github.provider — react", function()
       return ok(REACTION_CREATED_JSON)
     end)
     local p = make_provider(runner.fn)
-    p:react(SAMPLE_PR, "1001", "+1")
+    p:react(make_review(), "1001", "+1")
 
     -- Last call should be POST
     local last = runner._calls[#runner._calls]
@@ -902,7 +955,7 @@ async_tests.describe("parley.providers.github.provider — react", function()
       return ok(REACTIONS_WITH_VIEWER_JSON)
     end)
     local p = make_provider(runner.fn)
-    p:react(SAMPLE_PR, "1001", "+1")
+    p:react(make_review(), "1001", "+1")
 
     -- One of the calls must be DELETE
     local found_delete = false
@@ -927,8 +980,8 @@ async_tests.describe("parley.providers.github.provider — react", function()
       return ok(REACTIONS_EMPTY_JSON)
     end)
     local p = make_provider(runner.fn)
-    p:react(SAMPLE_PR, "1001", "+1")
-    p:react(SAMPLE_PR, "1002", "+1")
+    p:react(make_review(), "1001", "+1")
+    p:react(make_review(), "1002", "+1")
     assert.equals(1, user_call_count)
   end)
 end)
@@ -944,7 +997,7 @@ async_tests.describe("parley.providers.github.provider — edit", function()
     end)
     local p = make_provider(runner.fn)
     local body = model.new_body({ text = "Edited body", format = "markdown" })
-    p:edit(SAMPLE_PR, "1001", body)
+    p:edit(make_review(), "1001", body)
 
     local cmd = runner._calls[1]
     assert.is_not_nil(vim.tbl_contains(cmd, "PATCH"))
@@ -965,7 +1018,7 @@ async_tests.describe("parley.providers.github.provider — edit", function()
     })
     local p = make_provider(runner.fn)
     local body = model.new_body({ text = "Edited body", format = "markdown" })
-    local comment = p:edit(SAMPLE_PR, "1001", body)
+    local comment = p:edit(make_review(), "1001", body)
 
     assert.equals("1001", comment.id)
     assert.equals("Edited body", comment.body.text)
@@ -982,7 +1035,7 @@ async_tests.describe("parley.providers.github.provider — delete", function()
       return ok_empty()
     end)
     local p = make_provider(runner.fn)
-    p:delete(SAMPLE_PR, "1001")
+    p:delete(make_review(), "1001")
 
     local cmd = runner._calls[1]
     assert.is_not_nil(vim.tbl_contains(cmd, "DELETE"))
@@ -1002,7 +1055,7 @@ async_tests.describe("parley.providers.github.provider — delete", function()
     end)
     local p = make_provider(runner.fn)
     assert.has_no_error(function()
-      p:delete(SAMPLE_PR, "1001")
+      p:delete(make_review(), "1001")
     end)
   end)
 end)
@@ -1021,9 +1074,8 @@ async_tests.describe("parley.providers.github.provider — submit_review", funct
   async_tests.it("maps 'approve' to APPROVE event", function()
     local runner = review_runner()
     local p = make_provider(runner.fn)
-    p._pr_cache["42"] = { head_sha = "abc123", number = 42 }
     local body = model.new_body({ text = "lgtm", format = "markdown" })
-    p:submit_review(SAMPLE_PR, "approve", body)
+    p:submit_review(make_review("abc123"), "approve", body)
 
     local cmd = runner._calls[1]
     local has_event = false
@@ -1039,9 +1091,8 @@ async_tests.describe("parley.providers.github.provider — submit_review", funct
   async_tests.it("maps 'request_changes' to REQUEST_CHANGES event", function()
     local runner = review_runner()
     local p = make_provider(runner.fn)
-    p._pr_cache["42"] = { head_sha = "abc123", number = 42 }
     local body = model.new_body({ text = "needs work", format = "markdown" })
-    p:submit_review(SAMPLE_PR, "request_changes", body)
+    p:submit_review(make_review("abc123"), "request_changes", body)
 
     local cmd = runner._calls[1]
     local has_event = false
@@ -1057,9 +1108,8 @@ async_tests.describe("parley.providers.github.provider — submit_review", funct
   async_tests.it("maps 'comment' to COMMENT event", function()
     local runner = review_runner()
     local p = make_provider(runner.fn)
-    p._pr_cache["42"] = { head_sha = "abc123", number = 42 }
     local body = model.new_body({ text = "fyi", format = "markdown" })
-    p:submit_review(SAMPLE_PR, "comment", body)
+    p:submit_review(make_review("abc123"), "comment", body)
 
     local cmd = runner._calls[1]
     local has_event = false
@@ -1075,19 +1125,9 @@ async_tests.describe("parley.providers.github.provider — submit_review", funct
   async_tests.it("errors on unknown event", function()
     local runner = review_runner()
     local p = make_provider(runner.fn)
-    p._pr_cache["42"] = { head_sha = "abc123", number = 42 }
     local body = model.new_body({ text = "x", format = "markdown" })
     assert.has_error(function()
-      p:submit_review(SAMPLE_PR, "invalid_event", body)
-    end)
-  end)
-
-  async_tests.it("errors when pr not in cache", function()
-    local runner = review_runner()
-    local p = make_provider(runner.fn)
-    local body = model.new_body({ text = "x", format = "markdown" })
-    assert.has_error(function()
-      p:submit_review(SAMPLE_PR, "approve", body)
+      p:submit_review(make_review("abc123"), "invalid_event", body)
     end)
   end)
 end)
@@ -1213,35 +1253,15 @@ end)
 -- Suite: head_sha accessor
 -- ---------------------------------------------------------------------------
 
-describe("parley.providers.github.provider — head_sha", function()
-  it("returns nil when detect_pr has not populated the cache", function()
-    local p = gh.new({ owner = "o", repo = "r" })
-    assert.is_nil(p:head_sha(SAMPLE_PR))
-  end)
-
-  it("returns the cached head_sha after detect_pr", function()
-    local p = gh.new({ owner = "o", repo = "r" })
-    p._pr_cache["42"] = { head_sha = "abc123def456", number = 42 }
-    assert.equals("abc123def456", p:head_sha(SAMPLE_PR))
-  end)
-end)
-
-describe("parley.providers.github.provider — write context export/import", function()
-  it("exports cached PR write context after detect_pr", function()
+describe("parley.providers.github.provider — detect_pr write context", function()
+  it("returns write context after detect_pr", function()
     local runner = make_route_runner({
       { pattern = "/reviews", response = ok(REVIEWS_EMPTY_JSON) },
       { pattern = "/pulls", response = ok(PR_LIST_JSON) },
     })
     local p = make_provider(runner.fn)
-    local pr = p:detect_pr("/repo", "feature")
+    local review = p:detect_pr("/repo", "feature")
 
-    assert.same({ number = 42, head_sha = "abc123def456" }, p:export_write_context(pr))
-  end)
-
-  it("imports cached PR write context for later writes", function()
-    local p = make_provider(function(_) end)
-    p:import_write_context(SAMPLE_PR, { number = 42, head_sha = "abc123def456" })
-
-    assert.equals("abc123def456", p:head_sha(SAMPLE_PR))
+    assert.same({ number = 42, head_sha = "abc123def456" }, review.write_context)
   end)
 end)

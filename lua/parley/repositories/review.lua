@@ -12,6 +12,7 @@ local M = {}
 --- @type table<integer, {
 ---   status: 'ready'|'error',
 ---   stale: boolean,
+---   review: parley.DetectedReview|nil,
 ---   pr: parley.PR|nil,
 ---   discussions: parley.Discussion[],
 ---   all_discussions: parley.Discussion[],
@@ -103,18 +104,19 @@ local function build_summary(discussions)
   return { unresolved_count = unresolved_count }
 end
 
-local function build_snapshot(ctx, head_sha, pr, discussions)
+local function build_snapshot(ctx, review, discussions)
   local file_discussions = filter_for_file(discussions, ctx.rel_path)
   return {
     status = "ready",
     stale = false,
-    pr = pr,
+    review = review,
+    pr = review.pr,
     discussions = file_discussions,
     all_discussions = discussions,
-    mappings = anchor.map_discussions(ctx.vcs_info.root, head_sha, file_discussions),
+    mappings = anchor.map_discussions(ctx.vcs_info.root, review.head_sha or "", file_discussions),
     summary = build_summary(discussions),
     error = nil,
-    head_sha = head_sha,
+    head_sha = review.head_sha or "",
   }
 end
 
@@ -131,13 +133,9 @@ local function restore_cached_snapshot(bufnr, ctx, provider_snapshot)
     return nil
   end
 
-  local pr = pr_entry.data.pr
-  local write_context = pr_entry.data.write_context
-  if pr and provider.import_write_context and write_context then
-    provider:import_write_context(pr, write_context)
-  end
-
-  local pr_id = (pr and pr.id) or pr_entry.data.id
+  local review = pr_entry.data.review
+  local pr = review and review.pr or nil
+  local pr_id = pr and pr.id or nil
   if not pr_id then
     return nil
   end
@@ -152,13 +150,14 @@ local function restore_cached_snapshot(bufnr, ctx, provider_snapshot)
   return {
     status = "ready",
     stale = true,
+    review = review,
     pr = pr,
     discussions = file_discussions,
     all_discussions = discussions_entry.data,
-    mappings = anchor.map_discussions(ctx.vcs_info.root, pr_entry.data.head_sha or "", file_discussions),
+    mappings = anchor.map_discussions(ctx.vcs_info.root, review.head_sha or "", file_discussions),
     summary = build_summary(discussions_entry.data),
     error = nil,
-    head_sha = pr_entry.data.head_sha or (write_context and write_context.head_sha) or "",
+    head_sha = review.head_sha or "",
   }
 end
 
@@ -209,25 +208,21 @@ function M.refresh(bufnr, opts)
 
   M._in_flight[bufnr] = true
   local ok, result = pcall(function()
-    local pr = provider:detect_pr(ctx.vcs_info.root, branch)
-    if pr == nil then
+    local review = provider:detect_pr(ctx.vcs_info.root, branch)
+    if review == nil then
       cache.invalidate_async(pr_cache_key(provider, provider_opts, branch))
       publish(bufnr, nil)
       return nil
     end
 
-    local head_sha = (provider.head_sha and provider:head_sha(pr)) or ""
-    local write_context = provider.export_write_context and provider:export_write_context(pr) or nil
     cache.set_async(pr_cache_key(provider, provider_opts, branch), {
-      pr = pr,
-      head_sha = head_sha,
-      write_context = write_context,
+      review = review,
     })
 
-    local discussions = provider:fetch_discussions(pr)
-    cache.set_async(discussions_cache_key(provider, provider_opts, pr.id), discussions)
+    local discussions = provider:fetch_discussions(review)
+    cache.set_async(discussions_cache_key(provider, provider_opts, review.pr.id), discussions)
     provider_repository.store(bufnr, provider, provider_opts)
-    local snapshot = build_snapshot(ctx, head_sha, pr, discussions)
+    local snapshot = build_snapshot(ctx, review, discussions)
     publish(bufnr, snapshot)
     return snapshot
   end)
@@ -242,6 +237,7 @@ function M.refresh(bufnr, opts)
       publish(bufnr, {
         status = "error",
         stale = false,
+        review = nil,
         pr = nil,
         discussions = {},
         all_discussions = {},

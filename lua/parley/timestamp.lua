@@ -19,7 +19,12 @@ function M.utc_offset(epoch)
 end
 
 ---@param timestamp string
----@param hooks { now: fun(): integer, date: fun(fmt: string, time: integer): string, strptime: fun(fmt: string, value: string): integer|nil, utc_offset?: fun(epoch: integer): integer }
+---@param hooks {
+---  now: fun(): integer,
+---  date: fun(fmt: string, time: integer): string,
+---  strptime: fun(fmt: string, value: string): integer|nil,
+---  utc_offset?: fun(epoch: integer): integer,
+---}
 ---@return string
 function M.format(timestamp, hooks)
   local epoch = hooks.strptime("%Y-%m-%dT%H:%M:%SZ", timestamp)

@@ -393,7 +393,7 @@ function M.reply_current_line(bufnr)
     return false
   end
 
-  require("parley.services.write").open_reply_input(bufnr, discussion.id, parent.id)
+  require("parley.services.write").open_reply_input(bufnr, discussion, parent)
   return true
 end
 
@@ -416,7 +416,7 @@ function M.react_current_comment(bufnr)
     require("parley.services.write").react_comment(
       bufnr,
       ui_state and ui_state.current_source_line or nil,
-      comment.id,
+      comment,
       item.reaction
     )
   end)
@@ -438,7 +438,7 @@ function M.edit_current_comment(bufnr)
     return false
   end
 
-  require("parley.services.write").open_edit_input(bufnr, discussion.id, comment.id, comment.body.text)
+  require("parley.services.write").open_edit_input(bufnr, discussion, comment)
   return true
 end
 
@@ -459,7 +459,7 @@ function M.delete_current_comment(bufnr)
   end
 
   local ok =
-    require("parley.services.write").delete_comment(bufnr, ui_state and ui_state.current_source_line or nil, comment.id)
+    require("parley.services.write").delete_comment(bufnr, ui_state and ui_state.current_source_line or nil, comment)
   if ok == false then
     return false
   end

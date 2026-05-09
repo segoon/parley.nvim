@@ -28,7 +28,7 @@ local M = {}
 -- Type annotations
 -- ---------------------------------------------------------------------------
 
---- @class parley.github.PrCache
+--- @class parley.github.WriteContext
 --- @field head_sha string
 --- @field number   integer
 
@@ -38,12 +38,14 @@ local M = {}
 --- @field _repo         string
 --- @field _api_base     string
 --- @field _runner       fun(cmd: string[]): {code: integer, stdout: string, stderr: string}
---- @field _spawn        fun(cmd: string[], callback: fun(result: {code: integer, stdout: string, stderr: string})): vim.SystemObj|nil
+--- @field _spawn        fun(
+---   cmd: string[],
+---   callback: fun(result: {code: integer, stdout: string, stderr: string})
+--- ): vim.SystemObj|nil
 --- @field _sleep        fun(timeout_ms: integer): nil
 --- @field _defer        fun(callback: fun(), timeout_ms: integer): uv_timer_t|nil
 --- @field _get_config   fun(): parley.Config|nil
 --- @field _auth         table
---- @field _pr_cache     table<string, parley.github.PrCache>
 --- @field _viewer_login string|nil
 --- @field _cache_provider string
 
@@ -207,41 +209,20 @@ local function map_rest_comment(raw, viewer)
   })
 end
 
---- Normalize a line/range value into start/end lines.
---- @param line parley.LineRange
---- @return integer, integer|nil
-local function normalize_line(line)
-  if type(line) == "number" then
-    assert(line > 0, "parley.github: line must be > 0")
-    return line, nil
-  end
-
-  assert(type(line) == "table", "parley.github: line must be an integer or { start, end } range")
-  assert(#line == 2, "parley.github: line range must contain exactly two integers")
-
-  local first = assert(tonumber(line[1]), "parley.github: line range start must be a number")
-  local second = assert(tonumber(line[2]), "parley.github: line range end must be a number")
-  assert(first > 0 and second > 0, "parley.github: line range values must be > 0")
-
-  if first <= second then
-    return first, second
-  end
-  return second, first
-end
-
 --- Build form fields for a top-level comment anchor.
 --- @param file string
---- @param line parley.LineRange
+--- @param anchor parley.Anchor
 --- @param body parley.Body
---- @param commit_id string
+--- @param write_context parley.github.WriteContext
 --- @return string[]
-local function build_top_level_fields(file, line, body, commit_id)
-  local start_line, end_line = normalize_line(line)
+local function build_top_level_fields(file, anchor, body, write_context)
+  local start_line = anchor.start_line
+  local end_line = anchor.end_line
   local fields = {
     "-f",
     "body=" .. body.text,
     "-f",
-    "commit_id=" .. commit_id,
+    "commit_id=" .. write_context.head_sha,
     "-f",
     "path=" .. file,
     "-f",
@@ -486,11 +467,22 @@ end
 --- Required opts: owner, repo.
 --- Optional opts: host (default "github.com"), api_base, _runner, _auth.
 ---
---- @param opts { owner: string, repo: string, host?: string, api_base?: string,
----   _runner?: fun(cmd: string[]): table, _spawn?: fun(cmd: string[], callback: fun(result: {code: integer, stdout: string, stderr: string})): vim.SystemObj|nil,
----   _sleep?: fun(timeout_ms: integer): nil, _defer?: fun(callback: fun(), timeout_ms: integer): uv_timer_t|nil,
----   _get_config?: fun(): parley.Config|nil, _system?: fun(cmd: string[], opts: table, callback: fun(result: vim.SystemCompleted)): vim.SystemObj,
----   _auth?: table }
+--- @param opts {
+---   owner: string,
+---   repo: string,
+---   host?: string,
+---   api_base?: string,
+---   _runner?: fun(cmd: string[]): table,
+---   _spawn?: fun(
+---     cmd: string[],
+---     callback: fun(result: {code: integer, stdout: string, stderr: string})
+---   ): vim.SystemObj|nil,
+---   _sleep?: fun(timeout_ms: integer): nil,
+---   _defer?: fun(callback: fun(), timeout_ms: integer): uv_timer_t|nil,
+---   _get_config?: fun(): parley.Config|nil,
+---   _system?: fun(cmd: string[], opts: table, callback: fun(result: vim.SystemCompleted)): vim.SystemObj,
+---   _auth?: table,
+--- }
 --- @return parley.github.Provider
 function M.new(opts)
   opts = opts or {}
@@ -529,7 +521,6 @@ function M.new(opts)
       return require("parley").config
     end,
     _auth = opts._auth or require("parley.providers.github.auth"),
-    _pr_cache = {},
     _viewer_login = nil,
     _cache_provider = "github",
   }, GitHubProvider)
@@ -555,12 +546,11 @@ end
 
 --- Detect an open PR for the given branch.
 --- Makes two REST calls: PR list + reviews.
---- Caches head_sha and PR number in self._pr_cache[pr.id].
 ---
 --- @param self       parley.github.Provider
 --- @param _repo_root string  (unused — owner/repo already known from constructor)
 --- @param branch     string
---- @return parley.PR|nil
+--- @return parley.DetectedReview|nil
 function GitHubProvider:detect_pr(_repo_root, branch)
   local pulls_url = repo_path(self) .. "/pulls?head=" .. self._owner .. ":" .. branch .. "&state=open&per_page=1"
 
@@ -589,13 +579,14 @@ function GitHubProvider:detect_pr(_repo_root, branch)
     review_status = review_status,
   })
 
-  -- Cache for methods that need commit SHA or PR number.
-  self._pr_cache[pr.id] = {
+  return {
+    pr = pr,
     head_sha = raw.head and raw.head.sha or "",
-    number = pr_number,
+    write_context = {
+      head_sha = raw.head and raw.head.sha or "",
+      number = pr_number,
+    },
   }
-
-  return pr
 end
 
 --- Fetch all discussions for a PR using the REST review-comments endpoint.
@@ -603,11 +594,10 @@ end
 --- resolved is always false (GraphQL required — see POSTPONED.md).
 ---
 --- @param self parley.github.Provider
---- @param pr   parley.PR
+--- @param review parley.DetectedReview
 --- @return parley.Discussion[]
-function GitHubProvider:fetch_discussions(pr)
-  local cached = self._pr_cache[pr.id]
-  local pr_number = cached and cached.number or tonumber(pr.id)
+function GitHubProvider:fetch_discussions(review)
+  local pr_number = review.write_context and review.write_context.number or tonumber(review.pr.id)
   local url = repo_path(self) .. "/pulls/" .. pr_number .. "/comments"
 
   local comments = gh_run(self, { "gh", "api", "--paginate", url }) or {}
@@ -630,18 +620,16 @@ end
 --- Post a new top-level review comment anchored to a file/line.
 ---
 --- @param self parley.github.Provider
---- @param pr   parley.PR
+--- @param review parley.DetectedReview
 --- @param file string
---- @param line parley.LineRange
+--- @param anchor parley.Anchor
 --- @param body parley.Body
 --- @return parley.Comment
-function GitHubProvider:post_top_level_comment(pr, file, line, body)
-  local cached = self._pr_cache[pr.id]
-  assert(cached, "parley.github: detect_pr must be called before post_top_level_comment (pr not in cache)")
-
-  local url = repo_path(self) .. "/pulls/" .. cached.number .. "/comments"
+function GitHubProvider:post_top_level_comment(review, file, anchor, body)
+  local write_context = review.write_context
+  local url = repo_path(self) .. "/pulls/" .. write_context.number .. "/comments"
   local cmd = { "gh", "api", "--method", "POST", url }
-  vim.list_extend(cmd, build_top_level_fields(file, line, body, cached.head_sha))
+  vim.list_extend(cmd, build_top_level_fields(file, anchor, body, write_context))
   local raw = gh_run(self, cmd)
 
   return map_rest_comment(raw, self._viewer_login or "")
@@ -649,19 +637,17 @@ end
 
 --- Start a cancellable top-level comment request.
 --- @param self parley.github.Provider
---- @param pr parley.PR
+--- @param review parley.DetectedReview
 --- @param file string
---- @param line parley.LineRange
+--- @param anchor parley.Anchor
 --- @param body parley.Body
 --- @param callback fun(result: { ok: boolean, comment?: parley.Comment, err?: string, cancelled?: boolean }): nil
 --- @return { cancel: fun(): nil }
-function GitHubProvider:begin_post_top_level_comment(pr, file, line, body, callback)
-  local cached = self._pr_cache[pr.id]
-  assert(cached, "parley.github: detect_pr must be called before post_top_level_comment (pr not in cache)")
-
-  local url = repo_path(self) .. "/pulls/" .. cached.number .. "/comments"
+function GitHubProvider:begin_post_top_level_comment(review, file, anchor, body, callback)
+  local write_context = review.write_context
+  local url = repo_path(self) .. "/pulls/" .. write_context.number .. "/comments"
   local cmd = { "gh", "api", "--method", "POST", url }
-  vim.list_extend(cmd, build_top_level_fields(file, line, body, cached.head_sha))
+  vim.list_extend(cmd, build_top_level_fields(file, anchor, body, write_context))
   return gh_start(self, cmd, function(result)
     if not result.ok then
       callback(result)
@@ -675,17 +661,15 @@ end
 --- discussion_id is the root comment's database id (used as in_reply_to).
 ---
 --- @param self          parley.github.Provider
---- @param pr            parley.PR
---- @param discussion_id string  Root comment database id
---- @param parent_comment_id string
+--- @param review         parley.DetectedReview
+--- @param discussion     parley.Discussion
+--- @param parent_comment parley.Comment
 --- @param body          parley.Body
 --- @return parley.Comment
-function GitHubProvider:reply(pr, discussion_id, parent_comment_id, body)
-  local cached = self._pr_cache[pr.id]
-  assert(cached, "parley.github: detect_pr must be called before reply (pr not in cache)")
-
-  local url = repo_path(self) .. "/pulls/" .. cached.number .. "/comments"
-  local _ = discussion_id
+function GitHubProvider:reply(review, discussion, parent_comment, body)
+  local write_context = review.write_context
+  local url = repo_path(self) .. "/pulls/" .. write_context.number .. "/comments"
+  local _ = discussion
   local raw = gh_run(self, {
     "gh",
     "api",
@@ -695,9 +679,9 @@ function GitHubProvider:reply(pr, discussion_id, parent_comment_id, body)
     "-f",
     "body=" .. body.text,
     "-f",
-    "commit_id=" .. cached.head_sha,
+    "commit_id=" .. write_context.head_sha,
     "-F",
-    "in_reply_to=" .. parent_comment_id,
+    "in_reply_to=" .. parent_comment.id,
   })
 
   return map_rest_comment(raw, self._viewer_login or "")
@@ -705,18 +689,16 @@ end
 
 --- Start a cancellable reply request.
 --- @param self parley.github.Provider
---- @param pr parley.PR
---- @param discussion_id string
---- @param parent_comment_id string
+--- @param review parley.DetectedReview
+--- @param discussion parley.Discussion
+--- @param parent_comment parley.Comment
 --- @param body parley.Body
 --- @param callback fun(result: { ok: boolean, comment?: parley.Comment, err?: string, cancelled?: boolean }): nil
 --- @return { cancel: fun(): nil }
-function GitHubProvider:begin_reply(pr, discussion_id, parent_comment_id, body, callback)
-  local cached = self._pr_cache[pr.id]
-  assert(cached, "parley.github: detect_pr must be called before reply (pr not in cache)")
-
-  local url = repo_path(self) .. "/pulls/" .. cached.number .. "/comments"
-  local _ = discussion_id
+function GitHubProvider:begin_reply(review, discussion, parent_comment, body, callback)
+  local write_context = review.write_context
+  local url = repo_path(self) .. "/pulls/" .. write_context.number .. "/comments"
+  local _ = discussion
   return gh_start(self, {
     "gh",
     "api",
@@ -726,9 +708,9 @@ function GitHubProvider:begin_reply(pr, discussion_id, parent_comment_id, body, 
     "-f",
     "body=" .. body.text,
     "-f",
-    "commit_id=" .. cached.head_sha,
+    "commit_id=" .. write_context.head_sha,
     "-F",
-    "in_reply_to=" .. parent_comment_id,
+    "in_reply_to=" .. parent_comment.id,
   }, function(result)
     if not result.ok then
       callback(result)
@@ -742,9 +724,9 @@ end
 --- NOT IMPLEMENTED — requires GraphQL. See POSTPONED.md.
 ---
 --- @param self          parley.github.Provider
---- @param _pr           parley.PR
+--- @param _review       parley.DetectedReview
 --- @param _discussion_id string
-function GitHubProvider:resolve(_pr, _discussion_id)
+function GitHubProvider:resolve(_review, _discussion_id)
   local _ = self
   error("parley.github: resolve requires GraphQL (see POSTPONED.md)", 0)
 end
@@ -753,9 +735,9 @@ end
 --- NOT IMPLEMENTED — requires GraphQL. See POSTPONED.md.
 ---
 --- @param self          parley.github.Provider
---- @param _pr           parley.PR
+--- @param _review       parley.DetectedReview
 --- @param _discussion_id string
-function GitHubProvider:unresolve(_pr, _discussion_id)
+function GitHubProvider:unresolve(_review, _discussion_id)
   local _ = self
   error("parley.github: unresolve requires GraphQL (see POSTPONED.md)", 0)
 end
@@ -768,10 +750,10 @@ end
 ---   3. If viewer has a reaction → DELETE it; otherwise → POST a new one.
 ---
 --- @param self       parley.github.Provider
---- @param _pr        parley.PR
+--- @param _review    parley.DetectedReview
 --- @param comment_id string
 --- @param reaction   string  e.g. "+1", "heart"
-function GitHubProvider:react(_pr, comment_id, reaction)
+function GitHubProvider:react(_review, comment_id, reaction)
   -- Ensure viewer login is cached.
   if not self._viewer_login then
     local user = gh_run(self, { "gh", "api", "/user" })
@@ -825,11 +807,11 @@ end
 --- Edit an existing comment body.
 ---
 --- @param self       parley.github.Provider
---- @param _pr        parley.PR
+--- @param _review    parley.DetectedReview
 --- @param comment_id string
 --- @param body       parley.Body
 --- @return parley.Comment
-function GitHubProvider:edit(_pr, comment_id, body)
+function GitHubProvider:edit(_review, comment_id, body)
   local url = repo_path(self) .. "/pulls/comments/" .. comment_id
   local raw = gh_run(self, {
     "gh",
@@ -846,9 +828,9 @@ end
 --- Delete a comment.
 ---
 --- @param self       parley.github.Provider
---- @param _pr        parley.PR
+--- @param _review    parley.DetectedReview
 --- @param comment_id string
-function GitHubProvider:delete(_pr, comment_id)
+function GitHubProvider:delete(_review, comment_id)
   local url = repo_path(self) .. "/pulls/comments/" .. comment_id
   gh_run(self, { "gh", "api", "--method", "DELETE", url })
 end
@@ -857,17 +839,15 @@ end
 --- event must be one of: "approve", "request_changes", "comment".
 ---
 --- @param self  parley.github.Provider
---- @param pr    parley.PR
+--- @param review parley.DetectedReview
 --- @param event string
 --- @param body  parley.Body
-function GitHubProvider:submit_review(pr, event, body)
+function GitHubProvider:submit_review(review, event, body)
   local gh_event = REVIEW_EVENT_MAP[event]
   assert(gh_event, string.format("parley.github: unknown review event: %q", event))
 
-  local cached = self._pr_cache[pr.id]
-  assert(cached, "parley.github: detect_pr must be called before submit_review (pr not in cache)")
-
-  local url = repo_path(self) .. "/pulls/" .. cached.number .. "/reviews"
+  local write_context = review.write_context
+  local url = repo_path(self) .. "/pulls/" .. write_context.number .. "/reviews"
   gh_run(self, {
     "gh",
     "api",
@@ -879,46 +859,6 @@ function GitHubProvider:submit_review(pr, event, body)
     "-f",
     "event=" .. gh_event,
   })
-end
-
---- Return the head commit SHA cached for `pr` by detect_pr.
---- Returns nil when detect_pr has not been called for this PR.
----
---- @param self parley.github.Provider
---- @param pr   parley.PR
---- @return string|nil
-function GitHubProvider:head_sha(pr)
-  local cached = self._pr_cache[pr.id]
-  return cached and cached.head_sha or nil
-end
-
---- Export provider write context for cached stale startup restores.
---- @param self parley.github.Provider
---- @param pr parley.PR
---- @return { number: integer, head_sha: string }|nil
-function GitHubProvider:export_write_context(pr)
-  local cached = self._pr_cache[pr.id]
-  if not cached then
-    return nil
-  end
-  return {
-    number = cached.number,
-    head_sha = cached.head_sha,
-  }
-end
-
---- Import provider write context previously exported by export_write_context.
---- @param self parley.github.Provider
---- @param pr parley.PR
---- @param ctx { number: integer, head_sha: string }|nil
-function GitHubProvider:import_write_context(pr, ctx)
-  if not ctx then
-    return
-  end
-  self._pr_cache[pr.id] = {
-    number = ctx.number,
-    head_sha = ctx.head_sha,
-  }
 end
 
 -- ---------------------------------------------------------------------------

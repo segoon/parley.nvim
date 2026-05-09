@@ -43,46 +43,55 @@ end
 M._next_progress_id = 0
 
 --- @param bufnr integer
---- @return parley.Provider, parley.PR, string
+--- @return { provider: parley.Provider, review: parley.DetectedReview, rel_path: string }|nil, string|nil
 local function resolve_write_context(bufnr)
   local review_snapshot = review_repository.get(bufnr)
   local provider_snapshot = provider_repository.get(bufnr)
   local context_snapshot = context_repository.get(bufnr)
-  assert(review_snapshot and review_snapshot.pr, "parley: no PR context available for this buffer")
-  assert(
-    provider_snapshot and provider_snapshot.provider ~= nil,
-    "parley: provider context is not ready for this buffer"
-  )
-  assert(
-    context_snapshot and type(context_snapshot.rel_path) == "string" and context_snapshot.rel_path ~= "",
-    "parley: file context is not ready for this buffer"
-  )
-  return provider_snapshot.provider, review_snapshot.pr, context_snapshot.rel_path
+  if not review_snapshot or not review_snapshot.review then
+    return nil, "No Parley review is active for this buffer"
+  end
+  if not provider_snapshot or provider_snapshot.provider == nil then
+    return nil, "Parley provider context is not ready for this buffer"
+  end
+  if not context_snapshot or type(context_snapshot.rel_path) ~= "string" or context_snapshot.rel_path == "" then
+    return nil, "Parley file context is not ready for this buffer"
+  end
+  return {
+    provider = provider_snapshot.provider,
+    review = review_snapshot.review,
+    rel_path = context_snapshot.rel_path,
+  },
+    nil
 end
 
 --- @param line integer|nil
 --- @param range integer|nil
 --- @param line1 integer|nil
 --- @param line2 integer|nil
---- @return parley.LineRange
-local function resolve_line_range(line, range, line1, line2)
+--- @return parley.Anchor
+local function resolve_anchor(line, range, line1, line2)
   if type(line) == "number" then
-    assert(line > 0, "parley: line must be > 0")
-    return line
+    return { start_line = line, end_line = nil }
   end
 
   if range and range > 0 and line1 and line2 then
     if line1 == line2 then
-      return line1
+      return { start_line = line1, end_line = nil }
     end
     if line1 < line2 then
-      return { line1, line2 }
+      return { start_line = line1, end_line = line2 }
     end
-    return { line2, line1 }
+    return { start_line = line2, end_line = line1 }
   end
 
   local cursor_line = vim.api.nvim_win_get_cursor(0)[1]
-  return cursor_line
+  return { start_line = cursor_line, end_line = nil }
+end
+
+--- @param message string|nil
+local function notify_context_error(message)
+  M._notify(message or "Parley write context is not ready for this buffer", vim.log.levels.WARN)
 end
 
 --- @param instance table
@@ -173,7 +182,9 @@ end
 
 --- @param bufnr integer
 --- @param cursor_line integer|nil
---- @param starter fun(callback: fun(result: { ok: boolean, err?: string, cancelled?: boolean }): nil): { cancel: fun(): nil }
+--- @param starter fun(
+---   callback: fun(result: { ok: boolean, err?: string, cancelled?: boolean }): nil
+--- ): { cancel: fun(): nil }
 --- @param progress_texts { running: string, refreshing: string, success: string, failed: string, cancelled: string }
 --- @return boolean
 local function run_action(bufnr, cursor_line, starter, progress_texts)
@@ -223,7 +234,9 @@ end
 
 --- @param bufnr integer
 --- @param instance table
---- @param starter fun(callback: fun(result: { ok: boolean, comment?: parley.Comment, err?: string, cancelled?: boolean }): nil): { cancel: fun(): nil }
+--- @param starter fun(
+---   callback: fun(result: { ok: boolean, comment?: parley.Comment, err?: string, cancelled?: boolean }): nil
+--- ): { cancel: fun(): nil }
 --- @param status_text string
 --- @param progress_texts { running: string, refreshing: string, success: string, failed: string, cancelled: string }
 --- @param success_opts? { cursor_line?: integer }
@@ -292,17 +305,21 @@ end
 
 --- Open an input window for a new top-level comment.
 --- @param bufnr integer
---- @param opts? { line?: parley.LineRange, range?: integer, line1?: integer, line2?: integer }
+--- @param opts? { line?: integer, range?: integer, line1?: integer, line2?: integer }
 function M.open_new_comment_input(bufnr, opts)
   opts = opts or {}
-  local provider, pr, rel_path = resolve_write_context(bufnr)
-  local line = resolve_line_range(opts.line, opts.range, opts.line1, opts.line2)
-  local target_line = type(line) == "table" and line[1] or line
+  local write_context, err = resolve_write_context(bufnr)
+  if not write_context then
+    notify_context_error(err)
+    return false
+  end
+  local anchor = resolve_anchor(opts.line, opts.range, opts.line1, opts.line2)
+  local target_line = anchor.start_line
   composer_ui_state.set(bufnr, {
     mode = "new",
     visible = true,
     submit_state = "idle",
-    target_line = line,
+    target_line = anchor,
     draft = "",
   })
 
@@ -315,14 +332,25 @@ function M.open_new_comment_input(bufnr, opts)
         bufnr,
         instance,
         function(callback)
-          if provider.begin_post_top_level_comment then
-            return provider:begin_post_top_level_comment(pr, rel_path, line, body, callback)
+          if write_context.provider.begin_post_top_level_comment then
+            return write_context.provider:begin_post_top_level_comment(
+              write_context.review,
+              write_context.rel_path,
+              anchor,
+              body,
+              callback
+            )
           end
 
           local cancelled = false
           async.run(function()
             local ok, result = pcall(function()
-              return provider:post_top_level_comment(pr, rel_path, line, body)
+              return write_context.provider:post_top_level_comment(
+                write_context.review,
+                write_context.rel_path,
+                anchor,
+                body
+              )
             end)
             vim.schedule(function()
               if cancelled then
@@ -356,28 +384,35 @@ end
 
 --- Open an input window for a reply.
 --- @param bufnr integer
---- @param discussion_id string
---- @param parent_comment_id string
-function M.open_reply_input(bufnr, discussion_id, parent_comment_id)
-  assert(type(parent_comment_id) == "string" and parent_comment_id ~= "", "parley: parent_comment_id is required")
-  local provider, pr = resolve_write_context(bufnr)
+--- @param discussion parley.Discussion|nil
+--- @param parent_comment parley.Comment|nil
+function M.open_reply_input(bufnr, discussion, parent_comment)
+  if not discussion or not parent_comment then
+    M._notify("Open a Parley discussion before replying", vim.log.levels.INFO)
+    return false
+  end
+  local write_context, err = resolve_write_context(bufnr)
+  if not write_context then
+    notify_context_error(err)
+    return false
+  end
   local review_snapshot = review_repository.get(bufnr)
   local target_line = review_snapshot
       and review_snapshot.mappings
-      and review_snapshot.mappings[discussion_id]
-      and review_snapshot.mappings[discussion_id].local_line
+      and review_snapshot.mappings[discussion.id]
+      and review_snapshot.mappings[discussion.id].local_line
     or nil
   composer_ui_state.set(bufnr, {
     mode = "reply",
     visible = true,
     submit_state = "idle",
-    target_discussion_id = discussion_id,
-    target_parent_comment_id = parent_comment_id,
+    target_discussion_id = discussion.id,
+    target_parent_comment_id = parent_comment.id,
     draft = "",
   })
 
   require("parley.discussion_window").show_reply_input(bufnr, {
-    parent_comment_id = parent_comment_id,
+    parent_comment_id = parent_comment.id,
     status = "Drafting reply. Press <C-s> to send, or <Esc>s in normal mode. q closes.",
     on_submit = function(instance, text)
       local body = model.new_body({ text = text, format = "markdown" })
@@ -385,14 +420,14 @@ function M.open_reply_input(bufnr, discussion_id, parent_comment_id)
         bufnr,
         instance,
         function(callback)
-          if provider.begin_reply then
-            return provider:begin_reply(pr, discussion_id, parent_comment_id, body, callback)
+          if write_context.provider.begin_reply then
+            return write_context.provider:begin_reply(write_context.review, discussion, parent_comment, body, callback)
           end
 
           local cancelled = false
           async.run(function()
             local ok, result = pcall(function()
-              return provider:reply(pr, discussion_id, parent_comment_id, body)
+              return write_context.provider:reply(write_context.review, discussion, parent_comment, body)
             end)
             vim.schedule(function()
               if cancelled then
@@ -426,31 +461,36 @@ end
 
 --- Open an input window for editing an existing comment.
 --- @param bufnr integer
---- @param discussion_id string
---- @param comment_id string
---- @param initial_text string
-function M.open_edit_input(bufnr, discussion_id, comment_id, initial_text)
-  assert(type(comment_id) == "string" and comment_id ~= "", "parley: comment_id is required")
-  assert(type(initial_text) == "string", "parley: initial_text must be a string")
-  local provider, pr = resolve_write_context(bufnr)
+--- @param discussion parley.Discussion|nil
+--- @param comment parley.Comment|nil
+function M.open_edit_input(bufnr, discussion, comment)
+  if not discussion or not comment then
+    M._notify("Open a Parley discussion before editing", vim.log.levels.INFO)
+    return false
+  end
+  local write_context, err = resolve_write_context(bufnr)
+  if not write_context then
+    notify_context_error(err)
+    return false
+  end
   local review_snapshot = review_repository.get(bufnr)
   local target_line = review_snapshot
       and review_snapshot.mappings
-      and review_snapshot.mappings[discussion_id]
-      and review_snapshot.mappings[discussion_id].local_line
+      and review_snapshot.mappings[discussion.id]
+      and review_snapshot.mappings[discussion.id].local_line
     or nil
   composer_ui_state.set(bufnr, {
     mode = "edit",
     visible = true,
     submit_state = "idle",
-    target_discussion_id = discussion_id,
-    target_comment_id = comment_id,
-    draft = initial_text,
+    target_discussion_id = discussion.id,
+    target_comment_id = comment.id,
+    draft = comment.body.text,
   })
 
   require("parley.discussion_window").show_reply_input(bufnr, {
-    parent_comment_id = comment_id,
-    initial_text = initial_text,
+    parent_comment_id = comment.id,
+    initial_text = comment.body.text,
     status = "Editing comment. Press <C-s> to save, or <Esc>s in normal mode. q closes.",
     on_submit = function(instance, text)
       local body = model.new_body({ text = text, format = "markdown" })
@@ -461,7 +501,7 @@ function M.open_edit_input(bufnr, discussion_id, comment_id, initial_text)
           local cancelled = false
           async.run(function()
             local ok, result = pcall(function()
-              return provider:edit(pr, comment_id, body)
+              return write_context.provider:edit(write_context.review, comment.id, body)
             end)
             vim.schedule(function()
               if cancelled then
@@ -496,18 +536,24 @@ end
 --- Toggle a reaction on an existing comment and refresh the discussion.
 --- @param bufnr integer
 --- @param cursor_line integer|nil
---- @param comment_id string
+--- @param comment parley.Comment|nil
 --- @param reaction string
 --- @return boolean
-function M.react_comment(bufnr, cursor_line, comment_id, reaction)
-  assert(type(comment_id) == "string" and comment_id ~= "", "parley: comment_id is required")
-  assert(type(reaction) == "string" and reaction ~= "", "parley: reaction is required")
-  local provider, pr = resolve_write_context(bufnr)
+function M.react_comment(bufnr, cursor_line, comment, reaction)
+  if not comment then
+    M._notify("Open a Parley discussion before reacting", vim.log.levels.INFO)
+    return false
+  end
+  local write_context, err = resolve_write_context(bufnr)
+  if not write_context then
+    notify_context_error(err)
+    return false
+  end
   return run_action(bufnr, cursor_line, function(callback)
     local cancelled = false
     async.run(function()
       local ok, result = pcall(function()
-        provider:react(pr, comment_id, reaction)
+        write_context.provider:react(write_context.review, comment.id, reaction)
       end)
       vim.schedule(function()
         if cancelled then
@@ -536,20 +582,27 @@ end
 --- Delete an existing comment and refresh the discussion.
 --- @param bufnr integer
 --- @param cursor_line integer|nil
---- @param comment_id string
+--- @param comment parley.Comment|nil
 --- @return boolean
-function M.delete_comment(bufnr, cursor_line, comment_id)
-  assert(type(comment_id) == "string" and comment_id ~= "", "parley: comment_id is required")
+function M.delete_comment(bufnr, cursor_line, comment)
+  if not comment then
+    M._notify("Open a Parley discussion before deleting", vim.log.levels.INFO)
+    return false
+  end
   if not M._confirm_delete("Delete this comment permanently? This cannot be undone.") then
     return false
   end
 
-  local provider, pr = resolve_write_context(bufnr)
+  local write_context, err = resolve_write_context(bufnr)
+  if not write_context then
+    notify_context_error(err)
+    return false
+  end
   return run_action(bufnr, cursor_line, function(callback)
     local cancelled = false
     async.run(function()
       local ok, result = pcall(function()
-        provider:delete(pr, comment_id)
+        write_context.provider:delete(write_context.review, comment.id)
       end)
       vim.schedule(function()
         if cancelled then

@@ -20,6 +20,12 @@ local SAMPLE_PR = model.new_pr({
   review_status = "pending",
 })
 
+local SAMPLE_REVIEW = {
+  pr = SAMPLE_PR,
+  head_sha = "deadbeef",
+  write_context = { number = 42, head_sha = "deadbeef" },
+}
+
 local saved = {}
 
 local function save_seams()
@@ -118,6 +124,7 @@ describe("parley.services.write", function()
     review_repository._entries[1] = {
       status = "ready",
       stale = false,
+      review = SAMPLE_REVIEW,
       discussions = discussions or {},
       mappings = mappings or {},
       pr = SAMPLE_PR,
@@ -146,6 +153,7 @@ describe("parley.services.write", function()
     review_repository._entries[1] = {
       status = "ready",
       stale = false,
+      review = SAMPLE_REVIEW,
       discussions = {},
       mappings = {},
       pr = SAMPLE_PR,
@@ -173,7 +181,7 @@ describe("parley.services.write", function()
       return #provider.calls.post_top_level_comment == 1 and #refresh_calls == 1
     end))
 
-    assert.same({ 5, 8 }, provider.calls.post_top_level_comment[1].line)
+    assert.same({ start_line = 5, end_line = 8 }, provider.calls.post_top_level_comment[1].anchor)
     assert.same({ bufnr = 1, opts = { preserve_snapshot = true } }, invalidate_calls[1])
     assert.same({ bufnr = 1, opts = { force = true } }, refresh_calls[1])
     assert.is_true(opened.instance.closed)
@@ -205,6 +213,7 @@ describe("parley.services.write", function()
     review_repository._entries[1] = {
       status = "ready",
       stale = false,
+      review = SAMPLE_REVIEW,
       discussions = {},
       mappings = {},
       pr = SAMPLE_PR,
@@ -280,6 +289,7 @@ describe("parley.services.write", function()
     review_repository._entries[1] = {
       status = "ready",
       stale = false,
+      review = SAMPLE_REVIEW,
       discussions = {},
       mappings = {},
       pr = SAMPLE_PR,
@@ -296,14 +306,14 @@ describe("parley.services.write", function()
     review_repository.invalidate = function(_bufnr) end
     review_repository.refresh = function(_bufnr, _opts) end
 
-    write_service.open_reply_input(1, "d1", "c2")
+    write_service.open_reply_input(1, provider.state.discussions[1], provider.state.discussions[1].comments[2])
     opened.opts.on_submit(opened.instance, "reply draft")
 
     assert.is_true(vim.wait(500, function()
       return #provider.calls.reply == 1
     end))
 
-    assert.equals("c2", provider.calls.reply[1].parent_comment_id)
+    assert.equals("c2", provider.calls.reply[1].parent_comment.id)
     local progress_entries = progress_ui_state.list()
     assert.equals(1, #progress_entries)
     assert.equals("success", progress_entries[1].state)
@@ -328,6 +338,7 @@ describe("parley.services.write", function()
     review_repository._entries[1] = {
       status = "ready",
       stale = false,
+      review = SAMPLE_REVIEW,
       discussions = {},
       mappings = {},
       pr = SAMPLE_PR,
@@ -342,7 +353,17 @@ describe("parley.services.write", function()
     }
 
     local ok, err = pcall(function()
-      write_service.open_reply_input(1, "d1", "c2")
+      write_service.open_reply_input(
+        1,
+        model.new_discussion({ id = "d1", file = "src/foo.lua", line = 10, comments = {} }),
+        {
+          id = "c2",
+          author = "bob",
+          body = model.new_body({ text = "parent", format = "markdown" }),
+          created_at = "2024-01-01T00:00:01Z",
+          updated_at = "2024-01-01T00:00:01Z",
+        }
+      )
     end)
     assert.is_true(ok, err)
   end)
@@ -375,7 +396,7 @@ describe("parley.services.write", function()
       refresh_calls[#refresh_calls + 1] = { bufnr = bufnr, opts = opts }
     end
 
-    write_service.react_comment(1, 10, "c1", "+1")
+    write_service.react_comment(1, 10, comment, "+1")
 
     assert.is_true(vim.wait(500, function()
       return #provider.calls.react == 1 and #refresh_calls == 1
@@ -417,7 +438,7 @@ describe("parley.services.write", function()
     review_repository.invalidate = function(_bufnr, _opts) end
     review_repository.refresh = function(_bufnr, _opts) end
 
-    write_service.open_edit_input(1, "d1", "c1", "old body")
+    write_service.open_edit_input(1, provider.state.discussions[1], provider.state.discussions[1].comments[1])
     assert.equals("old body", opened.opts.initial_text)
     opened.opts.on_submit(opened.instance, "new body")
 
@@ -455,7 +476,7 @@ describe("parley.services.write", function()
     review_repository.invalidate = function(_bufnr, _opts) end
     review_repository.refresh = function(_bufnr, _opts) end
 
-    write_service.delete_comment(1, 10, "c1")
+    write_service.delete_comment(1, 10, comment)
 
     assert.is_true(vim.wait(500, function()
       return #provider.calls.delete == 1
@@ -487,7 +508,7 @@ describe("parley.services.write", function()
       return false
     end
 
-    local ok = write_service.delete_comment(1, 10, "c1")
+    local ok = write_service.delete_comment(1, 10, comment)
 
     assert.is_false(ok)
     assert.equals(0, #provider.calls.delete)
