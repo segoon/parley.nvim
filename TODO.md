@@ -15,6 +15,12 @@ quality:
 UI:
 - mark comment as stale (outdated position)
 
+documentation:
+- test on 'all commands/options/highlights are covered'
+- test on valid references
+
 Bugs:
 - multiple buffers with different repositories
 - cannot edit my own comment
+- no autocompletion on :'<,'>
+- tests isolation (pending callbacks, subscriptions)

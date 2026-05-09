@@ -9,12 +9,12 @@
 ---   • parley.signs.render / .clear — recorders
 ---   • parley.cache._fs — in-memory dictionary
 ---   • read_service._notify / _get_config — recorders / fixed config
+---   • async_operation._defer / _get_config — prevent real timers in tests
 ---
 --- No real filesystem, network, or git invocations.
 
-local async_tests = require("plenary.async.tests")
-
 local anchor = require("parley.anchor")
+local async_operation = require("parley.async_operation")
 local buffer_context = require("parley.buffer_context")
 local cache = require("parley.cache")
 local mock_provider = require("parley.mock_provider")
@@ -121,8 +121,8 @@ local function save_seams()
   saved.cache_fs = cache._fs
   saved.notify = read_service._notify
   saved.get_config = read_service._get_config
-  saved.defer = read_service._defer
-  saved.now = read_service._now
+  saved.async_op_defer = async_operation._defer
+  saved.async_op_config = async_operation._get_config
 end
 
 local function restore_seams()
@@ -134,8 +134,8 @@ local function restore_seams()
   cache._fs = saved.cache_fs
   read_service._notify = saved.notify
   read_service._get_config = saved.get_config
-  read_service._defer = saved.defer
-  read_service._now = saved.now
+  async_operation._defer = saved.async_op_defer
+  async_operation._get_config = saved.async_op_config
 end
 
 --- Wire seams for a test.
@@ -210,6 +210,12 @@ local function setup(o)
     return o.config or SAMPLE_CONFIG
   end
 
+  -- Prevent async_operation defer from removing progress entries mid-test.
+  async_operation._defer = function(_cb, _timeout) end
+  async_operation._get_config = function()
+    return { progress = { success_timeout = 2500, failed_timeout = 2500 } }
+  end
+
   -- Reentrancy guard: clear any state from previous tests.
   for k in pairs(review_repository._in_flight) do
     review_repository._in_flight[k] = nil
@@ -218,8 +224,10 @@ local function setup(o)
     review_repository._pending_force[k] = nil
   end
   review_repository._entries = {}
+  review_repository._subscribers = {}
   context_repository._entries = {}
   provider_repository._entries = {}
+  read_service._subscriptions = {}
 
   -- Provider via the registry.
   registry.reset()
@@ -258,13 +266,16 @@ end
 -- Suites
 -- ---------------------------------------------------------------------------
 
-async_tests.describe("parley.services.read refresh", function()
-  async_tests.before_each(function()
+describe("parley.services.read refresh", function()
+  before_each(function()
     save_seams()
     progress_ui_state.clear()
   end)
 
-  async_tests.after_each(function()
+  after_each(function()
+    vim.wait(20, function()
+      return false
+    end)
     restore_seams()
     registry.reset()
     progress_ui_state.clear()
@@ -274,7 +285,7 @@ async_tests.describe("parley.services.read refresh", function()
   -- 1. Happy path
   -- -------------------------------------------------------------------------
 
-  async_tests.it("renders signs for the current file's discussions only", function()
+  it("renders signs for the current file's discussions only", function()
     local s = setup({
       path = "/repo/src/foo.lua",
       pr = SAMPLE_PR,
@@ -285,7 +296,10 @@ async_tests.describe("parley.services.read refresh", function()
       },
     })
 
-    read_service.refresh(1)
+    read_service.refresh_async(1)
+    assert.is_true(vim.wait(200, function()
+      return #s.render_calls >= 1
+    end))
 
     assert.equals(1, #s.render_calls, "expected exactly one render call")
     local rc = s.render_calls[1]
@@ -300,7 +314,7 @@ async_tests.describe("parley.services.read refresh", function()
     assert.equals(10, state.mappings["1"].local_line)
   end)
 
-  async_tests.it("lists discussions for the current file or the whole PR", function()
+  it("lists discussions for the current file or the whole PR", function()
     setup({
       path = "/repo/src/foo.lua",
       pr = SAMPLE_PR,
@@ -311,7 +325,10 @@ async_tests.describe("parley.services.read refresh", function()
       },
     })
 
-    read_service.refresh(1)
+    read_service.refresh_async(1)
+    assert.is_true(vim.wait(200, function()
+      return #read_service.list_discussions(1) >= 2
+    end))
 
     local file_discussions = read_service.list_discussions(1)
     local all_discussions = read_service.list_discussions(1, { scope = "all" })
@@ -325,10 +342,13 @@ async_tests.describe("parley.services.read refresh", function()
     assert.equals("3", all_discussions[3].id)
   end)
 
-  async_tests.it("calls detect_pr and fetch_discussions on the provider", function()
+  it("calls detect_pr and fetch_discussions on the provider", function()
     local s = setup({ pr = SAMPLE_PR, discussions = {} })
 
-    read_service.refresh(1)
+    read_service.refresh_async(1)
+    assert.is_true(vim.wait(200, function()
+      return #s.provider.calls.detect_pr >= 1
+    end))
 
     assert.equals(1, #s.provider.calls.detect_pr)
     assert.equals(1, #s.provider.calls.fetch_discussions)
@@ -340,7 +360,7 @@ async_tests.describe("parley.services.read refresh", function()
   -- 2. No PR detected
   -- -------------------------------------------------------------------------
 
-  async_tests.it("clears signs when detect_pr returns nil (no PR for branch)", function()
+  it("clears signs when detect_pr returns nil (no PR for branch)", function()
     local s = setup({ pr = nil })
 
     review_repository._entries[1] = {
@@ -350,7 +370,10 @@ async_tests.describe("parley.services.read refresh", function()
       mappings = { ["99"] = { local_line = 5, stale = false, confidence = 1.0 } },
     }
 
-    read_service.refresh(1)
+    read_service.refresh_async(1)
+    assert.is_true(vim.wait(200, function()
+      return #s.provider.calls.detect_pr >= 1
+    end))
 
     assert.equals(0, #s.render_calls)
     assert.is_true(#s.clear_calls >= 1)
@@ -358,7 +381,7 @@ async_tests.describe("parley.services.read refresh", function()
     assert.is_nil(read_service.get_buffer_state(1))
   end)
 
-  async_tests.it("removes the cached PR record when detect_pr returns nil", function()
+  it("removes the cached PR record when detect_pr returns nil", function()
     local s = setup({ pr = nil })
 
     -- Pre-seed the cache with a stale PR record so we can verify it goes away.
@@ -371,7 +394,10 @@ async_tests.describe("parley.services.read refresh", function()
       "precondition: cache should hold the seeded entry"
     )
 
-    read_service.refresh(1)
+    read_service.refresh_async(1)
+    assert.is_true(vim.wait(200, function()
+      return #s.provider.calls.detect_pr >= 1
+    end))
 
     local entry = cache.get({ provider = "github", repository = "owner/repo", subkey = "pr_branch_feature" })
     assert.is_nil(entry)
@@ -383,7 +409,7 @@ async_tests.describe("parley.services.read refresh", function()
   -- 3 & 4. Stale-while-revalidate behaviour
   -- -------------------------------------------------------------------------
 
-  async_tests.it("renders cached data first, then fresh data, when force=false", function()
+  it("renders cached data first, then fresh data, when force=false", function()
     local s = setup({
       pr = SAMPLE_PR,
       discussions = { make_discussion(1, "src/foo.lua", 10, "fresh") },
@@ -399,7 +425,10 @@ async_tests.describe("parley.services.read refresh", function()
       { make_discussion(99, "src/foo.lua", 5, "stale") }
     )
 
-    read_service.refresh(1)
+    read_service.refresh_async(1)
+    assert.is_true(vim.wait(200, function()
+      return #s.render_calls >= 2
+    end))
 
     -- Expect 2 renders: stale (id 99) then fresh (id 1).
     assert.equals(2, #s.render_calls)
@@ -407,7 +436,7 @@ async_tests.describe("parley.services.read refresh", function()
     assert.equals("1", s.render_calls[2].discussions[1].id)
   end)
 
-  async_tests.it("skips the stale render when force=true", function()
+  it("skips the stale render when force=true", function()
     local s = setup({
       pr = SAMPLE_PR,
       discussions = { make_discussion(1, "src/foo.lua", 10, "fresh") },
@@ -422,19 +451,25 @@ async_tests.describe("parley.services.read refresh", function()
       { make_discussion(99, "src/foo.lua", 5, "stale") }
     )
 
-    read_service.refresh(1, { force = true })
+    read_service.refresh_async(1, { force = true })
+    assert.is_true(vim.wait(200, function()
+      return #s.render_calls >= 1
+    end))
 
     assert.equals(1, #s.render_calls)
     assert.equals("1", s.render_calls[1].discussions[1].id)
   end)
 
-  async_tests.it("preserves rendered decorations when only cached review data is invalidated", function()
+  it("preserves rendered decorations when only cached review data is invalidated", function()
     local s = setup({
       pr = SAMPLE_PR,
       discussions = { make_discussion(1, "src/foo.lua", 10, "fresh") },
     })
 
-    read_service.refresh(1)
+    read_service.refresh_async(1)
+    assert.is_true(vim.wait(200, function()
+      return #s.render_calls >= 1
+    end))
     local clear_count = #s.clear_calls
 
     review_repository.invalidate(1, { preserve_snapshot = true })
@@ -444,23 +479,21 @@ async_tests.describe("parley.services.read refresh", function()
     assert.equals(1, #s.render_calls)
   end)
 
-  async_tests.it("publishes progress for explicit refresh requests", function()
+  it("publishes progress for explicit refresh requests", function()
     setup({
       pr = SAMPLE_PR,
       discussions = { make_discussion(1, "src/foo.lua", 10, "fresh") },
     })
-    local ticks = 0
-    read_service._now = function()
-      ticks = ticks + 1
-      return ticks
-    end
-    read_service._defer = function(_cb, _timeout) end
 
-    read_service.refresh(1, { force = true, progress = true })
+    read_service.refresh_async(1, { force = true, progress = true })
+    assert.is_true(vim.wait(200, function()
+      local entries = progress_ui_state.list()
+      return #entries >= 1 and entries[1].state == "success"
+    end))
 
     local progress_entries = progress_ui_state.list()
     assert.equals(1, #progress_entries)
-    assert.equals("refresh", progress_entries[1].kind)
+    assert.equals("operation", progress_entries[1].kind)
     assert.equals("success", progress_entries[1].state)
     assert.equals("Refresh complete", progress_entries[1].message)
   end)
@@ -469,7 +502,7 @@ async_tests.describe("parley.services.read refresh", function()
   -- 5. Error path
   -- -------------------------------------------------------------------------
 
-  async_tests.it("notifies and leaves stale render in place when fetch raises", function()
+  it("notifies and leaves stale render in place when fetch raises", function()
     local s = setup({
       pr = SAMPLE_PR,
       discussions = {},
@@ -486,7 +519,10 @@ async_tests.describe("parley.services.read refresh", function()
       { make_discussion(99, "src/foo.lua", 5, "stale") }
     )
 
-    read_service.refresh(1)
+    read_service.refresh_async(1)
+    assert.is_true(vim.wait(200, function()
+      return #s.notify_calls >= 1
+    end))
 
     -- Stale render happened.
     assert.equals(1, #s.render_calls)
@@ -498,7 +534,7 @@ async_tests.describe("parley.services.read refresh", function()
     assert.equals("99", read_service.get_buffer_state(1).discussions[1].id)
   end)
 
-  async_tests.it("stays silent for background refresh failures when notify_errors=false", function()
+  it("stays silent for background refresh failures when notify_errors=false", function()
     local s = setup({
       pr = SAMPLE_PR,
       discussions = {},
@@ -514,14 +550,17 @@ async_tests.describe("parley.services.read refresh", function()
       { make_discussion(99, "src/foo.lua", 5, "stale") }
     )
 
-    read_service.refresh(1, { notify_errors = false })
+    read_service.refresh_async(1, { notify_errors = false })
+    assert.is_true(vim.wait(200, function()
+      return #s.render_calls >= 1
+    end))
 
     assert.equals(1, #s.render_calls)
     assert.equals(0, #s.notify_calls)
     assert.equals("99", read_service.get_buffer_state(1).discussions[1].id)
   end)
 
-  async_tests.it("keeps PR state and clears decorations when the current file has no discussions", function()
+  it("keeps PR state and clears decorations when the current file has no discussions", function()
     local s = setup({
       path = "/repo/src/foo.lua",
       pr = SAMPLE_PR,
@@ -535,7 +574,10 @@ async_tests.describe("parley.services.read refresh", function()
       mappings = { ["99"] = { local_line = 5, stale = false, confidence = 1.0 } },
     }
 
-    read_service.refresh(1)
+    read_service.refresh_async(1)
+    assert.is_true(vim.wait(200, function()
+      return #s.clear_calls >= 1
+    end))
 
     assert.equals(1, #s.clear_calls)
     local state = read_service.get_buffer_state(1)
@@ -549,13 +591,16 @@ async_tests.describe("parley.services.read refresh", function()
   -- 6. Reentrancy
   -- -------------------------------------------------------------------------
 
-  async_tests.it("returns immediately when a refresh is already in flight for this bufnr", function()
+  it("returns immediately when a refresh is already in flight for this bufnr", function()
     local s = setup({ pr = SAMPLE_PR, discussions = {} })
 
     -- Simulate an in-flight call.
     review_repository._in_flight[1] = true
 
-    read_service.refresh(1)
+    read_service.refresh_async(1)
+    vim.wait(100, function()
+      return false
+    end)
 
     assert.equals(0, #s.provider.calls.detect_pr)
     assert.equals(0, #s.render_calls)
@@ -563,12 +608,15 @@ async_tests.describe("parley.services.read refresh", function()
     review_repository._in_flight[1] = nil
   end)
 
-  async_tests.it("queues a forced rerun when force=true arrives during an in-flight refresh", function()
+  it("queues a forced rerun when force=true arrives during an in-flight refresh", function()
     local s = setup({ pr = SAMPLE_PR, discussions = {} })
 
     review_repository._in_flight[1] = true
 
-    read_service.refresh(1, { force = true })
+    read_service.refresh_async(1, { force = true })
+    vim.wait(100, function()
+      return false
+    end)
 
     assert.is_true(review_repository._pending_force[1])
     assert.equals(0, #s.provider.calls.detect_pr)
@@ -581,58 +629,70 @@ async_tests.describe("parley.services.read refresh", function()
   -- 7. Non-regular buffers are silently skipped
   -- -------------------------------------------------------------------------
 
-  async_tests.it("does nothing for a diffview buffer", function()
+  it("does nothing for a diffview buffer", function()
     local s = setup({
       filetype = "DiffviewFiles",
       pr = SAMPLE_PR,
     })
 
-    read_service.refresh(1)
+    read_service.refresh_async(1)
+    vim.wait(50, function()
+      return false
+    end)
 
     assert.equals(0, #s.render_calls)
     assert.equals(0, #s.clear_calls)
     assert.equals(0, #s.provider.calls.detect_pr)
   end)
 
-  async_tests.it("does nothing for a non-VCS buffer", function()
+  it("does nothing for a non-VCS buffer", function()
     local s = setup({
       vcs_info = false,
       pr = SAMPLE_PR,
     })
 
-    read_service.refresh(1)
+    read_service.refresh_async(1)
+    vim.wait(50, function()
+      return false
+    end)
 
     assert.equals(0, #s.render_calls)
     assert.equals(0, #s.clear_calls)
     assert.equals(0, #s.provider.calls.detect_pr)
   end)
 
-  async_tests.it("does nothing when no provider matches the vcs_info", function()
+  it("does nothing when no provider matches the vcs_info", function()
     local s = setup({
       no_provider = true,
       pr = SAMPLE_PR,
     })
 
-    read_service.refresh(1)
+    read_service.refresh_async(1)
+    vim.wait(50, function()
+      return false
+    end)
 
     assert.equals(0, #s.render_calls)
     assert.equals(0, #s.clear_calls)
     assert.is_nil(s.provider)
   end)
 
-  async_tests.it("does nothing when the buffer path is outside the repo root", function()
+  it("does nothing when the buffer path is outside the repo root", function()
     local s = setup({
       path = "/some/other/place/file.lua",
       pr = SAMPLE_PR,
     })
 
-    read_service.refresh(1)
+    read_service.refresh_async(1)
+    vim.wait(50, function()
+      return false
+    end)
 
     assert.equals(0, #s.render_calls)
     assert.equals(0, #s.provider.calls.detect_pr)
   end)
 
-  async_tests.it("does nothing when the branch is nil (detached HEAD)", function()
+  it("does nothing when the branch is nil (detached HEAD)", function()
     local s = setup({
       vcs_info = {
         vcs = "git",
@@ -643,24 +703,32 @@ async_tests.describe("parley.services.read refresh", function()
       pr = SAMPLE_PR,
     })
 
-    read_service.refresh(1)
+    read_service.refresh_async(1)
+    vim.wait(50, function()
+      return false
+    end)
 
     assert.equals(0, #s.provider.calls.detect_pr)
   end)
 end)
 
 -- ---------------------------------------------------------------------------
--- refresh_async — sync wrapper
+-- refresh_async — async coroutine integration
 -- ---------------------------------------------------------------------------
 
 describe("parley.services.read refresh_async", function()
   before_each(function()
     save_seams()
+    progress_ui_state.clear()
   end)
 
   after_each(function()
+    vim.wait(20, function()
+      return false
+    end)
     restore_seams()
     registry.reset()
+    progress_ui_state.clear()
   end)
 
   it("invokes refresh inside an async coroutine", function()
@@ -669,9 +737,9 @@ describe("parley.services.read refresh_async", function()
     read_service.refresh_async(1)
     -- async.run schedules; let plenary's scheduler drain.
     -- A tiny vim.wait suffices because all our seams are synchronous.
-    vim.wait(50, function()
+    assert.is_true(vim.wait(200, function()
       return #s.provider.calls.detect_pr > 0
-    end)
+    end))
 
     assert.equals(1, #s.provider.calls.detect_pr)
   end)

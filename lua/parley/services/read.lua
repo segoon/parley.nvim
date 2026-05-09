@@ -1,90 +1,25 @@
 --- parley.services.read — read-side rendering wrapper over repositories.
 
-local async = require("plenary.async")
+local async_operation = require("parley.async_operation")
 local context_repository = require("parley.repositories.context")
 local provider_repository = require("parley.repositories.provider")
 local review_repository = require("parley.repositories.review")
 local signs = require("parley.signs")
-local progress_ui_state = require("parley.ui_states.progress")
 
 local M = {}
 M._subscriptions = {}
-M._next_progress_id = 0
 
+--- @type fun(msg: string, level: integer): nil
 M._notify = function(msg, level)
   vim.notify(msg, level)
 end
 
+--- @type fun(): parley.Config
 M._get_config = function()
   return require("parley").config
 end
 
-M._defer = function(cb, timeout)
-  vim.defer_fn(cb, timeout)
-end
-
-M._now = function()
-  return math.floor((vim.uv or vim.loop).hrtime() / 1000000)
-end
-
----@param state 'success'|'failed'|'cancelled'
----@return integer
-local function progress_timeout(state)
-  local config = M._get_config() or {}
-  local progress = config.progress or {}
-  if state == "success" then
-    return progress.success_timeout or 1200
-  end
-  if state == "failed" then
-    return progress.failed_timeout or 2500
-  end
-  return progress.cancelled_timeout or 1200
-end
-
----@param bufnr integer
----@param message string
----@return { id: string, started_at: integer, title: string }
-local function start_progress(bufnr, message)
-  M._next_progress_id = M._next_progress_id + 1
-  local now = M._now()
-  local entry = {
-    id = "read-" .. tostring(M._next_progress_id),
-    bufnr = bufnr,
-    title = "Parley",
-    message = message,
-    kind = "refresh",
-    state = "running",
-    started_at = now,
-    updated_at = now,
-  }
-  progress_ui_state.upsert(entry)
-  return {
-    id = entry.id,
-    started_at = entry.started_at,
-    title = entry.title,
-  }
-end
-
----@param progress { id: string, started_at: integer, title: string }
----@param bufnr integer
----@param state 'success'|'failed'|'cancelled'
----@param message string
-local function finish_progress(progress, bufnr, state, message)
-  progress_ui_state.upsert({
-    id = progress.id,
-    bufnr = bufnr,
-    title = progress.title,
-    message = message,
-    kind = "refresh",
-    state = state,
-    started_at = progress.started_at,
-    updated_at = M._now(),
-  })
-  M._defer(function()
-    progress_ui_state.remove(progress.id)
-  end, progress_timeout(state))
-end
-
+--- @param bufnr integer
 --- @param snapshot table|nil
 local function render_snapshot(bufnr, snapshot)
   if not snapshot or not snapshot.discussions or #snapshot.discussions == 0 then
@@ -106,6 +41,20 @@ local function ensure_subscription(bufnr)
   M._subscriptions[bufnr] = review_repository.subscribe(bufnr, function(snapshot)
     render_snapshot(bufnr, snapshot)
   end)
+end
+
+--- Perform the blocking review refresh for bufnr.
+--- Must be called from within a plenary.async coroutine.
+--- @param bufnr integer
+--- @param opts { force?: boolean, notify_errors?: boolean }
+--- @return table|nil
+local function do_refresh(bufnr, opts)
+  ensure_subscription(bufnr)
+  local snapshot = review_repository.refresh(bufnr, opts)
+  if snapshot and snapshot.status == "error" and opts.notify_errors ~= false and snapshot.error then
+    M._notify("parley: refresh failed: " .. tostring(snapshot.error), vim.log.levels.WARN)
+  end
+  return snapshot
 end
 
 --- @param bufnr integer
@@ -150,56 +99,69 @@ function M.clear_buffer_state(bufnr)
   signs.clear(bufnr)
 end
 
+--- Start an async refresh for bufnr.
+---
+--- A progress popup is shown when:
+---   - opts.progress is true (e.g. explicit :Parley refresh), OR
+---   - there is no existing in-memory snapshot yet (first-time / cold cache).
+---
+--- The popup is suppressed (silent) when a snapshot already exists because the
+--- stale data is rendered immediately while the background fetch completes.
+---
+--- context_repository.refresh and provider_repository.refresh are called
+--- synchronously before the async coroutine is spawned so that the `silent`
+--- decision is made with up-to-date context. do_refresh re-checks context
+--- inside the coroutine to guard against state changes during scheduling.
+---
 --- @param bufnr integer
---- @param opts? { force?: boolean, notify_errors?: boolean }
-function M.refresh(bufnr, opts)
-  opts = opts or {}
-  local context_snapshot = context_repository.refresh(bufnr)
-  if not context_snapshot or context_snapshot.kind ~= "regular" then
-    return nil
-  end
-  if not context_snapshot.rel_path then
-    return nil
-  end
-  if
-    not context_snapshot.vcs_info
-    or not context_snapshot.vcs_info.branch
-    or context_snapshot.vcs_info.branch == ""
-  then
-    return nil
-  end
-  local provider_snapshot = provider_repository.refresh(bufnr)
-  if not provider_snapshot then
-    return nil
-  end
-  ensure_subscription(bufnr)
-  local progress = opts.progress and start_progress(bufnr, "Refreshing discussions") or nil
-  local snapshot = review_repository.refresh(bufnr, opts)
-  if snapshot and snapshot.status == "error" and opts.notify_errors ~= false and snapshot.error then
-    M._notify("parley: refresh failed: " .. tostring(snapshot.error), vim.log.levels.WARN)
-  end
-  if progress then
-    if snapshot and snapshot.status == "error" then
-      finish_progress(progress, bufnr, "failed", "Refresh failed")
-    else
-      finish_progress(progress, bufnr, "success", "Refresh complete")
-    end
-  end
-  return snapshot
-end
-
---- @param bufnr integer
---- @param opts? { force?: boolean, notify_errors?: boolean }
+--- @param opts? { force?: boolean, notify_errors?: boolean, progress?: boolean }
 --- @param callback? fun(snapshot: table|nil): nil
 function M.refresh_async(bufnr, opts, callback)
-  async.run(function()
-    local snapshot = M.refresh(bufnr, opts)
-    if callback then
-      vim.schedule(function()
-        callback(snapshot)
-      end)
-    end
-  end)
+  opts = opts or {}
+
+  -- Fast sync pre-check: context/provider detection is in-memory plus branch
+  -- detection; no network or disk I/O. Required before spawning the coroutine
+  -- so the `silent` flag can be set correctly.
+  local ctx = context_repository.refresh(bufnr)
+  if not ctx or ctx.kind ~= "regular" or not ctx.rel_path then
+    return
+  end
+  if not ctx.vcs_info or not ctx.vcs_info.branch or ctx.vcs_info.branch == "" then
+    return
+  end
+  if not provider_repository.refresh(bufnr) then
+    return
+  end
+
+  local has_snapshot = review_repository.get(bufnr) ~= nil
+  local silent = not opts.progress and has_snapshot
+
+  -- Capture the snapshot in a closure so the callback always receives it even
+  -- when fn throws due to an error snapshot (fn's return value is lost on throw).
+  local last_snapshot = nil
+
+  async_operation
+    .new({
+      bufnr = bufnr,
+      silent = silent,
+      fn = function()
+        local snapshot = do_refresh(bufnr, opts)
+        last_snapshot = snapshot
+        if snapshot and snapshot.status == "error" then
+          error(snapshot.error or "refresh failed")
+        end
+        return snapshot
+      end,
+      popup = silent and nil or {
+        progress = "Refreshing discussions",
+        success = "Refresh complete",
+        error = "Refresh failed",
+      },
+      finally_scheduled_fn = callback and function(_ok, _result)
+        callback(last_snapshot)
+      end or nil,
+    })
+    :start()
 end
 
 return M
