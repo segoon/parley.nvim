@@ -20,6 +20,7 @@ local M = {}
 --- @field telescope         boolean  Auto-register Parley Telescope extensions during setup
 --- @field keymaps           parley.KeymapsConfig
 --- @field providers         table<string, table>  Provider-specific options
+--- @field debug             boolean  Write trace logs to stdpath("log")/parley.log
 
 --- @class parley.SignsConfig
 --- @field enabled  boolean
@@ -60,6 +61,7 @@ local M = {}
 local defaults = {
   refresh_interval = 300, -- 5 minutes
   cache_dir = vim.fn.stdpath("cache") .. "/parley",
+  debug = false,
   telescope = true,
   signs = {
     enabled = true,
@@ -115,7 +117,6 @@ local PARLEY_GROUPS = {
   nav = { "next", "prev" },
 }
 
-local PARLEY_GROUP_NAMES = { "discussion", "comment", "nav" }
 local PARLEY_TOP_LEVEL = { "discussion", "comment", "nav", "refresh" }
 
 --- @param items string[]
@@ -174,7 +175,6 @@ function M._dispatch_parley(fargs, bufnr, cmd_opts)
   end
 
   if group == "refresh" then
-    local read_service = require("parley.services.read")
     read_service.refresh_async(bufnr, { force = true, progress = true })
     return
   end
@@ -271,6 +271,8 @@ end
 --- @param opts parley.Config | nil  Partial config; merged with defaults.
 function M.setup(opts)
   M.config = vim.tbl_deep_extend("force", defaults, opts or {})
+
+  require("parley.debug").tracing_enable(M.config.debug)
 
   -- cache.setup() owns cache-dir creation.
   cache.setup({ cache_dir = M.config.cache_dir })

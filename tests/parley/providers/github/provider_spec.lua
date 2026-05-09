@@ -214,6 +214,11 @@ local function ok(json_str)
   return { code = 0, stdout = json_str, stderr = "" }
 end
 
+--- Success response with plain text (non-JSON) body.
+local function ok_text(text)
+  return { code = 0, stdout = text, stderr = "" }
+end
+
 --- Success response with no body (DELETE).
 local function ok_empty()
   return { code = 0, stdout = "", stderr = "" }
@@ -222,6 +227,12 @@ end
 --- Failure response.
 local function fail(msg)
   return { code = 1, stdout = "", stderr = msg }
+end
+
+--- Return true when cmd is a `gh config get` invocation.
+--- Used by test runners to distinguish local config reads from API calls.
+local function is_config_get(cmd)
+  return cmd[1] == "gh" and cmd[2] == "config"
 end
 
 --- Build a runner that dispatches based on the URL argument.
@@ -883,19 +894,15 @@ end)
 -- ---------------------------------------------------------------------------
 
 async_tests.describe("parley.providers.github.provider — react", function()
-  async_tests.it("GETs /user on first call and caches viewer login", function()
-    local calls = {}
+  async_tests.it("caches viewer login on first call (falls back to gh api /user when config unavailable)", function()
     local runner = make_runner(function(cmd)
-      table.insert(calls, cmd)
-      local path = nil
-      for _, a in ipairs(cmd) do
-        if a:find("/user", 1, true) or a:find("/reactions", 1, true) then
-          path = a
-          break
-        end
+      if is_config_get(cmd) then
+        return fail("no config")
       end
-      if path and path:find("/user", 1, true) and not path:find("/reactions", 1, true) then
-        return ok(USER_JSON)
+      for _, a in ipairs(cmd) do
+        if a == "/user" then
+          return ok(USER_JSON)
+        end
       end
       return ok(REACTIONS_EMPTY_JSON)
     end)
@@ -907,6 +914,9 @@ async_tests.describe("parley.providers.github.provider — react", function()
 
   async_tests.it("POSTs reaction when viewer has not reacted", function()
     local runner = make_runner(function(cmd)
+      if is_config_get(cmd) then
+        return fail("no config")
+      end
       -- /user → viewer login
       for _, a in ipairs(cmd) do
         if a == "/user" then
@@ -936,6 +946,9 @@ async_tests.describe("parley.providers.github.provider — react", function()
 
   async_tests.it("DELETEs reaction when viewer has already reacted", function()
     local runner = make_runner(function(cmd)
+      if is_config_get(cmd) then
+        return fail("no config")
+      end
       for _, a in ipairs(cmd) do
         if a == "/user" then
           return ok(USER_JSON)
@@ -971,6 +984,9 @@ async_tests.describe("parley.providers.github.provider — react", function()
   async_tests.it("reuses cached viewer login on second react call", function()
     local user_call_count = 0
     local runner = make_runner(function(cmd)
+      if is_config_get(cmd) then
+        return fail("no config")
+      end
       for _, a in ipairs(cmd) do
         if a == "/user" then
           user_call_count = user_call_count + 1
@@ -1246,6 +1262,136 @@ describe("parley.providers.github.provider — detect", function()
       branch = "main",
       remote_url = "git@github.corp.example.com:team/svc.git",
     }))
+  end)
+end)
+
+-- ---------------------------------------------------------------------------
+-- Suite: fetch_viewer_login (viewer identity resolution)
+-- ---------------------------------------------------------------------------
+
+async_tests.describe("parley.providers.github.provider — fetch_viewer_login", function()
+  async_tests.it("fast path: uses gh config get and caches login (no API call)", function()
+    local runner = make_route_runner({
+      { pattern = "config", response = ok_text("alice\n") },
+      { pattern = "/comments", response = ok(COMMENTS_JSON) },
+    })
+    local p2 = make_provider(runner.fn)
+    p2:fetch_discussions(make_review())
+    assert.equals("alice", p2._viewer_login)
+    -- no /user API call was made
+    local api_calls = 0
+    for _, call in ipairs(runner._calls) do
+      if not is_config_get(call) and not vim.tbl_contains(call, "--paginate") then
+        api_calls = api_calls + 1
+      end
+    end
+    assert.equals(0, api_calls)
+  end)
+
+  async_tests.it("fast path: second call does not invoke the runner again", function()
+    local config_call_count = 0
+    local runner = make_runner(function(cmd)
+      if is_config_get(cmd) then
+        config_call_count = config_call_count + 1
+        return ok_text("alice\n")
+      end
+      return ok(REACTIONS_EMPTY_JSON)
+    end)
+    local p = make_provider(runner.fn)
+    p:react(make_review(), "1001", "+1")
+    p:react(make_review(), "1002", "+1")
+    assert.equals(1, config_call_count)
+  end)
+
+  async_tests.it("slow path: falls back to gh api /user when gh config fails", function()
+    local api_user_called = false
+    local runner = make_runner(function(cmd)
+      if is_config_get(cmd) then
+        return fail("could not find key \"user\"")
+      end
+      for _, a in ipairs(cmd) do
+        if a == "/user" then
+          api_user_called = true
+          return ok(USER_JSON)
+        end
+      end
+      return ok(REACTIONS_EMPTY_JSON)
+    end)
+    local p = make_provider(runner.fn)
+    p:react(make_review(), "1001", "+1")
+    assert.is_true(api_user_called)
+    assert.equals("alice", p._viewer_login)
+  end)
+
+  async_tests.it("stays nil when both gh config and gh api /user fail", function()
+    -- Use fetch_discussions so there are no further gh_run calls after
+    -- fetch_viewer_login; react() would make an additional /reactions call.
+    local runner = make_route_runner({
+      { pattern = "config", response = fail("no config") },
+      { pattern = "/comments", response = ok(COMMENTS_JSON) },
+      -- no /user route → gh_run raises → pcall in fetch_viewer_login catches it
+    })
+    -- no-op sleep so gh_run retries don't stall the async test
+    local p = make_provider({ _runner = runner.fn, _sleep = function(_ms) end })
+    p:fetch_discussions(make_review())
+    assert.is_nil(p._viewer_login)
+  end)
+end)
+
+-- ---------------------------------------------------------------------------
+-- Suite: fetch_discussions — is_own assignment
+-- ---------------------------------------------------------------------------
+
+async_tests.describe("parley.providers.github.provider — fetch_discussions is_own", function()
+  async_tests.it("sets is_own=true for comments authored by the viewer (config path)", function()
+    local runner = make_route_runner({
+      { pattern = "config", response = ok_text("alice\n") },
+      { pattern = "/comments", response = ok(COMMENTS_JSON) },
+    })
+    local p = make_provider(runner.fn)
+    local comments = p:fetch_discussions(make_review())[1].comments
+    assert.is_true(comments[1].is_own) -- alice's root comment
+    assert.is_false(comments[2].is_own) -- bob's reply
+  end)
+
+  async_tests.it("sets is_own=true for comments authored by the viewer (api fallback path)", function()
+    local runner = make_route_runner({
+      { pattern = "config", response = fail("no config") },
+      { pattern = "/user", response = ok(USER_JSON) },
+      { pattern = "/comments", response = ok(COMMENTS_JSON) },
+    })
+    local p = make_provider(runner.fn)
+    local comments = p:fetch_discussions(make_review())[1].comments
+    assert.is_true(comments[1].is_own) -- alice's root comment
+    assert.is_false(comments[2].is_own) -- bob's reply
+  end)
+
+  async_tests.it("sets is_own=false for all comments when viewer is unknown", function()
+    local runner = make_route_runner({
+      { pattern = "config", response = fail("no config") },
+      { pattern = "/comments", response = ok(COMMENTS_JSON) },
+      -- no /user route → gh_run raises → pcall catches → _viewer_login stays nil
+    })
+    local p = make_provider(runner.fn)
+    local comments = p:fetch_discussions(make_review())[1].comments
+    assert.is_false(comments[1].is_own)
+    assert.is_false(comments[2].is_own)
+  end)
+
+  async_tests.it("caches viewer login: second fetch_discussions does not call runner for identity", function()
+    local identity_call_count = 0
+    local runner = make_runner(function(cmd)
+      if is_config_get(cmd) then
+        identity_call_count = identity_call_count + 1
+        return ok_text("alice\n")
+      end
+      -- gh api --paginate /comments
+      return ok(COMMENTS_JSON)
+    end)
+    local p = make_provider(runner.fn)
+    p:fetch_discussions(make_review())
+    p:fetch_discussions(make_review())
+    assert.equals(1, identity_call_count)
   end)
 end)
 

@@ -4,6 +4,7 @@
     "lua/parley/anchor.lua",
     "lua/parley/buffer_context.lua",
     "lua/parley/cache.lua",
+    "lua/parley/debug.lua",
     "lua/parley/discussion_window.lua",
     "lua/parley/discussion_window/input.lua",
     "lua/parley/discussion_window/render.lua",
@@ -207,6 +208,7 @@
     },
     "infra": {
       "modules": [
+        "lua/parley/debug.lua",
         "lua/parley/http.lua",
         "lua/parley/cache.lua",
         "lua/parley/vcs.lua",
@@ -217,6 +219,7 @@
       ],
       "capabilities": [
         "buffer_inspect",
+        "fs_read_blocking",
         "process_async",
         "ui_timers",
         "time",

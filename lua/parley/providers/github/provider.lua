@@ -21,6 +21,7 @@
 local model = require("parley.model")
 local await = require("parley.runtime.await")
 local ui = require("parley.runtime.ui")
+local dbg = require("parley.debug")
 
 local M = {}
 
@@ -342,6 +343,53 @@ local function gh_run(self, cmd)
   return decoded
 end
 
+--- Resolve and cache the authenticated user's GitHub login.
+---
+--- Resolution order (fast-to-slow, stops on first success):
+---   1. Already cached in self._viewer_login → no-op.
+---   2. `gh config get -h <host> user`  (local config, no network).
+---   3. `gh api /user`                  (one API call, always authoritative).
+---
+--- Errors are silenced — caller treats nil _viewer_login as "unknown"
+--- and defaults is_own to false.
+---
+--- @param self parley.github.Provider
+local function fetch_viewer_login(self)
+  if self._viewer_login then
+    dbg.trace("github.provider", "fetch_viewer_login: already cached → " .. self._viewer_login)
+    return
+  end
+  -- Fast path: gh config (local, no network call)
+  local result = self._runner({ "gh", "config", "get", "-h", self._host, "user" })
+  dbg.trace(
+    "github.provider",
+    "fetch_viewer_login: gh config get → code="
+      .. tostring(result.code)
+      .. " stdout="
+      .. vim.inspect(result.stdout or "")
+      .. " stderr="
+      .. vim.inspect(result.stderr or "")
+  )
+  if result.code == 0 and result.stdout and result.stdout:match("%S") then
+    self._viewer_login = result.stdout:match("^%s*(.-)%s*$")
+    dbg.trace("github.provider", "fetch_viewer_login: set via config → " .. tostring(self._viewer_login))
+    return
+  end
+  -- Slow path: gh api /user (one API call)
+  local ok, user = pcall(gh_run, self, { "gh", "api", "/user" })
+  dbg.trace(
+    "github.provider",
+    "fetch_viewer_login: gh api /user → ok="
+      .. tostring(ok)
+      .. " login="
+      .. vim.inspect(ok and user and user.login or nil)
+  )
+  if ok and user and user.login then
+    self._viewer_login = user.login
+  end
+  dbg.trace("github.provider", "fetch_viewer_login: final _viewer_login=" .. vim.inspect(self._viewer_login))
+end
+
 --- Start a cancellable gh CLI request.
 --- @param self parley.github.Provider
 --- @param cmd string[]
@@ -602,19 +650,25 @@ function GitHubProvider:fetch_discussions(review)
 
   local comments = gh_run(self, { "gh", "api", "--paginate", url }) or {}
 
-  -- Use auth username as viewer for is_own detection.
-  -- Ignore errors — is_own defaults to false.
-  local viewer = ""
-  local ok_auth, token = pcall(function()
-    return self:auth()
-  end)
-  if ok_auth and token then
-    -- Best-effort: viewer login is derived lazily in react(); here we leave
-    -- is_own = false unless we already have it cached.
-    viewer = self._viewer_login or ""
-  end
+  -- Resolve viewer login for is_own detection.
+  -- fetch_viewer_login uses gh directly (handles keyring, env-var, and
+  -- hosts.yml auth transparently) and silences its own errors, so no
+  -- Lua-level auth guard is needed here.
+  fetch_viewer_login(self)
+  local viewer = self._viewer_login or ""
+  dbg.trace("github.provider", "fetch_discussions: viewer=" .. vim.inspect(viewer) .. " #comments=" .. tostring(#comments))
 
-  return group_comments_into_discussions(comments, viewer)
+  local discussions = group_comments_into_discussions(comments, viewer)
+  local own_count = 0
+  for _, d in ipairs(discussions) do
+    for _, c in ipairs(d.comments) do
+      if c.is_own then
+        own_count = own_count + 1
+      end
+    end
+  end
+  dbg.trace("github.provider", "fetch_discussions: #discussions=" .. tostring(#discussions) .. " is_own_count=" .. tostring(own_count))
+  return discussions
 end
 
 --- Post a new top-level review comment anchored to a file/line.
@@ -754,14 +808,7 @@ end
 --- @param comment_id string
 --- @param reaction   string  e.g. "+1", "heart"
 function GitHubProvider:react(_review, comment_id, reaction)
-  -- Ensure viewer login is cached.
-  if not self._viewer_login then
-    local user = gh_run(self, { "gh", "api", "/user" })
-    if user and user.login then
-      self._viewer_login = user.login
-    end
-  end
-
+  fetch_viewer_login(self)
   local viewer = self._viewer_login or ""
   local base_url = repo_path(self) .. "/pulls/comments/" .. comment_id .. "/reactions"
 

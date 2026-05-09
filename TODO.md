@@ -21,6 +21,5 @@ documentation:
 
 Bugs:
 - multiple buffers with different repositories
-- cannot edit my own comment
 - no autocompletion on :'<,'>
 - tests isolation (pending callbacks, subscriptions)

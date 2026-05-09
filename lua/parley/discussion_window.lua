@@ -13,6 +13,8 @@ local input = require("parley.discussion_window.input")
 local selection = require("parley.discussion_window.selection")
 local window_helpers = require("parley.discussion_window.window")
 
+local dbg = require("parley.debug")
+
 local M = {}
 
 local INPUT_HEIGHT = 6
@@ -433,6 +435,15 @@ function M.edit_current_comment(bufnr)
     M._notify("Open a Parley discussion before editing", vim.log.levels.INFO)
     return false
   end
+  dbg.trace(
+    "discussion_window",
+    "edit_current_comment: comment.id="
+      .. tostring(comment.id)
+      .. " author="
+      .. tostring(comment.author)
+      .. " is_own="
+      .. tostring(comment.is_own)
+  )
   if not comment.is_own then
     M._notify("You can only edit your own Parley comments", vim.log.levels.WARN)
     return false
@@ -453,6 +464,15 @@ function M.delete_current_comment(bufnr)
     M._notify("Open a Parley discussion before deleting", vim.log.levels.INFO)
     return false
   end
+  dbg.trace(
+    "discussion_window",
+    "delete_current_comment: comment.id="
+      .. tostring(comment.id)
+      .. " author="
+      .. tostring(comment.author)
+      .. " is_own="
+      .. tostring(comment.is_own)
+  )
   if not comment.is_own then
     M._notify("You can only delete your own Parley comments", vim.log.levels.WARN)
     return false

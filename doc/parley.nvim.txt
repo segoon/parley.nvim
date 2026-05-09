@@ -223,6 +223,7 @@ The full default configuration:
     require('parley').setup({
       refresh_interval = 300, -- 5 minutes
       cache_dir = vim.fn.stdpath("cache") .. "/parley",
+      debug = false,
       telescope = true,
       signs = {
         enabled = true,
@@ -276,6 +277,9 @@ Options: ~
 
     providers  (`table<string, table>`)
         Provider-specific options
+
+    debug  (`boolean`)  Default: `false`
+        Write trace logs to stdpath("log")/parley.log
 
 
 signs ~                                                 *parley-config-signs*
