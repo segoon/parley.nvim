@@ -19,6 +19,7 @@
 ---   • _parse_remote_url is a pure function exported for unit testing.
 
 local await = require("parley.runtime.await")
+local dbg = require("parley.debug")
 local mapping = require("parley.providers.github.mapping")
 local transport = require("parley.providers.github.transport")
 
