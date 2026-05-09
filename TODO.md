@@ -1,12 +1,10 @@
 - arcanum provider
 - diffview.nvim integration
 - :Telescope discussions|issues|comments? vcs_issues? - preview
-- mark comment as stale (outdated position)
 - consistent opts for setup()
 
 quality:
 - lua-language-server type warnings, but not in linter
-- tests on call dependencies (ui/non-ui threads)
 
 documentation:
 - vim help
@@ -14,6 +12,7 @@ documentation:
 
 UI:
 - configure comment preview layout in setup(...)
+- mark comment as stale (outdated position)
 
 Bugs:
 - too many asserts - detect_pr() must be called before
