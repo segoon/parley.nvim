@@ -2,7 +2,6 @@
 
 - @PROJECT.md - the core concept, the project goals, user scenarios
 - @TODO.md - the plans
-- @POSTPONED.md - postponed features
 - @README.md - the main user documentation
 
 ## Quick Reference

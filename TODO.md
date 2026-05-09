@@ -3,6 +3,9 @@ features:
 - diffview.nvim integration
 - :Telescope discussions|issues|comments? vcs_issues? - preview
 - consistent opts for setup()
+- multiple discussions of the same line
+- X-RateLimit-*, 429, 403 from gh
+- resolve/unresolve thread, unresolved count (GraphQL)
 
 quality:
 - lua-language-server type warnings, but not in linter
