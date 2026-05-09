@@ -217,13 +217,12 @@ local function setup(o)
   end
 
   -- Reentrancy guard: clear any state from previous tests.
-  for k in pairs(review_repository._in_flight) do
-    review_repository._in_flight[k] = nil
-  end
-  for k in pairs(review_repository._pending_force) do
-    review_repository._pending_force[k] = nil
-  end
-  review_repository._entries = {}
+  review_repository._reviews = {}
+  review_repository._views = {}
+  review_repository._bufnr_key = {}
+  review_repository._key_bufnrs = {}
+  review_repository._in_flight = {}
+  review_repository._pending_force = {}
   review_repository._subscribers = {}
   context_repository._entries = {}
   provider_repository._entries = {}
@@ -363,12 +362,12 @@ describe("parley.services.read refresh", function()
   it("clears signs when detect_pr returns nil (no PR for branch)", function()
     local s = setup({ pr = nil })
 
-    review_repository._entries[1] = {
+    review_repository._seed(1, {
       status = "ready",
       stale = false,
       discussions = { make_discussion(99, "src/foo.lua", 5, "stale") },
       mappings = { ["99"] = { local_line = 5, stale = false, confidence = 1.0 } },
-    }
+    })
 
     read_service.refresh_async(1)
     assert.is_true(vim.wait(200, function()
@@ -567,12 +566,12 @@ describe("parley.services.read refresh", function()
       discussions = { make_discussion(1, "src/bar.lua", 10, "for bar") },
     })
 
-    review_repository._entries[1] = {
+    review_repository._seed(1, {
       status = "ready",
       stale = false,
       discussions = { make_discussion(99, "src/foo.lua", 5, "stale") },
       mappings = { ["99"] = { local_line = 5, stale = false, confidence = 1.0 } },
-    }
+    })
 
     read_service.refresh_async(1)
     assert.is_true(vim.wait(200, function()
@@ -594,8 +593,9 @@ describe("parley.services.read refresh", function()
   it("returns immediately when a refresh is already in flight for this bufnr", function()
     local s = setup({ pr = SAMPLE_PR, discussions = {} })
 
-    -- Simulate an in-flight call.
-    review_repository._in_flight[1] = true
+    -- Simulate an in-flight call (keyed by review_key, not bufnr).
+    local rk = "github/owner/repo/feature"
+    review_repository._in_flight[rk] = true
 
     read_service.refresh_async(1)
     vim.wait(100, function()
@@ -605,24 +605,25 @@ describe("parley.services.read refresh", function()
     assert.equals(0, #s.provider.calls.detect_pr)
     assert.equals(0, #s.render_calls)
 
-    review_repository._in_flight[1] = nil
+    review_repository._in_flight[rk] = nil
   end)
 
   it("queues a forced rerun when force=true arrives during an in-flight refresh", function()
     local s = setup({ pr = SAMPLE_PR, discussions = {} })
 
-    review_repository._in_flight[1] = true
+    local rk = "github/owner/repo/feature"
+    review_repository._in_flight[rk] = true
 
     read_service.refresh_async(1, { force = true })
     vim.wait(100, function()
       return false
     end)
 
-    assert.is_true(review_repository._pending_force[1])
+    assert.is_true(review_repository._pending_force[rk])
     assert.equals(0, #s.provider.calls.detect_pr)
 
-    review_repository._in_flight[1] = nil
-    review_repository._pending_force[1] = nil
+    review_repository._in_flight[rk] = nil
+    review_repository._pending_force[rk] = nil
   end)
 
   -- -------------------------------------------------------------------------

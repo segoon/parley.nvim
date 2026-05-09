@@ -16,8 +16,10 @@ local function save_seams()
   saved.notify = read_service._notify
   saved.ctx_refresh = context_repository.refresh
   saved.prov_refresh = provider_repository.refresh
+  saved.prov_get = provider_repository.get
   saved.review_refresh = review_repository.refresh
-  saved.review_get = review_repository.get
+  saved.review_has = review_repository.has_review
+  saved.review_make_key = review_repository.make_key
 end
 
 local function restore_seams()
@@ -27,8 +29,10 @@ local function restore_seams()
   read_service._notify = saved.notify
   context_repository.refresh = saved.ctx_refresh
   provider_repository.refresh = saved.prov_refresh
+  provider_repository.get = saved.prov_get
   review_repository.refresh = saved.review_refresh
-  review_repository.get = saved.review_get
+  review_repository.has_review = saved.review_has
+  review_repository.make_key = saved.review_make_key
 end
 
 --- Make async_operation run synchronously for deterministic tests.
@@ -50,6 +54,12 @@ local function use_sync_async()
   return ctx
 end
 
+local PROVIDER_SNAPSHOT = {
+  status = "ready",
+  provider = {},
+  opts = { owner = "owner", repo = "repo", host = "github.com" },
+}
+
 --- Seed standard VCS context for bufnr 1.
 local function seed_vcs_context()
   context_repository.refresh = function(_bufnr)
@@ -68,18 +78,19 @@ local function seed_vcs_context()
     }
   end
   provider_repository.refresh = function(_bufnr)
-    return {
-      status = "ready",
-      provider = {},
-      opts = { owner = "owner", repo = "repo", host = "github.com" },
-    }
+    return PROVIDER_SNAPSHOT
+  end
+  provider_repository.get = function(_bufnr)
+    return PROVIDER_SNAPSHOT
+  end
+  review_repository.make_key = function(_ps, _ctx)
+    return "test/owner/repo/feature"
   end
 end
 
 --- Seed a successful review snapshot for bufnr 1 in the review repository.
 local function seed_snapshot()
-  review_repository._entries = review_repository._entries or {}
-  review_repository._entries[1] = {
+  review_repository._seed(1, {
     status = "ready",
     stale = false,
     review = { pr = { id = "42" }, head_sha = "abc" },
@@ -89,7 +100,10 @@ local function seed_snapshot()
     summary = { unresolved_count = 0 },
     error = nil,
     head_sha = "abc",
-  }
+  })
+  review_repository.has_review = function(_key)
+    return true
+  end
 end
 
 describe("parley.services.read", function()
@@ -98,7 +112,10 @@ describe("parley.services.read", function()
   before_each(function()
     save_seams()
     progress_ui_state.clear()
-    review_repository._entries = {}
+    review_repository._reviews = {}
+    review_repository._views = {}
+    review_repository._bufnr_key = {}
+    review_repository._key_bufnrs = {}
     read_service._subscriptions = {}
     notify_calls = {}
     read_service._notify = function(msg, level)
@@ -112,7 +129,10 @@ describe("parley.services.read", function()
     end)
     restore_seams()
     progress_ui_state.clear()
-    review_repository._entries = {}
+    review_repository._reviews = {}
+    review_repository._views = {}
+    review_repository._bufnr_key = {}
+    review_repository._key_bufnrs = {}
     read_service._subscriptions = {}
   end)
 
@@ -225,12 +245,12 @@ describe("parley.services.read", function()
   -- -------------------------------------------------------------------------
 
   describe("silent determination", function()
-    it("silent = false when no existing snapshot (cold cache / first-time fetch)", function()
+    it("silent = false when no existing review data (cold cache / first-time fetch)", function()
       use_sync_async()
       seed_vcs_context()
-      -- No entry in review_repository → get() returns nil
-      review_repository.get = function(_bufnr)
-        return nil
+      -- No shared review data → has_review returns false
+      review_repository.has_review = function(_key)
+        return false
       end
       review_repository.refresh = function(_bufnr, _opts)
         return nil
@@ -249,12 +269,12 @@ describe("parley.services.read", function()
       async_operation.new = orig_new
     end)
 
-    it("silent = true when a snapshot already exists (warm cache)", function()
+    it("silent = true when review data already exists (warm cache)", function()
       use_sync_async()
       seed_vcs_context()
       seed_snapshot()
       review_repository.refresh = function(_bufnr, _opts)
-        return review_repository._entries[1]
+        return review_repository.get(1)
       end
 
       local captured_silent = nil
@@ -270,12 +290,12 @@ describe("parley.services.read", function()
       async_operation.new = orig_new
     end)
 
-    it("silent = false when opts.progress = true even with existing snapshot", function()
+    it("silent = false when opts.progress = true even with existing data", function()
       use_sync_async()
       seed_vcs_context()
       seed_snapshot()
       review_repository.refresh = function(_bufnr, _opts)
-        return review_repository._entries[1]
+        return review_repository.get(1)
       end
 
       local captured_silent = nil
@@ -297,11 +317,11 @@ describe("parley.services.read", function()
   -- -------------------------------------------------------------------------
 
   describe("progress popup on cold cache", function()
-    it("shows a running popup when no snapshot exists", function()
+    it("shows a running popup when no review data exists", function()
       use_sync_async()
       seed_vcs_context()
-      review_repository.get = function(_bufnr)
-        return nil
+      review_repository.has_review = function(_key)
+        return false
       end
       review_repository.refresh = function(_bufnr, _opts)
         return nil
@@ -317,12 +337,12 @@ describe("parley.services.read", function()
       assert.equals(1, #entries)
     end)
 
-    it("does not show a popup when a snapshot exists", function()
+    it("does not show a popup when review data exists", function()
       use_sync_async()
       seed_vcs_context()
       seed_snapshot()
       review_repository.refresh = function(_bufnr, _opts)
-        return review_repository._entries[1]
+        return review_repository.get(1)
       end
 
       read_service.refresh_async(1)
@@ -346,7 +366,7 @@ describe("parley.services.read", function()
       seed_vcs_context()
       seed_snapshot()
       review_repository.refresh = function(_bufnr, _opts)
-        return review_repository._entries[1]
+        return review_repository.get(1)
       end
 
       local received = nil
@@ -366,8 +386,8 @@ describe("parley.services.read", function()
     it("is called with error snapshot when refresh returns status=error", function()
       use_sync_async()
       seed_vcs_context()
-      review_repository.get = function(_bufnr)
-        return nil
+      review_repository.has_review = function(_key)
+        return false
       end
       review_repository.refresh = function(_bufnr, _opts)
         return {
@@ -398,8 +418,8 @@ describe("parley.services.read", function()
     it("popup transitions to failed state when refresh returns error snapshot", function()
       use_sync_async()
       seed_vcs_context()
-      review_repository.get = function(_bufnr)
-        return nil -- cold cache → silent=false → popup shown
+      review_repository.has_review = function(_key)
+        return false -- cold cache → silent=false → popup shown
       end
       review_repository.refresh = function(_bufnr, _opts)
         return {
@@ -427,8 +447,8 @@ describe("parley.services.read", function()
     it("is not required (nil callback is accepted)", function()
       use_sync_async()
       seed_vcs_context()
-      review_repository.get = function(_bufnr)
-        return nil
+      review_repository.has_review = function(_key)
+        return false
       end
       review_repository.refresh = function(_bufnr, _opts)
         return nil
@@ -451,8 +471,8 @@ describe("parley.services.read", function()
     it("notifies on error snapshot by default", function()
       use_sync_async()
       seed_vcs_context()
-      review_repository.get = function(_bufnr)
-        return nil
+      review_repository.has_review = function(_key)
+        return false
       end
       review_repository.refresh = function(_bufnr, _opts)
         return {
@@ -476,8 +496,8 @@ describe("parley.services.read", function()
     it("suppresses notification when notify_errors = false", function()
       use_sync_async()
       seed_vcs_context()
-      review_repository.get = function(_bufnr)
-        return nil
+      review_repository.has_review = function(_key)
+        return false
       end
       review_repository.refresh = function(_bufnr, _opts)
         return {

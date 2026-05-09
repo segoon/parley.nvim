@@ -1,5 +1,6 @@
 --- parley.services.read — read-side rendering wrapper over repositories.
 
+local async = require("plenary.async")
 local async_operation = require("parley.async_operation")
 local context_repository = require("parley.repositories.context")
 local provider_repository = require("parley.repositories.provider")
@@ -108,10 +109,15 @@ end
 --- The popup is suppressed (silent) when a snapshot already exists because the
 --- stale data is rendered immediately while the background fetch completes.
 ---
---- context_repository.refresh and provider_repository.refresh are called
---- synchronously before the async coroutine is spawned so that the `silent`
---- decision is made with up-to-date context. do_refresh re-checks context
---- inside the coroutine to guard against state changes during scheduling.
+--- Phase 1 (detection coroutine): context_repository.refresh and
+--- provider_repository.refresh run inside an async coroutine so that VCS git
+--- subprocess calls (vcs._vcs_detect → await.system) can yield safely. This
+--- avoids the "attempt to yield across C-call boundary" error when called from
+--- a BufEnter autocmd.
+---
+--- Phase 2 (fetch operation): AsyncOperation is created with the `silent` flag
+--- determined in Phase 1 and started from within the detection coroutine,
+--- which schedules its own coroutine for the actual network work.
 ---
 --- @param bufnr integer
 --- @param opts? { force?: boolean, notify_errors?: boolean, progress?: boolean }
@@ -119,49 +125,55 @@ end
 function M.refresh_async(bufnr, opts, callback)
   opts = opts or {}
 
-  -- Fast sync pre-check: context/provider detection is in-memory plus branch
-  -- detection; no network or disk I/O. Required before spawning the coroutine
-  -- so the `silent` flag can be set correctly.
-  local ctx = context_repository.refresh(bufnr)
-  if not ctx or ctx.kind ~= "regular" or not ctx.rel_path then
-    return
-  end
-  if not ctx.vcs_info or not ctx.vcs_info.branch or ctx.vcs_info.branch == "" then
-    return
-  end
-  if not provider_repository.refresh(bufnr) then
-    return
-  end
+  -- Phase 1: silent detection. VCS git subprocesses require a coroutine context;
+  -- this wrapper provides it without showing any popup.
+  async.run(function()
+    local ctx = context_repository.refresh(bufnr)
+    if not ctx or ctx.kind ~= "regular" or not ctx.rel_path then
+      return
+    end
+    if not ctx.vcs_info or not ctx.vcs_info.branch or ctx.vcs_info.branch == "" then
+      return
+    end
+    if not provider_repository.refresh(bufnr) then
+      return
+    end
 
-  local has_snapshot = review_repository.get(bufnr) ~= nil
-  local silent = not opts.progress and has_snapshot
+    local provider_snapshot = provider_repository.get(bufnr)
+    local review_key = review_repository.make_key(provider_snapshot, ctx)
+    local has_data = review_key and review_repository.has_review(review_key) or false
+    local silent = not opts.progress and has_data
 
-  -- Capture the snapshot in a closure so the callback always receives it even
-  -- when fn throws due to an error snapshot (fn's return value is lost on throw).
-  local last_snapshot = nil
+    -- Capture the snapshot in a closure so the callback always receives it even
+    -- when fn throws due to an error snapshot (fn's return value is lost on throw).
+    local last_snapshot = nil
 
-  async_operation
-    .new({
-      bufnr = bufnr,
-      silent = silent,
-      fn = function()
-        local snapshot = do_refresh(bufnr, opts)
-        last_snapshot = snapshot
-        if snapshot and snapshot.status == "error" then
-          error(snapshot.error or "refresh failed")
-        end
-        return snapshot
-      end,
-      popup = silent and nil or {
-        progress = "Refreshing discussions",
-        success = "Refresh complete",
-        error = "Refresh failed",
-      },
-      finally_scheduled_fn = callback and function(_ok, _result)
-        callback(last_snapshot)
-      end or nil,
-    })
-    :start()
+    -- Phase 2: start the fetch operation. Called from within the Phase 1
+    -- coroutine: start() shows the popup synchronously (queued via vim.schedule)
+    -- then schedules a new coroutine for the network work.
+    async_operation
+      .new({
+        bufnr = bufnr,
+        silent = silent,
+        fn = function()
+          local snapshot = do_refresh(bufnr, opts)
+          last_snapshot = snapshot
+          if snapshot and snapshot.status == "error" then
+            error(snapshot.error or "refresh failed")
+          end
+          return snapshot
+        end,
+        popup = silent and nil or {
+          progress = "Refreshing discussions",
+          success = "Refresh complete",
+          error = "Refresh failed",
+        },
+        finally_scheduled_fn = callback and function(_ok, _result)
+          callback(last_snapshot)
+        end or nil,
+      })
+      :start()
+  end)
 end
 
 return M

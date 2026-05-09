@@ -78,7 +78,10 @@ describe("parley.services.write", function()
     write_service._operations = {}
     context_repository._entries = {}
     provider_repository._entries = {}
-    review_repository._entries = {}
+    review_repository._reviews = {}
+    review_repository._views = {}
+    review_repository._bufnr_key = {}
+    review_repository._key_bufnrs = {}
     progress_ui_state.clear()
     notify_calls = {}
     write_service._notify = function(msg, level)
@@ -103,7 +106,10 @@ describe("parley.services.write", function()
     write_service._operations = {}
     context_repository._entries = {}
     provider_repository._entries = {}
-    review_repository._entries = {}
+    review_repository._reviews = {}
+    review_repository._views = {}
+    review_repository._bufnr_key = {}
+    review_repository._key_bufnrs = {}
     progress_ui_state.clear()
   end)
 
@@ -121,7 +127,7 @@ describe("parley.services.write", function()
       provider = provider,
       opts = { owner = "owner", repo = "repo", host = "github.com" },
     }
-    review_repository._entries[1] = {
+    review_repository._seed(1, {
       status = "ready",
       stale = false,
       review = SAMPLE_REVIEW,
@@ -129,7 +135,7 @@ describe("parley.services.write", function()
       mappings = mappings or {},
       pr = SAMPLE_PR,
       head_sha = "deadbeef",
-    }
+    })
   end
 
   it("posts a top-level comment with a normalized range and forces a refresh", function()
@@ -150,7 +156,7 @@ describe("parley.services.write", function()
       provider = provider,
       opts = { owner = "owner", repo = "repo", host = "github.com" },
     }
-    review_repository._entries[1] = {
+    review_repository._seed(1, {
       status = "ready",
       stale = false,
       review = SAMPLE_REVIEW,
@@ -158,7 +164,7 @@ describe("parley.services.write", function()
       mappings = {},
       pr = SAMPLE_PR,
       head_sha = "deadbeef",
-    }
+    })
 
     package.loaded["parley.discussion_window"] = {
       show_new_comment_input = function(_bufnr, opts)
@@ -210,7 +216,7 @@ describe("parley.services.write", function()
       provider = provider,
       opts = { owner = "owner", repo = "repo", host = "github.com" },
     }
-    review_repository._entries[1] = {
+    review_repository._seed(1, {
       status = "ready",
       stale = false,
       review = SAMPLE_REVIEW,
@@ -218,7 +224,7 @@ describe("parley.services.write", function()
       mappings = {},
       pr = SAMPLE_PR,
       head_sha = "deadbeef",
-    }
+    })
 
     package.loaded["parley.discussion_window"] = {
       show_new_comment_input = function(_bufnr, opts)
@@ -286,7 +292,7 @@ describe("parley.services.write", function()
       provider = provider,
       opts = { owner = "owner", repo = "repo", host = "github.com" },
     }
-    review_repository._entries[1] = {
+    review_repository._seed(1, {
       status = "ready",
       stale = false,
       review = SAMPLE_REVIEW,
@@ -294,7 +300,7 @@ describe("parley.services.write", function()
       mappings = {},
       pr = SAMPLE_PR,
       head_sha = "deadbeef",
-    }
+    })
 
     package.loaded["parley.discussion_window"] = {
       show_reply_input = function(_bufnr, opts)
@@ -335,7 +341,7 @@ describe("parley.services.write", function()
       provider = provider,
       opts = { owner = "owner", repo = "repo", host = "github.com" },
     }
-    review_repository._entries[1] = {
+    review_repository._seed(1, {
       status = "ready",
       stale = false,
       review = SAMPLE_REVIEW,
@@ -343,7 +349,7 @@ describe("parley.services.write", function()
       mappings = {},
       pr = SAMPLE_PR,
       head_sha = "deadbeef",
-    }
+    })
 
     package.loaded["parley.discussion_window"] = {
       show_reply_input = function(_bufnr, _opts)
