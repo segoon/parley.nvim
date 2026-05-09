@@ -32,3 +32,14 @@
 - When fixing a bug, search for similar bugs in the nearby code
 - When found a bug, elaborate whether it is possible to redesign the system to make such bugs impossible
 - max *.lua file size = 600 lines
+
+## User interaction
+
+User experience is the priority.
+Handle anything related to user interaction very carefully.
+Examples:
+- UI elements (windows, labels, keymaps)
+- error messages
+- documentation
+- setup()
+- user commands

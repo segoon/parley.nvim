@@ -265,8 +265,7 @@ end
 function M.setup(opts)
   M.config = vim.tbl_deep_extend("force", defaults, opts or {})
 
-  -- Ensure cache directory exists and initialise the cache module.
-  vim.fn.mkdir(M.config.cache_dir, "p")
+  -- cache.setup() owns cache-dir creation.
   cache.setup({ cache_dir = M.config.cache_dir })
 
   -- Define highlight groups for signs and virtual text.

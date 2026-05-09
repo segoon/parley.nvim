@@ -1,0 +1,251 @@
+{
+  "version": 1,
+  "capabilities": {
+    "ui_direct": {
+      "functions": [
+        "vim.api.nvim_",
+        "vim.bo[",
+        "vim.wo[",
+        "vim.o.",
+        "vim.g.",
+        "vim.keymap.set(",
+        "vim.cmd",
+        "vim.notify(",
+        "vim.fn.confirm(",
+        "vim.fn.strdisplaywidth(",
+        "vim.health."
+      ]
+    },
+    "ui_dispatch": {
+      "functions": [
+        "vim.schedule(",
+        "vim.in_fast_event("
+      ]
+    },
+    "ui_timers": {
+      "functions": [
+        "vim.defer_fn(",
+        "new_timer("
+      ]
+    },
+    "buffer_inspect": {
+      "functions": [
+        "vim.api.nvim_get_current_buf(",
+        "vim.api.nvim_get_current_win(",
+        "vim.api.nvim_buf_get_name(",
+        "vim.api.nvim_win_get_cursor(",
+        "vim.api.nvim_win_get_position(",
+        "vim.api.nvim_win_get_buf(",
+        "vim.api.nvim_tabpage_list_wins(",
+        "vim.api.nvim_buf_is_valid(",
+        "vim.api.nvim_win_is_valid(",
+        "vim.bo["
+      ]
+    },
+    "fs_async": {
+      "functions": [
+        "uv.fs_"
+      ]
+    },
+    "fs_sync": {
+      "functions": [
+        "io.open(",
+        "vim.fn.mkdir(",
+        "vim.fn.delete("
+      ]
+    },
+    "process_async": {
+      "functions": [
+        "vim.system("
+      ]
+    },
+    "process_blocking": {
+      "functions": [
+        "vim.system:wait("
+      ]
+    },
+    "network_curl": {
+      "functions": [
+        "plenary.curl"
+      ]
+    },
+    "env_read": {
+      "functions": [
+        "os.getenv("
+      ]
+    },
+    "time_wall": {
+      "functions": [
+        "os.time(",
+        "os.date(",
+        "os.difftime(",
+        "vim.fn.strptime("
+      ]
+    },
+    "time_mono": {
+      "functions": [
+        "hrtime("
+      ]
+    },
+    "json_codec": {
+      "functions": [
+        "vim.json.encode(",
+        "vim.json.decode("
+      ]
+    },
+    "path_helpers": {
+      "functions": [
+        "vim.fn.fnamemodify(",
+        "vim.fn.fnameescape(",
+        "vim.fn.stdpath("
+      ]
+    },
+    "host_query": {
+      "functions": [
+        "vim.fn.has(",
+        "vim.fn.executable(",
+        "vim.fn.isdirectory(",
+        "vim.fn.filewritable("
+      ]
+    }
+  },
+  "layers": {
+    "core": {
+      "modules": [
+        "lua/parley/model.lua",
+        "lua/parley/provider.lua",
+        "lua/parley/registry.lua",
+        "lua/parley/discussion_window/render.lua"
+      ],
+      "capabilities": [],
+      "depends": []
+    },
+    "time_utils": {
+      "modules": [
+        "lua/parley/timestamp.lua"
+      ],
+      "capabilities": [
+        "time_wall"
+      ],
+      "depends": []
+    },
+    "runtime_ui": {
+      "modules": [
+        "lua/parley/runtime/ui.lua"
+      ],
+      "capabilities": [
+        "ui_dispatch"
+      ],
+      "depends": []
+    },
+    "runtime_async": {
+      "modules": [
+        "lua/parley/runtime/await.lua"
+      ],
+      "capabilities": [
+        "process_async",
+        "ui_timers"
+      ],
+      "depends": [
+        "runtime_ui"
+      ]
+    },
+    "runtime_fs": {
+      "modules": [
+        "lua/parley/runtime/fs.lua"
+      ],
+      "capabilities": [
+        "fs_async",
+        "fs_sync"
+      ],
+      "depends": [
+        "runtime_async"
+      ]
+    },
+    "infra": {
+      "modules": [
+        "lua/parley/http.lua",
+        "lua/parley/cache.lua",
+        "lua/parley/vcs.lua",
+        "lua/parley/anchor.lua",
+        "lua/parley/buffer_context.lua",
+        "lua/parley/providers/github/auth.lua",
+        "lua/parley/providers/github/provider.lua"
+      ],
+      "capabilities": [
+        "buffer_inspect",
+        "process_async",
+        "ui_timers",
+        "time_wall",
+        "json_codec",
+        "env_read",
+        "path_helpers",
+        "network_curl"
+      ],
+      "depends": [
+        "core",
+        "runtime_ui",
+        "runtime_async",
+        "runtime_fs"
+      ]
+    },
+    "app": {
+      "modules": [
+        "plugin/parley.lua",
+        "lua/parley/init.lua",
+        "lua/parley/mock_provider.lua",
+        "lua/parley/discussion_window.lua",
+        "lua/parley/discussion_window/selection.lua",
+        "lua/parley/discussion_window/input.lua",
+        "lua/parley/discussion_window/window.lua",
+        "lua/parley/signs.lua",
+        "lua/parley/statusline.lua",
+        "lua/parley/telescope.lua",
+        "lua/parley/services/read.lua",
+        "lua/parley/services/write.lua",
+        "lua/parley/repositories/review.lua",
+        "lua/parley/repositories/provider.lua",
+        "lua/parley/repositories/context.lua",
+        "lua/parley/reaction_picker_window.lua",
+        "lua/parley/progress_popup.lua",
+        "lua/parley/nav.lua",
+        "lua/parley/ui_states/discussion.lua",
+        "lua/parley/ui_states/progress.lua",
+        "lua/parley/ui_states/composer.lua",
+        "lua/telescope/_extensions/parley_discussions.lua",
+        "lua/telescope/_extensions/parley_discussions_file.lua"
+      ],
+      "capabilities": [
+        "ui_direct",
+        "ui_dispatch",
+        "ui_timers",
+        "buffer_inspect",
+        "time_wall",
+        "time_mono",
+        "path_helpers",
+        "host_query"
+      ],
+      "depends": [
+        "core",
+        "time_utils",
+        "runtime_ui",
+        "infra"
+      ]
+    },
+    "diagnostics": {
+      "modules": [
+        "lua/parley/health.lua"
+      ],
+      "capabilities": [
+        "ui_direct",
+        "buffer_inspect",
+        "path_helpers",
+        "host_query",
+        "process_blocking"
+      ],
+      "depends": [
+        "infra"
+      ]
+    }
+  }
+}

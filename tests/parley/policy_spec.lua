@@ -1,0 +1,277 @@
+local policy_path = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":h:h:h") .. "/policy.yml"
+
+---@param file_path string
+---@return string
+local function read_file(file_path)
+  local lines = vim.fn.readfile(file_path)
+  return table.concat(lines, "\n")
+end
+
+---@param text string
+---@return string
+local function strip_line_comments(text)
+  local out = {}
+  for _, line in ipairs(vim.split(text, "\n", { plain = true })) do
+    out[#out + 1] = line:gsub("%-%-.*$", "")
+  end
+  return table.concat(out, "\n")
+end
+
+---@param file_path string
+---@return table
+local function load_policy(file_path)
+  return assert(vim.json.decode(read_file(file_path)))
+end
+
+---@param pattern string
+---@return string
+local function pattern_to_lua(pattern)
+  return "^" .. pattern:gsub("([%^%$%(%)%%%.%[%]%+%-%?])", "%%%1") .. "$"
+end
+
+---@param paths string[]
+---@return string[]
+local function sort_paths(paths)
+  table.sort(paths)
+  return paths
+end
+
+---@return string[]
+local function source_files()
+  local lua_files = vim.fn.globpath("/home/segoon/projects/parley.nvim", "lua/**/*.lua", false, true)
+  local plugin_files = vim.fn.globpath("/home/segoon/projects/parley.nvim", "plugin/**/*.lua", false, true)
+  local files = {}
+  local prefix = "/home/segoon/projects/parley.nvim/"
+  for _, file_path in ipairs(vim.list_extend(lua_files, plugin_files)) do
+    files[#files + 1] = file_path:sub(#prefix + 1)
+  end
+  return sort_paths(files)
+end
+
+---@param policy table
+---@return table<string, string>
+local function module_to_layer(policy)
+  local mapping = {}
+  for layer_name, layer in pairs(policy.layers) do
+    for _, module_path in ipairs(layer.modules) do
+      assert.is_nil(mapping[module_path], string.format("module assigned twice: %s", module_path))
+      mapping[module_path] = layer_name
+    end
+  end
+  return mapping
+end
+
+---@param policy table
+---@return table<string, table>
+local function capability_functions(policy)
+  local mapping = {}
+  for name, capability in pairs(policy.capabilities) do
+    mapping[name] = capability.functions or {}
+  end
+  return mapping
+end
+
+---@param function_name string
+---@param line string
+---@return boolean
+local function function_matches(function_name, line)
+  if function_name == "vim.system:wait(" then
+    return line:find("vim%.system", 1, false) ~= nil and line:find(":wait%s*%(") ~= nil
+  end
+  if function_name == "vim.api.nvim_" then
+    return line:find("vim%.api%.nvim_") ~= nil
+  end
+  if function_name == "uv.fs_" then
+    return line:find("uv%.fs_") ~= nil
+  end
+  if function_name == "new_timer(" then
+    return line:find("new_timer%s*%(") ~= nil
+  end
+  if function_name == "hrtime(" then
+    return line:find("hrtime%s*%(") ~= nil
+  end
+  return line:find(function_name, 1, true) ~= nil
+end
+
+---@param functions string[]
+---@param line string
+---@return string[]
+local function matching_functions(functions, line)
+  local matches = {}
+  for _, function_name in ipairs(functions) do
+    if function_matches(function_name, line) then
+      matches[#matches + 1] = function_name
+    end
+  end
+  return matches
+end
+
+---@param policy table
+---@return string[]
+local function known_functions(policy)
+  local all = {}
+  for _, capability in pairs(policy.capabilities) do
+    for _, function_name in ipairs(capability.functions or {}) do
+      all[#all + 1] = function_name
+    end
+  end
+  table.sort(all)
+  return all
+end
+
+---@param file_path string
+---@param policy table
+---@return string[]
+local function external_api_violations(file_path, policy)
+  local layer_name = module_to_layer(policy)[file_path]
+  local layer = assert(policy.layers[layer_name], file_path)
+  local capability_map = capability_functions(policy)
+  local allowed_functions = {}
+  for _, capability_name in ipairs(layer.capabilities) do
+    for _, function_name in ipairs(capability_map[capability_name] or {}) do
+      allowed_functions[#allowed_functions + 1] = function_name
+    end
+  end
+
+  local violations = {}
+  local stripped = strip_line_comments(read_file("/home/segoon/projects/parley.nvim/" .. file_path))
+  for line_nr, line in ipairs(vim.split(stripped, "\n", { plain = true })) do
+    local allowed = matching_functions(allowed_functions, line)
+    local all = matching_functions(known_functions(policy), line)
+    if #all > 0 and #allowed == 0 then
+      for _, function_name in ipairs(all) do
+        violations[#violations + 1] = string.format("%s:%d uses %s", file_path, line_nr, function_name)
+      end
+    end
+  end
+  return violations
+end
+
+---@param file_path string
+---@return string[]
+local function internal_requires(file_path)
+  local stripped = strip_line_comments(read_file("/home/segoon/projects/parley.nvim/" .. file_path))
+  local deps = {}
+  for _, line in ipairs(vim.split(stripped, "\n", { plain = true })) do
+    for module_name in line:gmatch("require%([\"'](parley%.[^\"']+)[\"']%)") do
+      deps[#deps + 1] = "lua/" .. module_name:gsub("%.", "/") .. ".lua"
+    end
+  end
+  table.sort(deps)
+  return deps
+end
+
+---@param policy table
+---@return string[]
+local function dependency_violations(policy)
+  local mapping = module_to_layer(policy)
+  local violations = {}
+  for _, file_path in ipairs(source_files()) do
+    local source_layer = assert(mapping[file_path], "missing layer for " .. file_path)
+    local allowed_layers = {}
+    for _, layer_name in ipairs(policy.layers[source_layer].depends) do
+      allowed_layers[layer_name] = true
+    end
+    allowed_layers[source_layer] = true
+
+    for _, dep_path in ipairs(internal_requires(file_path)) do
+      local dep_layer = mapping[dep_path]
+      if dep_layer and not allowed_layers[dep_layer] then
+        violations[#violations + 1] =
+          string.format("%s (%s) depends on %s (%s)", file_path, source_layer, dep_path, dep_layer)
+      end
+    end
+  end
+  table.sort(violations)
+  return violations
+end
+
+---@param policy table
+---@return string[]
+local function cycle_violations(policy)
+  local visiting = {}
+  local visited = {}
+  local path = {}
+  local cycles = {}
+
+  local function visit(layer_name)
+    if visited[layer_name] then
+      return
+    end
+    if visiting[layer_name] then
+      local cycle = {}
+      local seen = false
+      for _, entry in ipairs(path) do
+        if entry == layer_name then
+          seen = true
+        end
+        if seen then
+          cycle[#cycle + 1] = entry
+        end
+      end
+      cycle[#cycle + 1] = layer_name
+      cycles[#cycles + 1] = table.concat(cycle, " -> ")
+      return
+    end
+    visiting[layer_name] = true
+    path[#path + 1] = layer_name
+    for _, dep in ipairs(policy.layers[layer_name].depends) do
+      visit(dep)
+    end
+    path[#path] = nil
+    visiting[layer_name] = nil
+    visited[layer_name] = true
+  end
+
+  for layer_name in pairs(policy.layers) do
+    visit(layer_name)
+  end
+
+  table.sort(cycles)
+  return cycles
+end
+
+describe("architecture policy", function()
+  it("assigns every Lua module to exactly one layer", function()
+    local policy = load_policy(policy_path)
+    local mapping = module_to_layer(policy)
+    for _, file_path in ipairs(source_files()) do
+      assert.is_not_nil(mapping[file_path], "missing layer for " .. file_path)
+    end
+    assert.same(sort_paths(source_files()), sort_paths(vim.tbl_keys(mapping)))
+  end)
+
+  it("references only defined capabilities and layers", function()
+    local policy = load_policy(policy_path)
+    for layer_name, layer in pairs(policy.layers) do
+      for _, capability_name in ipairs(layer.capabilities) do
+        assert.is_not_nil(
+          policy.capabilities[capability_name],
+          string.format("unknown capability %s in %s", capability_name, layer_name)
+        )
+      end
+      for _, dep in ipairs(layer.depends) do
+        assert.is_not_nil(policy.layers[dep], string.format("unknown dependency %s in %s", dep, layer_name))
+      end
+    end
+  end)
+
+  it("keeps the layer graph acyclic", function()
+    local policy = load_policy(policy_path)
+    assert.same({}, cycle_violations(policy))
+  end)
+
+  it("restricts direct external API usage to declared capabilities", function()
+    local policy = load_policy(policy_path)
+    local violations = {}
+    for _, file_path in ipairs(source_files()) do
+      vim.list_extend(violations, external_api_violations(file_path, policy))
+    end
+    assert.same({}, violations)
+  end)
+
+  it("restricts internal requires to declared layer dependencies", function()
+    local policy = load_policy(policy_path)
+    assert.same({}, dependency_violations(policy))
+  end)
+end)

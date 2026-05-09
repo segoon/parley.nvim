@@ -2,7 +2,11 @@
 - diffview.nvim integration
 - :Telescope discussions|issues|comments? vcs_issues? - preview
 - mark comment as stale (outdated position)
-- lua-language-server warnings
+- consistent opts for setup()
+
+quality:
+- lua-language-server type warnings, but not in linter
+- tests on call dependencies (ui/non-ui threads)
 
 documentation:
 - vim help
