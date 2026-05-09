@@ -34,8 +34,9 @@
 
 ## Documentation
 
-- `doc/parley.nvim.txt` — the vim help file (`:help parley.nvim`)
-- Any PR that adds or changes commands, keymaps, config options, or public API **must** update `doc/parley.nvim.txt.in` (the template)
+- `doc/parley.nvim.txt.in` — the vim help file template (`:help parley.nvim`)
+- do not edit `doc/parley.nvim.txt`
+- Any PR that adds or changes commands, keymaps, config options, or public API **must** update the template file
 
 ## User interaction
 

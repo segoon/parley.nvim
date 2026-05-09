@@ -10,7 +10,7 @@ local progress_popup = require("parley.progress_popup")
 describe("parley command completion", function()
   it("returns top-level groups for the first argument", function()
     local items = parley._complete_parley("", ":Parley ")
-    assert.same({ "discussion", "comment", "nav" }, items)
+    assert.same({ "discussion", "comment", "nav", "refresh" }, items)
   end)
 
   it("returns discussion actions for the second argument", function()
@@ -63,10 +63,9 @@ describe("parley setup", function()
     package.loaded["parley.providers.github.provider"] = saved_gh
     package.loaded["telescope"] = saved_telescope
     pcall(vim.api.nvim_del_user_command, "Parley")
-    pcall(vim.api.nvim_del_user_command, "ParleyRefresh")
   end)
 
-  it("wires :ParleyRefresh to a progress-enabled refresh", function()
+  it("wires :Parley refresh to a progress-enabled refresh", function()
     local calls = {}
     cache.setup = function(_opts) end
     signs.setup_highlights = function() end
@@ -88,7 +87,7 @@ describe("parley setup", function()
     parley.setup({})
     local bufnr = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_set_current_buf(bufnr)
-    vim.cmd("ParleyRefresh")
+    vim.cmd("Parley refresh")
 
     assert.is_true(#calls >= 1)
     assert.equals(bufnr, calls[#calls].bufnr)

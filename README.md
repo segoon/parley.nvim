@@ -78,7 +78,7 @@ require("parley").setup({
 1. Install the plugin and call `require("parley").setup({})`.
 2. Authenticate GitHub CLI with `gh auth login`.
 3. Open a file inside a git repository whose current branch has an open PR.
-4. Run `:ParleyRefresh` once, or just re-enter the buffer.
+4. Run `:Parley refresh` once, or just re-enter the buffer.
 5. Use `]c` and `[c` to move between commented lines.
 6. Use `:Parley discussion toggle` to open the discussion window for the current line.
 
@@ -90,7 +90,7 @@ If no matching PR is found, Parley stays silent and inactive.
 
 | Command | Description |
 | --- | --- |
-| `:ParleyRefresh` | Force a refresh for the current buffer |
+| `:Parley refresh` | Force a refresh for the current buffer |
 | `:Parley discussion toggle` | Toggle the discussion window |
 | `:Parley discussion new` | Open a draft for a new comment |
 | `:Parley discussion reply` | Reply to the current thread |

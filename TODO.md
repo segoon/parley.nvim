@@ -13,7 +13,6 @@ quality:
 - lua-language-server type warnings, but not in linter
 
 UI:
-- configure comment preview layout in setup(...)
 - mark comment as stale (outdated position)
 
 Bugs:

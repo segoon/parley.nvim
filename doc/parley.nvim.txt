@@ -78,7 +78,7 @@ Quick start: ~
   1. Install the plugin and call `setup()`.
   2. Authenticate GitHub CLI: `gh auth login`.
   3. Open a file in a git repo whose current branch has an open PR.
-  4. Run |:ParleyRefresh| or re-enter the buffer.
+  4. Run `:Parley refresh` or re-enter the buffer.
   5. Navigate with `]c` / `[c` (|parley-keymaps|).
   6. Toggle the discussion window with `:Parley discussion toggle`.
 
@@ -89,7 +89,7 @@ If no matching PR is found, Parley stays silent and inactive.
 
 All Parley commands support tab completion.
 
-:ParleyRefresh                                       *:ParleyRefresh*
+:Parley refresh                                      *:Parley-refresh*
     Force a re-fetch of PR discussions for the current buffer. Shows a
     progress popup while the request is in flight.
 

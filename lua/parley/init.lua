@@ -116,6 +116,7 @@ local PARLEY_GROUPS = {
 }
 
 local PARLEY_GROUP_NAMES = { "discussion", "comment", "nav" }
+local PARLEY_TOP_LEVEL = { "discussion", "comment", "nav", "refresh" }
 
 --- @param items string[]
 --- @param prefix string
@@ -145,13 +146,13 @@ function M._complete_parley(arg_lead, cmd_line)
 
   local trailing_space = cmd_line:match("%s$") ~= nil
   if #args == 0 then
-    return filter_prefix(PARLEY_GROUP_NAMES, arg_lead)
+    return filter_prefix(PARLEY_TOP_LEVEL, arg_lead)
   end
   if #args == 1 then
     if trailing_space then
       return PARLEY_GROUPS[args[1]] or {}
     end
-    return filter_prefix(PARLEY_GROUP_NAMES, arg_lead)
+    return filter_prefix(PARLEY_TOP_LEVEL, arg_lead)
   end
   if #args == 2 and not trailing_space then
     return filter_prefix(PARLEY_GROUPS[args[1]] or {}, arg_lead)
@@ -169,7 +170,13 @@ function M._dispatch_parley(fargs, bufnr, cmd_opts)
   local action = fargs[2]
 
   if group == nil or group == "" then
-    error("parley: expected a command group", 0)
+    error("parley: expected a command", 0)
+  end
+
+  if group == "refresh" then
+    local read_service = require("parley.services.read")
+    read_service.refresh_async(bufnr, { force = true, progress = true })
+    return
   end
 
   if group == "discussion" then
@@ -315,7 +322,6 @@ function M.setup(opts)
   -- whose remote matches a registered provider).
   local augroup = vim.api.nvim_create_augroup("parley", { clear = true })
   pcall(vim.api.nvim_del_user_command, "Parley")
-  pcall(vim.api.nvim_del_user_command, "ParleyRefresh")
 
   vim.api.nvim_create_autocmd("BufEnter", {
     group = augroup,
@@ -335,10 +341,6 @@ function M.setup(opts)
     end,
     desc = "Parley commands",
   })
-
-  vim.api.nvim_create_user_command("ParleyRefresh", function()
-    read_service.refresh_async(vim.api.nvim_get_current_buf(), { force = true, progress = true })
-  end, { desc = "Re-fetch PR discussions for the current buffer" })
 
   vim.api.nvim_create_autocmd("BufWipeout", {
     group = augroup,
