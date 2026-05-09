@@ -1,4 +1,4 @@
-local policy_path = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":h:h:h") .. "/policy.yml"
+local policy_path = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":h:h:h") .. "/policy.json"
 
 ---@param file_path string
 ---@return string
@@ -21,12 +21,6 @@ end
 ---@return table
 local function load_policy(file_path)
   return assert(vim.json.decode(read_file(file_path)))
-end
-
----@param pattern string
----@return string
-local function pattern_to_lua(pattern)
-  return "^" .. pattern:gsub("([%^%$%(%)%%%.%[%]%+%-%?])", "%%%1") .. "$"
 end
 
 ---@param paths string[]
@@ -71,36 +65,66 @@ local function capability_functions(policy)
   return mapping
 end
 
----@param function_name string
+---@param pattern string
+---@return string
+local function escape_lua_pattern(pattern)
+  return pattern:gsub("([%^%$%(%)%%%.%[%]%*%+%-%?])", "%%%1")
+end
+
+---@param function_pattern string
+---@return string
+local function function_pattern_to_lua(function_pattern)
+  local placeholder = "\0"
+  local escaped = function_pattern:gsub("%%", placeholder)
+  escaped = escape_lua_pattern(escaped)
+  escaped = escaped:gsub(placeholder, "[^%%.:]+")
+  return "^" .. escaped .. "$"
+end
+
 ---@param line string
+---@return table<string, true>
+local function line_targets(line)
+  local targets = {}
+
+  for token in line:gmatch("[%a_][%w_]*[%.:][%a_][%w_%.:]*") do
+    targets[token] = true
+  end
+
+  for token in line:gmatch("[%a_][%w_]*") do
+    if token == "new_timer" or token == "hrtime" then
+      targets[token] = true
+    end
+  end
+
+  for token in line:gmatch("([%a_][%w_%.]*)%[") do
+    targets[token] = true
+  end
+
+  if line:find("vim%.system", 1, false) ~= nil and line:find(":wait%s*%(") ~= nil then
+    targets["vim.system:wait"] = true
+  end
+
+  return targets
+end
+
+---@param function_pattern string
+---@param target string
 ---@return boolean
-local function function_matches(function_name, line)
-  if function_name == "vim.system:wait(" then
-    return line:find("vim%.system", 1, false) ~= nil and line:find(":wait%s*%(") ~= nil
+local function function_matches(function_pattern, target)
+  if function_pattern == "vim.system:wait" then
+    return target == "vim.system:wait"
   end
-  if function_name == "vim.api.nvim_" then
-    return line:find("vim%.api%.nvim_") ~= nil
-  end
-  if function_name == "uv.fs_" then
-    return line:find("uv%.fs_") ~= nil
-  end
-  if function_name == "new_timer(" then
-    return line:find("new_timer%s*%(") ~= nil
-  end
-  if function_name == "hrtime(" then
-    return line:find("hrtime%s*%(") ~= nil
-  end
-  return line:find(function_name, 1, true) ~= nil
+  return target:match(function_pattern_to_lua(function_pattern)) ~= nil
 end
 
 ---@param functions string[]
----@param line string
+---@param target string
 ---@return string[]
-local function matching_functions(functions, line)
+local function matching_functions(functions, target)
   local matches = {}
-  for _, function_name in ipairs(functions) do
-    if function_matches(function_name, line) then
-      matches[#matches + 1] = function_name
+  for _, function_pattern in ipairs(functions) do
+    if function_matches(function_pattern, target) then
+      matches[#matches + 1] = function_pattern
     end
   end
   return matches
@@ -136,14 +160,15 @@ local function external_api_violations(file_path, policy)
   local violations = {}
   local stripped = strip_line_comments(read_file("/home/segoon/projects/parley.nvim/" .. file_path))
   for line_nr, line in ipairs(vim.split(stripped, "\n", { plain = true })) do
-    local allowed = matching_functions(allowed_functions, line)
-    local all = matching_functions(known_functions(policy), line)
-    if #all > 0 and #allowed == 0 then
-      for _, function_name in ipairs(all) do
-        violations[#violations + 1] = string.format("%s:%d uses %s", file_path, line_nr, function_name)
+    for target in pairs(line_targets(line)) do
+      local allowed = matching_functions(allowed_functions, target)
+      local all = matching_functions(known_functions(policy), target)
+      if #all > 0 and #allowed == 0 then
+        violations[#violations + 1] = string.format("%s:%d uses %s", file_path, line_nr, target)
       end
     end
   end
+  table.sort(violations)
   return violations
 end
 

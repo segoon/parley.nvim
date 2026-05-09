@@ -3,65 +3,73 @@
   "capabilities": {
     "ui_direct": {
       "functions": [
-        "vim.api.nvim_",
-        "vim.bo[",
-        "vim.wo[",
-        "vim.o.",
-        "vim.g.",
-        "vim.keymap.set(",
+        "vim.api.nvim_%",
+        "vim.bo",
+        "vim.wo",
+        "vim.o.%",
+        "vim.g.%",
+        "vim.keymap.set",
         "vim.cmd",
-        "vim.notify(",
-        "vim.fn.confirm(",
-        "vim.fn.strdisplaywidth(",
-        "vim.health."
+        "vim.cmd.%",
+        "vim.notify",
+        "vim.fn.confirm",
+        "vim.fn.strdisplaywidth",
+        "vim.health.%"
       ]
     },
     "ui_dispatch": {
       "functions": [
-        "vim.schedule(",
-        "vim.in_fast_event("
+        "vim.schedule",
+        "vim.in_fast_event"
       ]
     },
     "ui_timers": {
       "functions": [
-        "vim.defer_fn(",
-        "new_timer("
+        "vim.defer_fn",
+        "new_timer"
       ]
     },
     "buffer_inspect": {
       "functions": [
-        "vim.api.nvim_get_current_buf(",
-        "vim.api.nvim_get_current_win(",
-        "vim.api.nvim_buf_get_name(",
-        "vim.api.nvim_win_get_cursor(",
-        "vim.api.nvim_win_get_position(",
-        "vim.api.nvim_win_get_buf(",
-        "vim.api.nvim_tabpage_list_wins(",
-        "vim.api.nvim_buf_is_valid(",
-        "vim.api.nvim_win_is_valid(",
-        "vim.bo["
+        "vim.api.nvim_get_current_buf",
+        "vim.api.nvim_get_current_win",
+        "vim.api.nvim_buf_get_name",
+        "vim.api.nvim_win_get_cursor",
+        "vim.api.nvim_win_get_position",
+        "vim.api.nvim_win_get_buf",
+        "vim.api.nvim_tabpage_list_wins",
+        "vim.api.nvim_buf_is_valid",
+        "vim.api.nvim_win_is_valid",
+        "vim.bo"
       ]
     },
     "fs_async": {
       "functions": [
-        "uv.fs_"
+        "uv.fs_%"
       ]
     },
-    "fs_sync": {
+    "fs_read_blocking": {
       "functions": [
-        "io.open(",
-        "vim.fn.mkdir(",
-        "vim.fn.delete("
+        "io.open",
+        "vim.fn.executable",
+        "vim.fn.isdirectory",
+        "vim.fn.filewritable"
+      ]
+    },
+    "fs_write_blocking": {
+      "functions": [
+        "vim.fn.mkdir",
+        "vim.fn.delete"
       ]
     },
     "process_async": {
       "functions": [
-        "vim.system("
+        "vim.system"
       ]
     },
     "process_blocking": {
       "functions": [
-        "vim.system:wait("
+        "vim.system:wait"
       ]
     },
     "network_curl": {
@@ -71,41 +79,34 @@
     },
     "env_read": {
       "functions": [
-        "os.getenv("
+        "os.getenv"
       ]
     },
-    "time_wall": {
+    "time": {
       "functions": [
-        "os.time(",
-        "os.date(",
-        "os.difftime(",
-        "vim.fn.strptime("
+        "os.time",
+        "os.date",
+        "os.difftime",
+        "vim.fn.strptime",
+        "hrtime"
       ]
     },
-    "time_mono": {
+    "json": {
       "functions": [
-        "hrtime("
-      ]
-    },
-    "json_codec": {
-      "functions": [
-        "vim.json.encode(",
-        "vim.json.decode("
+        "vim.json.encode",
+        "vim.json.decode"
       ]
     },
     "path_helpers": {
       "functions": [
-        "vim.fn.fnamemodify(",
-        "vim.fn.fnameescape(",
-        "vim.fn.stdpath("
+        "vim.fn.fnamemodify",
+        "vim.fn.fnameescape",
+        "vim.fn.stdpath"
       ]
     },
     "host_query": {
       "functions": [
-        "vim.fn.has(",
-        "vim.fn.executable(",
-        "vim.fn.isdirectory(",
-        "vim.fn.filewritable("
+        "vim.fn.has"
       ]
     }
   },
@@ -125,7 +126,7 @@
         "lua/parley/timestamp.lua"
       ],
       "capabilities": [
-        "time_wall"
+        "time"
       ],
       "depends": []
     },
@@ -156,7 +157,8 @@
       ],
       "capabilities": [
         "fs_async",
-        "fs_sync"
+        "fs_read_blocking",
+        "fs_write_blocking"
       ],
       "depends": [
         "runtime_async"
@@ -176,8 +178,8 @@
         "buffer_inspect",
         "process_async",
         "ui_timers",
-        "time_wall",
-        "json_codec",
+        "time",
+        "json",
         "env_read",
         "path_helpers",
         "network_curl"
@@ -220,8 +222,7 @@
         "ui_dispatch",
         "ui_timers",
         "buffer_inspect",
-        "time_wall",
-        "time_mono",
+        "time",
         "path_helpers",
         "host_query"
       ],
@@ -241,6 +242,7 @@
         "buffer_inspect",
         "path_helpers",
         "host_query",
+        "fs_read_blocking",
         "process_blocking"
       ],
       "depends": [
