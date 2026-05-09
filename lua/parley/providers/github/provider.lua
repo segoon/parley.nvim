@@ -19,7 +19,6 @@
 ---   • _parse_remote_url is a pure function exported for unit testing.
 
 local await = require("parley.runtime.await")
-local dbg = require("parley.debug")
 local mapping = require("parley.providers.github.mapping")
 local transport = require("parley.providers.github.transport")
 
@@ -69,53 +68,6 @@ end
 --- @return string  e.g. "/repos/owner/repo"
 local function repo_path(self)
   return "/repos/" .. self._owner .. "/" .. self._repo
-end
-
---- Resolve and cache the authenticated user's GitHub login.
----
---- Resolution order (fast-to-slow, stops on first success):
----   1. Already cached in self._viewer_login → no-op.
----   2. `gh config get -h <host> user`  (local config, no network).
----   3. `gh api /user`                  (one API call, always authoritative).
----
---- Errors are silenced — caller treats nil _viewer_login as "unknown"
---- and defaults is_own to false.
----
---- @param self parley.github.Provider
-local function fetch_viewer_login(self)
-  if self._viewer_login then
-    dbg.trace("github.provider", "fetch_viewer_login: already cached → " .. self._viewer_login)
-    return
-  end
-  -- Fast path: gh config (local, no network call)
-  local result = self._runner({ "gh", "config", "get", "-h", self._host, "user" })
-  dbg.trace(
-    "github.provider",
-    "fetch_viewer_login: gh config get → code="
-      .. tostring(result.code)
-      .. " stdout="
-      .. vim.inspect(result.stdout or "")
-      .. " stderr="
-      .. vim.inspect(result.stderr or "")
-  )
-  if result.code == 0 and result.stdout and result.stdout:match("%S") then
-    self._viewer_login = result.stdout:match("^%s*(.-)%s*$")
-    dbg.trace("github.provider", "fetch_viewer_login: set via config → " .. tostring(self._viewer_login))
-    return
-  end
-  -- Slow path: gh api /user (one API call)
-  local ok, user = pcall(transport.gh_run, self, { "gh", "api", "/user" })
-  dbg.trace(
-    "github.provider",
-    "fetch_viewer_login: gh api /user → ok="
-      .. tostring(ok)
-      .. " login="
-      .. vim.inspect(ok and user and user.login or nil)
-  )
-  if ok and user and user.login then
-    self._viewer_login = user.login
-  end
-  dbg.trace("github.provider", "fetch_viewer_login: final _viewer_login=" .. vim.inspect(self._viewer_login))
 end
 
 -- ---------------------------------------------------------------------------
@@ -274,7 +226,7 @@ function GitHubProvider:fetch_discussions(review)
   local comments = transport.gh_run(self, { "gh", "api", "--paginate", url }) or {}
 
   -- Resolve viewer login for is_own detection.
-  fetch_viewer_login(self)
+  transport.fetch_viewer_login(self)
   local viewer = self._viewer_login or ""
   dbg.trace(
     "github.provider",
@@ -434,7 +386,7 @@ end
 --- @param comment_id string
 --- @param reaction   string  e.g. "+1", "heart"
 function GitHubProvider:react(_review, comment_id, reaction)
-  fetch_viewer_login(self)
+  transport.fetch_viewer_login(self)
   local viewer = self._viewer_login or ""
   local base_url = repo_path(self) .. "/pulls/comments/" .. comment_id .. "/reactions"
 

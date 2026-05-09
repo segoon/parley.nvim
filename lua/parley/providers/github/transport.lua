@@ -9,6 +9,7 @@
 --- timeout / retry settings through transport_config().
 
 local ui = require("parley.runtime.ui")
+local dbg = require("parley.debug")
 
 local M = {}
 
@@ -226,6 +227,57 @@ function M.gh_start(self, cmd, callback)
       finish({ ok = false, cancelled = true })
     end,
   }
+end
+
+-- ---------------------------------------------------------------------------
+-- fetch_viewer_login — identity resolution
+-- ---------------------------------------------------------------------------
+
+--- Resolve and cache the authenticated user's GitHub login.
+---
+--- Resolution order (fast-to-slow, stops on first success):
+---   1. Already cached in self._viewer_login → no-op.
+---   2. `gh config get -h <host> user`  (local config, no network).
+---   3. `gh api /user`                  (one API call, always authoritative).
+---
+--- Errors are silenced — caller treats nil _viewer_login as "unknown"
+--- and defaults is_own to false.
+---
+--- @param self parley.github.Provider
+function M.fetch_viewer_login(self)
+  if self._viewer_login then
+    dbg.trace("github.provider", "fetch_viewer_login: already cached → " .. self._viewer_login)
+    return
+  end
+  -- Fast path: gh config (local, no network call)
+  local result = self._runner({ "gh", "config", "get", "-h", self._host, "user" })
+  dbg.trace(
+    "github.provider",
+    "fetch_viewer_login: gh config get → code="
+      .. tostring(result.code)
+      .. " stdout="
+      .. vim.inspect(result.stdout or "")
+      .. " stderr="
+      .. vim.inspect(result.stderr or "")
+  )
+  if result.code == 0 and result.stdout and result.stdout:match("%S") then
+    self._viewer_login = result.stdout:match("^%s*(.-)%s*$")
+    dbg.trace("github.provider", "fetch_viewer_login: set via config → " .. tostring(self._viewer_login))
+    return
+  end
+  -- Slow path: gh api /user (one API call)
+  local ok, user = pcall(M.gh_run, self, { "gh", "api", "/user" })
+  dbg.trace(
+    "github.provider",
+    "fetch_viewer_login: gh api /user → ok="
+      .. tostring(ok)
+      .. " login="
+      .. vim.inspect(ok and user and user.login or nil)
+  )
+  if ok and user and user.login then
+    self._viewer_login = user.login
+  end
+  dbg.trace("github.provider", "fetch_viewer_login: final _viewer_login=" .. vim.inspect(self._viewer_login))
 end
 
 return M
