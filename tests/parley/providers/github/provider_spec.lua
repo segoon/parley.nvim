@@ -1149,6 +1149,22 @@ async_tests.describe("parley.providers.github.provider — submit_review", funct
 end)
 
 -- ---------------------------------------------------------------------------
+-- Suite: progress_label
+-- ---------------------------------------------------------------------------
+
+describe("parley.providers.github.provider — progress_label", function()
+  it("returns 'github.com' for the default host", function()
+    local p = make_provider({})
+    assert.equals("github.com", p:progress_label())
+  end)
+
+  it("returns the configured host for a GitHub Enterprise instance", function()
+    local p = gh.new({ host = "github.mycompany.com", owner = "owner", repo = "repo", _auth = make_auth("token") })
+    assert.equals("github.mycompany.com", p:progress_label())
+  end)
+end)
+
+-- ---------------------------------------------------------------------------
 -- Suite: M._parse_remote_url
 -- ---------------------------------------------------------------------------
 

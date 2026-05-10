@@ -168,7 +168,7 @@ function M.refresh_async(bufnr, opts, callback)
           return snapshot
         end,
         popup = silent and nil or {
-          progress = "Refreshing discussions",
+          progress = "Refreshing discussions (" .. provider_snapshot.provider:progress_label() .. ")...",
           success = "Refresh complete",
           error = "Refresh failed",
         },

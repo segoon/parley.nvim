@@ -78,6 +78,10 @@ local M = {}
 --- Submit a PR-level review.
 --- `event` is one of: "approve", "request_changes", "comment".
 --- @field submit_review fun(self: parley.Provider, review: parley.DetectedReview, event: string, body: parley.Body)
+---
+--- Return a short human-readable label for use in progress messages,
+--- e.g. "github.com" or "github.mycompany.com".
+--- @field progress_label fun(self: parley.Provider): string
 
 -- ---------------------------------------------------------------------------
 -- Required method names (single source of truth)
@@ -98,6 +102,7 @@ M.METHOD_NAMES = {
   "edit",
   "delete",
   "submit_review",
+  "progress_label",
 }
 
 -- ---------------------------------------------------------------------------

@@ -509,6 +509,13 @@ function GitHubProvider:submit_review(review, event, body)
   })
 end
 
+--- Return a short label for use in progress messages, e.g. "github.com".
+--- @param self parley.github.Provider
+--- @return string
+function GitHubProvider:progress_label()
+  return self._host
+end
+
 -- ---------------------------------------------------------------------------
 -- Registry helpers
 -- ---------------------------------------------------------------------------
