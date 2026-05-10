@@ -142,8 +142,6 @@ function M.build_top_level_fields(file, anchor, body, write_context)
   else
     fields[#fields + 1] = "-F"
     fields[#fields + 1] = "line=" .. tostring(start_line)
-    fields[#fields + 1] = "-f"
-    fields[#fields + 1] = "subject_type=line"
   end
 
   dbg.trace("github.mapping", "build_top_level_fields: fields=" .. vim.inspect(fields))
