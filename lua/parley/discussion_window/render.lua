@@ -96,11 +96,11 @@ end
 local function render_discussion(discussion, mapping, out, ranges, deps)
   local title = discussion.resolved and "resolved" or "unresolved"
   if mapping and mapping.stale then
-    title = title .. " · stale anchor"
+    title = title .. " · stale"
   end
 
   if #discussion.comments == 0 then
-    out[#out + 1] = "_No comments in this thread._"
+    out[#out + 1] = "(no comments in the discussion yet)"
     out[#out + 1] = ""
     return title
   end

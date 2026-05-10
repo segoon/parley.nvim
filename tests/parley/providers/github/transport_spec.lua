@@ -12,11 +12,23 @@ local saved = {}
 local function save_seams()
   saved.gh_available = transport._gh_available
   saved.executable = transport._executable
+  saved.notify = vim.notify
 end
 
 local function restore_seams()
   transport._gh_available = saved.gh_available
   transport._executable = saved.executable
+  vim.notify = saved.notify
+end
+
+--- Stub vim.notify and return the recorded calls table.
+--- @return table[]
+local function stub_notify()
+  local calls = {}
+  vim.notify = function(msg, level)
+    table.insert(calls, { msg = msg, level = level })
+  end
+  return calls
 end
 
 --- Build a minimal provider table for transport functions.
@@ -112,6 +124,7 @@ describe("parley.providers.github.transport — gh_run availability guard", func
       end,
     })
 
+    local notify_calls = stub_notify()
     local ok, err = pcall(transport.gh_run, provider, { "gh", "api", "/user" })
 
     assert.is_false(ok)
@@ -121,6 +134,10 @@ describe("parley.providers.github.transport — gh_run availability guard", func
     assert.is_not_nil(err:find("not found", 1, true))
     -- Must NOT contain a Lua file:line prefix
     assert.is_nil(err:find("transport%.lua", 1, true))
+    -- vim.notify(WARN) must fire
+    assert.equals(1, #notify_calls)
+    assert.is_not_nil(notify_calls[1].msg:find("'gh'", 1, true))
+    assert.equals(vim.log.levels.WARN, notify_calls[1].level)
   end)
 
   it("calls runner normally when gh is not found on initial probe but found on re-probe", function()
@@ -187,6 +204,7 @@ describe("parley.providers.github.transport — gh_start availability guard", fu
       end,
     })
 
+    local notify_calls = stub_notify()
     local result = nil
     transport.gh_start(provider, { "gh", "api", "/user" }, function(r)
       result = r
@@ -204,6 +222,10 @@ describe("parley.providers.github.transport — gh_start availability guard", fu
     assert.is_not_nil(result.err:find("'gh'", 1, true))
     assert.is_not_nil(result.err:find("not found", 1, true))
     assert.is_nil(result.err:find("transport%.lua", 1, true))
+    -- vim.notify(WARN) must fire
+    assert.equals(1, #notify_calls)
+    assert.is_not_nil(notify_calls[1].msg:find("'gh'", 1, true))
+    assert.equals(vim.log.levels.WARN, notify_calls[1].level)
   end)
 
   it("calls spawn normally when gh is not found on initial probe but found on re-probe", function()
@@ -259,5 +281,89 @@ describe("parley.providers.github.transport — gh_start availability guard", fu
     end)
 
     assert.equals(0, probe_calls)
+  end)
+end)
+
+-- ---------------------------------------------------------------------------
+-- Suite: fetch_viewer_login — gh availability guard
+-- ---------------------------------------------------------------------------
+
+describe("parley.providers.github.transport — fetch_viewer_login availability guard", function()
+  before_each(save_seams)
+  after_each(restore_seams)
+
+  it("calls vim.notify(WARN) and skips runner when gh is not found", function()
+    transport._gh_available = false
+    transport._executable = function(_bin)
+      return 0 -- still not found on re-probe
+    end
+
+    local runner_called = false
+    local provider = make_provider({
+      _runner = function(_cmd)
+        runner_called = true
+        return { code = 0, stdout = "", stderr = "" }
+      end,
+    })
+    provider._viewer_login = nil
+
+    local notify_calls = stub_notify()
+
+    transport.fetch_viewer_login(provider)
+
+    assert.is_false(runner_called)
+    assert.is_nil(provider._viewer_login)
+    assert.equals(1, #notify_calls)
+    assert.is_not_nil(notify_calls[1].msg:find("'gh'", 1, true))
+    assert.is_not_nil(notify_calls[1].msg:find("not found", 1, true))
+    assert.equals(vim.log.levels.WARN, notify_calls[1].level)
+  end)
+
+  it("does not notify and calls runner when gh is available", function()
+    transport._gh_available = true
+    transport._executable = function(_bin)
+      return 1
+    end
+
+    local runner_called = false
+    local provider = make_provider({
+      _runner = function(_cmd)
+        runner_called = true
+        return { code = 0, stdout = "testuser\n", stderr = "" }
+      end,
+    })
+    provider._viewer_login = nil
+
+    local notify_calls = stub_notify()
+
+    transport.fetch_viewer_login(provider)
+
+    assert.is_true(runner_called)
+    assert.equals("testuser", provider._viewer_login)
+    assert.equals(0, #notify_calls)
+  end)
+
+  it("skips runner and does not notify when _viewer_login is already cached", function()
+    transport._gh_available = false
+    transport._executable = function(_bin)
+      return 0
+    end
+
+    local runner_called = false
+    local provider = make_provider({
+      _runner = function(_cmd)
+        runner_called = true
+        return { code = 0, stdout = "", stderr = "" }
+      end,
+    })
+    provider._viewer_login = "cached-user"
+
+    local notify_calls = stub_notify()
+
+    transport.fetch_viewer_login(provider)
+
+    assert.is_false(runner_called)
+    assert.equals("cached-user", provider._viewer_login)
+    assert.equals(0, #notify_calls)
   end)
 end)

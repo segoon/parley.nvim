@@ -35,14 +35,17 @@ end
 
 --- Ensure gh availability is known. If not currently confirmed available,
 --- re-probes once (the binary may have just been installed).
---- Returns an error string when gh is unavailable, nil when ok.
+--- When gh is unavailable, emits vim.notify(WARN) and returns an error string.
+--- Returns nil when gh is ok.
 --- @return string|nil
 local function check_gh_available()
   if M._gh_available ~= true then
     M.probe_gh_executable()
   end
   if not M._gh_available then
-    return "parley: 'gh' (GitHub CLI) not found — install it from https://cli.github.com"
+    local msg = "parley: 'gh' (GitHub CLI) not found — install it from https://cli.github.com"
+    vim.notify(msg, vim.log.levels.WARN)
+    return msg
   end
   return nil
 end
@@ -311,13 +314,17 @@ end
 ---   2. `gh config get -h <host> user`  (local config, no network).
 ---   3. `gh api /user`                  (one API call, always authoritative).
 ---
---- Errors are silenced — caller treats nil _viewer_login as "unknown"
---- and defaults is_own to false.
+--- Network/auth errors are silenced — caller treats nil _viewer_login as
+--- "unknown" and defaults is_own to false.
+--- A missing gh executable is reported via check_gh_available().
 ---
 --- @param self parley.github.Provider
 function M.fetch_viewer_login(self)
   if self._viewer_login then
     dbg.trace("github.provider", "fetch_viewer_login: already cached → " .. self._viewer_login)
+    return
+  end
+  if check_gh_available() then
     return
   end
   -- Fast path: gh config (local, no network call)

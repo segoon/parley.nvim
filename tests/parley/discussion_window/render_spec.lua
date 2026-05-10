@@ -78,7 +78,19 @@ describe("parley.discussion_window.render", function()
       c1 = { start_line = 1, end_line = 4 },
       c2 = { start_line = 6, end_line = 7 },
     }, ranges)
-    assert.equals("unresolved · stale anchor", title)
+    assert.equals("unresolved · stale", title)
+  end)
+
+  it("renders placeholder text for a discussion with no comments", function()
+    local discussion = make_discussion({ comments = {} })
+
+    local lines, ranges, title = render.render_lines({ discussion }, {}, {
+      format_timestamp = formatter,
+    })
+
+    assert.same({ "(no comments in the discussion yet)" }, lines)
+    assert.same({}, ranges)
+    assert.equals("unresolved", title)
   end)
 
   it("builds reaction picker items with counts and viewer state", function()

@@ -52,6 +52,11 @@ function M.new(deps)
     end
     deps.focus_discussion(instance)
     deps.sync_selected_comment(source_bufnr)
+    local on_hidden = instance._on_input_hidden
+    instance._on_input_hidden = nil
+    if on_hidden then
+      on_hidden()
+    end
     return true
   end
 
@@ -128,6 +133,7 @@ function M.new(deps)
 
     instance.input_state = "idle"
     instance.input_cancel = nil
+    instance._on_input_hidden = opts.on_input_hidden or nil
     deps.discussion_ui_state.patch(src_bufnr, { input_visible = true })
 
     local composer

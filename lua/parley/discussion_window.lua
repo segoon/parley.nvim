@@ -582,6 +582,7 @@ end
 function M.show_new_comment_input(bufnr, opts)
   bufnr = resolve_source_bufnr(bufnr)
   local instance = live_instance(bufnr)
+  local on_input_hidden = nil
   if not instance then
     local state = read_service.get_buffer_state(bufnr)
     local config = M._get_config() or {}
@@ -634,6 +635,11 @@ function M.show_new_comment_input(bufnr, opts)
         selected_comment_id = nil,
         input_visible = false,
       })
+      -- No existing discussion: the window was opened only to host the input.
+      -- Close it automatically when the input is dismissed.
+      on_input_hidden = function()
+        M.close(bufnr)
+      end
     end
   end
 
@@ -642,6 +648,7 @@ function M.show_new_comment_input(bufnr, opts)
     initial_text = opts.initial_text,
     parent_comment_id = nil,
     on_submit = opts.on_submit,
+    on_input_hidden = on_input_hidden,
   })
 end
 
