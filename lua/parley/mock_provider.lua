@@ -512,6 +512,18 @@ function M.new(opts)
   end
 
   --------------------------------------------------------------------------
+  -- progress_label
+  --------------------------------------------------------------------------
+
+  ---@param self table
+  ---@return string
+  function mock:progress_label()
+    check_error(self, "progress_label")
+    table.insert(self.calls.progress_label, {})
+    return "mock"
+  end
+
+  --------------------------------------------------------------------------
   -- submit_review
   --------------------------------------------------------------------------
 

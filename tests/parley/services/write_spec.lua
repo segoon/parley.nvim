@@ -603,7 +603,10 @@ describe("parley.services.write — open_new_comment_input sync-state check", fu
       open_current_line = function() end,
     }
     write_service._check_sync_state = function()
-      return { ok = false, err = "Cannot comment: local branch has commits not yet pushed to the remote. Push first and retry." }
+      return {
+        ok = false,
+        err = "Cannot comment: local branch has commits not yet pushed to the remote. Push first and retry.",
+      }
     end
 
     write_service.open_new_comment_input(1, { line = 5 })
@@ -627,7 +630,10 @@ describe("parley.services.write — open_new_comment_input sync-state check", fu
       open_current_line = function() end,
     }
     write_service._check_sync_state = function()
-      return { ok = false, err = "Cannot comment: 'src/foo.lua' has uncommitted changes. Commit or stash them and retry." }
+      return {
+        ok = false,
+        err = "Cannot comment: 'src/foo.lua' has uncommitted changes. Commit or stash them and retry.",
+      }
     end
 
     write_service.open_new_comment_input(1, { line = 5 })
@@ -658,8 +664,8 @@ describe("parley.services.write — open_new_comment_input sync-state check", fu
     assert.is_true(vim.wait(300, function()
       return check_args ~= nil
     end))
-    assert.equals("/repo",      check_args.root)
+    assert.equals("/repo", check_args.root)
     assert.equals("src/foo.lua", check_args.rel_path)
-    assert.equals("deadbeef",   check_args.head_sha)
+    assert.equals("deadbeef", check_args.head_sha)
   end)
 end)

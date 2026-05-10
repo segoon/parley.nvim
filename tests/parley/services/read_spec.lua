@@ -58,7 +58,11 @@ end
 
 local PROVIDER_SNAPSHOT = {
   status = "ready",
-  provider = {},
+  provider = {
+    progress_label = function()
+      return "github.com"
+    end,
+  },
   opts = { owner = "owner", repo = "repo", host = "github.com" },
 }
 
@@ -525,6 +529,52 @@ describe("parley.services.read", function()
         return #notify_calls == 1
       end))
       assert.is_not_nil(notify_calls[1].msg:find("rate limit"))
+    end)
+
+    it("error re-raised to async_operation does not contain a Lua file:line prefix", function()
+      use_sync_async()
+      seed_vcs_context()
+      review_repository.has_review = function(_key)
+        return false
+      end
+      local raw_error = "parley: 'gh' (GitHub CLI) not found — install it from https://cli.github.com"
+      review_repository.refresh = function(_bufnr, _opts)
+        return {
+          status = "error",
+          error = raw_error,
+          discussions = {},
+          all_discussions = {},
+          mappings = {},
+          summary = { unresolved_count = 0 },
+        }
+      end
+
+      -- Intercept the fn passed to async_operation so we can pcall it directly
+      -- and observe the error string before async_operation wraps it.
+      local captured_result = nil
+      local orig_new = async_operation.new
+      async_operation.new = function(opts)
+        local op = orig_new(opts)
+        op.start = function(_self)
+          local ok, result = pcall(opts.fn)
+          if not ok then
+            captured_result = result
+          end
+        end
+        return op
+      end
+
+      read_service.refresh_async(1, { notify_errors = false })
+
+      assert.is_true(vim.wait(200, function()
+        return captured_result ~= nil
+      end))
+
+      async_operation.new = orig_new
+
+      -- The captured error string must equal the raw message exactly —
+      -- no "read.lua:NNN: " prefix prepended by Lua.
+      assert.equals(raw_error, captured_result)
     end)
 
     it("suppresses notification when notify_errors = false", function()

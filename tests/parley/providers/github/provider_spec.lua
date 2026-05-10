@@ -5,6 +5,13 @@ local async_tests = require("plenary.async.tests")
 local provider_mod = require("parley.provider")
 local model = require("parley.model")
 local gh = require("parley.providers.github.provider")
+local transport = require("parley.providers.github.transport")
+
+-- All tests in this file inject a fake _runner/_spawn and exercise provider
+-- logic, not the gh availability guard. Mark gh as available so that
+-- check_gh_available() does not re-probe (which would fail in CI where gh is
+-- absent) and lets the injected runners receive the call.
+transport._gh_available = true
 
 -- ---------------------------------------------------------------------------
 -- Fixtures — raw GitHub API JSON responses (as Lua strings)

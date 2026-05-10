@@ -163,15 +163,16 @@ function M.refresh_async(bufnr, opts, callback)
           local snapshot = do_refresh(bufnr, opts)
           last_snapshot = snapshot
           if snapshot and snapshot.status == "error" then
-            error(snapshot.error or "refresh failed")
+            error(snapshot.error or "refresh failed", 0)
           end
           return snapshot
         end,
-        popup = silent and nil or {
-          progress = "Refreshing discussions (" .. provider_snapshot.provider:progress_label() .. ")...",
-          success = "Refresh complete",
-          error = "Refresh failed",
-        },
+        popup = silent and nil
+          or {
+            progress = "Refreshing discussions (" .. provider_snapshot.provider:progress_label() .. ")...",
+            success = "Refresh complete",
+            error = "Refresh failed",
+          },
         finally_scheduled_fn = callback and function(_ok, _result)
           callback(last_snapshot)
         end or nil,

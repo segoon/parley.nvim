@@ -323,11 +323,8 @@ function M.open_new_comment_input(bufnr, opts)
   local target_line = anchor.start_line
 
   async.run(function()
-    local check = M._check_sync_state(
-      write_context.root or "",
-      write_context.rel_path,
-      write_context.review.write_context.head_sha
-    )
+    local check =
+      M._check_sync_state(write_context.root or "", write_context.rel_path, write_context.review.write_context.head_sha)
     if not check.ok then
       vim.schedule(function()
         M._notify(check.err, vim.log.levels.WARN)
@@ -347,59 +344,59 @@ function M.open_new_comment_input(bufnr, opts)
       cursor_line = target_line,
       status = "Drafting top-level comment. Press <C-s> to send, or <Esc>s in normal mode. q closes.",
       on_submit = function(instance, text)
-      local body = model.new_body({ text = text, format = "markdown" })
-      return run_submit(
-        bufnr,
-        instance,
-        function(callback)
-          if write_context.provider.begin_post_top_level_comment then
-            return write_context.provider:begin_post_top_level_comment(
-              write_context.review,
-              write_context.rel_path,
-              anchor,
-              body,
-              callback
-            )
-          end
-
-          local cancelled = false
-          async.run(function()
-            local ok, result = pcall(function()
-              return write_context.provider:post_top_level_comment(
+        local body = model.new_body({ text = text, format = "markdown" })
+        return run_submit(
+          bufnr,
+          instance,
+          function(callback)
+            if write_context.provider.begin_post_top_level_comment then
+              return write_context.provider:begin_post_top_level_comment(
                 write_context.review,
                 write_context.rel_path,
                 anchor,
-                body
+                body,
+                callback
               )
+            end
+
+            local cancelled = false
+            async.run(function()
+              local ok, result = pcall(function()
+                return write_context.provider:post_top_level_comment(
+                  write_context.review,
+                  write_context.rel_path,
+                  anchor,
+                  body
+                )
+              end)
+              vim.schedule(function()
+                if cancelled then
+                  callback({ ok = false, cancelled = true })
+                elseif ok then
+                  callback({ ok = true, comment = result })
+                else
+                  callback({ ok = false, err = tostring(result) })
+                end
+              end)
             end)
-            vim.schedule(function()
-              if cancelled then
-                callback({ ok = false, cancelled = true })
-              elseif ok then
-                callback({ ok = true, comment = result })
-              else
-                callback({ ok = false, err = tostring(result) })
-              end
-            end)
-          end)
-          return {
-            cancel = function()
-              cancelled = true
-            end,
-          }
-        end,
-        "Sending request... Press C to cancel request.",
-        {
-          running = "Sending comment",
-          refreshing = "Refreshing discussion",
-          success = "Comment sent",
-          failed = "Comment failed",
-          cancelled = "Comment cancelled",
-        },
-        { cursor_line = target_line }
-      )
-    end,
-  })
+            return {
+              cancel = function()
+                cancelled = true
+              end,
+            }
+          end,
+          "Sending request... Press C to cancel request.",
+          {
+            running = "Sending comment",
+            refreshing = "Refreshing discussion",
+            success = "Comment sent",
+            failed = "Comment failed",
+            cancelled = "Comment cancelled",
+          },
+          { cursor_line = target_line }
+        )
+      end,
+    })
   end)
 end
 

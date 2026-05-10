@@ -313,7 +313,7 @@ a.describe("parley.vcs check_sync_state", function()
   a.it("returns ok=true when HEAD matches head_sha and file is clean", function()
     local mock = make_runner({
       { code = 0, stdout = SHA .. "\n", stderr = "" },
-      { code = 0, stdout = "",          stderr = "" },
+      { code = 0, stdout = "", stderr = "" },
     })
     vcs._runner = mock.runner
 
@@ -353,7 +353,7 @@ a.describe("parley.vcs check_sync_state", function()
 
   a.it("returns ok=false when the file has uncommitted changes", function()
     local mock = make_runner({
-      { code = 0, stdout = SHA .. "\n",    stderr = "" },
+      { code = 0, stdout = SHA .. "\n", stderr = "" },
       { code = 0, stdout = " M src/foo.lua\n", stderr = "" },
     })
     vcs._runner = mock.runner
@@ -367,8 +367,8 @@ a.describe("parley.vcs check_sync_state", function()
 
   a.it("error message includes the rel_path for uncommitted changes", function()
     local mock = make_runner({
-      { code = 0, stdout = SHA .. "\n",      stderr = "" },
-      { code = 0, stdout = "M  TODO.md\n",   stderr = "" },
+      { code = 0, stdout = SHA .. "\n", stderr = "" },
+      { code = 0, stdout = "M  TODO.md\n", stderr = "" },
     })
     vcs._runner = mock.runner
 
@@ -382,7 +382,7 @@ a.describe("parley.vcs check_sync_state", function()
   a.it("first command is git rev-parse HEAD with root as cwd", function()
     local mock = make_runner({
       { code = 0, stdout = SHA .. "\n", stderr = "" },
-      { code = 0, stdout = "",          stderr = "" },
+      { code = 0, stdout = "", stderr = "" },
     })
     vcs._runner = mock.runner
 
@@ -395,7 +395,7 @@ a.describe("parley.vcs check_sync_state", function()
   a.it("second command is git status --porcelain -- <rel_path> with root as cwd", function()
     local mock = make_runner({
       { code = 0, stdout = SHA .. "\n", stderr = "" },
-      { code = 0, stdout = "",          stderr = "" },
+      { code = 0, stdout = "", stderr = "" },
     })
     vcs._runner = mock.runner
 
@@ -421,8 +421,8 @@ a.describe("parley.vcs check_sync_state", function()
 
   a.it("returns ok=false when git status fails", function()
     local mock = make_runner({
-      { code = 0,   stdout = SHA .. "\n", stderr = "" },
-      { code = 128, stdout = "",          stderr = "fatal: bad index" },
+      { code = 0, stdout = SHA .. "\n", stderr = "" },
+      { code = 128, stdout = "", stderr = "fatal: bad index" },
     })
     vcs._runner = mock.runner
 

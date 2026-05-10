@@ -288,6 +288,10 @@ function M.setup(opts)
   -- setup() if needed.
   registry.reset()
 
+  -- Probe gh availability once so subsequent calls can fast-fail without
+  -- spawning a subprocess.
+  require("parley.providers.github.transport").probe_gh_executable()
+
   -- Register built-in providers.
   local gh = require("parley.providers.github.provider")
   registry.register({

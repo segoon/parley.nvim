@@ -14,6 +14,40 @@ local dbg = require("parley.debug")
 local M = {}
 
 -- ---------------------------------------------------------------------------
+-- gh availability probe
+-- ---------------------------------------------------------------------------
+
+--- nil = not yet probed, true = available, false = not available.
+--- @type boolean|nil
+M._gh_available = nil
+
+--- Injectable executable checker. Defaults to vim.fn.executable.
+--- @type fun(bin: string): integer
+M._executable = function(bin)
+  return vim.fn.executable(bin)
+end
+
+--- Probe whether the `gh` CLI is available and cache the result.
+--- Called once at setup() and lazily inside check_gh_available().
+function M.probe_gh_executable()
+  M._gh_available = M._executable("gh") == 1
+end
+
+--- Ensure gh availability is known. If not currently confirmed available,
+--- re-probes once (the binary may have just been installed).
+--- Returns an error string when gh is unavailable, nil when ok.
+--- @return string|nil
+local function check_gh_available()
+  if M._gh_available ~= true then
+    M.probe_gh_executable()
+  end
+  if not M._gh_available then
+    return "parley: 'gh' (GitHub CLI) not found — install it from https://cli.github.com"
+  end
+  return nil
+end
+
+-- ---------------------------------------------------------------------------
 -- Constants
 -- ---------------------------------------------------------------------------
 
@@ -95,6 +129,11 @@ function M.gh_run(self, cmd)
   local result
 
   dbg.trace("github.transport", "gh_run: cmd=" .. vim.inspect(cmd))
+
+  local gh_err = check_gh_available()
+  if gh_err then
+    error(gh_err, 0)
+  end
 
   for attempt = 1, attempts do
     result = runner(cmd)
@@ -180,6 +219,11 @@ function M.gh_start(self, cmd, callback)
   local function start_attempt()
     attempt = attempt + 1
     dbg.trace("github.transport", "gh_start: attempt=" .. attempt)
+    local gh_err = check_gh_available()
+    if gh_err then
+      finish({ ok = false, err = gh_err })
+      return
+    end
     handle = self._spawn(cmd, function(result)
       handle = nil
       dbg.trace(
