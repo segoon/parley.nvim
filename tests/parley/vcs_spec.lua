@@ -292,3 +292,143 @@ a.describe("parley.vcs detect", function()
     assert.same({ "git", "remote", "get-url", "origin" }, mock.calls[3].cmd)
   end)
 end)
+
+-- ---------------------------------------------------------------------------
+-- Suite: check_sync_state
+-- ---------------------------------------------------------------------------
+
+a.describe("parley.vcs check_sync_state", function()
+  local SHA = "aabbccddeeff00112233445566778899aabbccdd"
+
+  a.before_each(function()
+    original_runner = vcs._runner
+  end)
+
+  a.after_each(function()
+    vcs._runner = original_runner
+  end)
+
+  -- ── Happy path ────────────────────────────────────────────────────────────
+
+  a.it("returns ok=true when HEAD matches head_sha and file is clean", function()
+    local mock = make_runner({
+      { code = 0, stdout = SHA .. "\n", stderr = "" },
+      { code = 0, stdout = "",          stderr = "" },
+    })
+    vcs._runner = mock.runner
+
+    local result = vcs.check_sync_state("/repo", "src/foo.lua", SHA)
+
+    assert.is_true(result.ok)
+    assert.is_nil(result.err)
+  end)
+
+  -- ── Unpushed commits ──────────────────────────────────────────────────────
+
+  a.it("returns ok=false when local HEAD differs from head_sha", function()
+    local mock = make_runner({
+      { code = 0, stdout = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n", stderr = "" },
+    })
+    vcs._runner = mock.runner
+
+    local result = vcs.check_sync_state("/repo", "src/foo.lua", SHA)
+
+    assert.is_false(result.ok)
+    assert.is_not_nil(result.err)
+    assert.is_truthy(result.err:find("push", 1, true))
+  end)
+
+  a.it("does not run status check when HEAD mismatches (short-circuits)", function()
+    local mock = make_runner({
+      { code = 0, stdout = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n", stderr = "" },
+    })
+    vcs._runner = mock.runner
+
+    vcs.check_sync_state("/repo", "src/foo.lua", SHA)
+
+    assert.equals(1, #mock.calls)
+  end)
+
+  -- ── Uncommitted changes ───────────────────────────────────────────────────
+
+  a.it("returns ok=false when the file has uncommitted changes", function()
+    local mock = make_runner({
+      { code = 0, stdout = SHA .. "\n",    stderr = "" },
+      { code = 0, stdout = " M src/foo.lua\n", stderr = "" },
+    })
+    vcs._runner = mock.runner
+
+    local result = vcs.check_sync_state("/repo", "src/foo.lua", SHA)
+
+    assert.is_false(result.ok)
+    assert.is_not_nil(result.err)
+    assert.is_truthy(result.err:find("uncommitted", 1, true))
+  end)
+
+  a.it("error message includes the rel_path for uncommitted changes", function()
+    local mock = make_runner({
+      { code = 0, stdout = SHA .. "\n",      stderr = "" },
+      { code = 0, stdout = "M  TODO.md\n",   stderr = "" },
+    })
+    vcs._runner = mock.runner
+
+    local result = vcs.check_sync_state("/repo", "TODO.md", SHA)
+
+    assert.is_truthy(result.err:find("TODO.md", 1, true))
+  end)
+
+  -- ── Command shape ─────────────────────────────────────────────────────────
+
+  a.it("first command is git rev-parse HEAD with root as cwd", function()
+    local mock = make_runner({
+      { code = 0, stdout = SHA .. "\n", stderr = "" },
+      { code = 0, stdout = "",          stderr = "" },
+    })
+    vcs._runner = mock.runner
+
+    vcs.check_sync_state("/my/repo", "foo.lua", SHA)
+
+    assert.same({ "git", "rev-parse", "HEAD" }, mock.calls[1].cmd)
+    assert.equals("/my/repo", mock.calls[1].cwd)
+  end)
+
+  a.it("second command is git status --porcelain -- <rel_path> with root as cwd", function()
+    local mock = make_runner({
+      { code = 0, stdout = SHA .. "\n", stderr = "" },
+      { code = 0, stdout = "",          stderr = "" },
+    })
+    vcs._runner = mock.runner
+
+    vcs.check_sync_state("/my/repo", "src/bar.lua", SHA)
+
+    assert.same({ "git", "status", "--porcelain", "--", "src/bar.lua" }, mock.calls[2].cmd)
+    assert.equals("/my/repo", mock.calls[2].cwd)
+  end)
+
+  -- ── git failures ──────────────────────────────────────────────────────────
+
+  a.it("returns ok=false when git rev-parse fails", function()
+    local mock = make_runner({
+      { code = 128, stdout = "", stderr = "fatal: not a git repo" },
+    })
+    vcs._runner = mock.runner
+
+    local result = vcs.check_sync_state("/repo", "foo.lua", SHA)
+
+    assert.is_false(result.ok)
+    assert.is_not_nil(result.err)
+  end)
+
+  a.it("returns ok=false when git status fails", function()
+    local mock = make_runner({
+      { code = 0,   stdout = SHA .. "\n", stderr = "" },
+      { code = 128, stdout = "",          stderr = "fatal: bad index" },
+    })
+    vcs._runner = mock.runner
+
+    local result = vcs.check_sync_state("/repo", "foo.lua", SHA)
+
+    assert.is_false(result.ok)
+    assert.is_not_nil(result.err)
+  end)
+end)

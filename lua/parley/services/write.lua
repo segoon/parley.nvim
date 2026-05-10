@@ -2,6 +2,7 @@
 
 local async = require("plenary.async")
 local model = require("parley.model")
+local vcs = require("parley.vcs")
 local composer_ui_state = require("parley.ui_states.composer")
 local progress_ui_state = require("parley.ui_states.progress")
 local context_repository = require("parley.repositories.context")
@@ -40,6 +41,10 @@ M._confirm_delete = function(msg)
   return vim.fn.confirm(msg, "&Delete\n&Keep", 2) == 1
 end
 
+--- VCS sync-state check seam; replace in tests to avoid real git calls.
+--- @type fun(root: string, rel_path: string, head_sha: string): { ok: boolean, err?: string }
+M._check_sync_state = vcs.check_sync_state
+
 M._next_progress_id = 0
 
 --- @param bufnr integer
@@ -61,6 +66,7 @@ local function resolve_write_context(bufnr)
     provider = provider_snapshot.provider,
     review = review_snapshot.review,
     rel_path = context_snapshot.rel_path,
+    root = context_snapshot.vcs_info and context_snapshot.vcs_info.root or nil,
   },
     nil
 end
@@ -315,18 +321,32 @@ function M.open_new_comment_input(bufnr, opts)
   end
   local anchor = resolve_anchor(opts.line, opts.range, opts.line1, opts.line2)
   local target_line = anchor.start_line
-  composer_ui_state.set(bufnr, {
-    mode = "new",
-    visible = true,
-    submit_state = "idle",
-    target_line = anchor,
-    draft = "",
-  })
 
-  require("parley.discussion_window").show_new_comment_input(bufnr, {
-    cursor_line = target_line,
-    status = "Drafting top-level comment. Press <C-s> to send, or <Esc>s in normal mode. q closes.",
-    on_submit = function(instance, text)
+  async.run(function()
+    local check = M._check_sync_state(
+      write_context.root or "",
+      write_context.rel_path,
+      write_context.review.write_context.head_sha
+    )
+    if not check.ok then
+      vim.schedule(function()
+        M._notify(check.err, vim.log.levels.WARN)
+      end)
+      return
+    end
+
+    composer_ui_state.set(bufnr, {
+      mode = "new",
+      visible = true,
+      submit_state = "idle",
+      target_line = anchor,
+      draft = "",
+    })
+
+    require("parley.discussion_window").show_new_comment_input(bufnr, {
+      cursor_line = target_line,
+      status = "Drafting top-level comment. Press <C-s> to send, or <Esc>s in normal mode. q closes.",
+      on_submit = function(instance, text)
       local body = model.new_body({ text = text, format = "markdown" })
       return run_submit(
         bufnr,
@@ -380,6 +400,7 @@ function M.open_new_comment_input(bufnr, opts)
       )
     end,
   })
+  end)
 end
 
 --- Open an input window for a reply.

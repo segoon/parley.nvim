@@ -16,7 +16,7 @@ end
 
 ---@param item table
 ---@return string
-local function render_item(item)
+local function default_render_item(item)
   local text = string.format("%s %s", item.emoji or "", item.label or item.reaction or "")
   if item.count and item.count > 1 then
     text = string.format("%s x%d", text, item.count)
@@ -224,7 +224,7 @@ local function setup_autocmds(bufnr)
 end
 
 ---@param items table[]
----@param opts? { prompt?: string, source_winid?: integer }
+---@param opts? { prompt?: string, source_winid?: integer, render_item?: fun(item: table): string }
 ---@param on_choice fun(item: table|nil): nil
 ---@return boolean
 function M.open(items, opts, on_choice)
@@ -236,9 +236,10 @@ function M.open(items, opts, on_choice)
 
   M.close()
 
+  local render = opts.render_item or default_render_item
   local lines = {}
   for _, item in ipairs(items) do
-    lines[#lines + 1] = render_item(item)
+    lines[#lines + 1] = render(item)
   end
 
   local bufnr = vim.api.nvim_create_buf(false, true)

@@ -94,8 +94,21 @@ function M.gh_run(self, cmd)
   local attempts = cfg.retry_count + 1
   local result
 
+  dbg.trace("github.transport", "gh_run: cmd=" .. vim.inspect(cmd))
+
   for attempt = 1, attempts do
     result = runner(cmd)
+    dbg.trace(
+      "github.transport",
+      "gh_run: attempt="
+        .. attempt
+        .. " code="
+        .. tostring(result.code)
+        .. " stdout="
+        .. vim.inspect(result.stdout or "")
+        .. " stderr="
+        .. vim.inspect(result.stderr or "")
+    )
     if result.code == 0 then
       break
     end
@@ -162,10 +175,24 @@ function M.gh_start(self, cmd, callback)
     end)
   end
 
+  dbg.trace("github.transport", "gh_start: cmd=" .. vim.inspect(cmd))
+
   local function start_attempt()
     attempt = attempt + 1
+    dbg.trace("github.transport", "gh_start: attempt=" .. attempt)
     handle = self._spawn(cmd, function(result)
       handle = nil
+      dbg.trace(
+        "github.transport",
+        "gh_start: attempt="
+          .. attempt
+          .. " code="
+          .. tostring(result.code)
+          .. " stdout="
+          .. vim.inspect(result.stdout or "")
+          .. " stderr="
+          .. vim.inspect(result.stderr or "")
+      )
       if completed then
         return
       end

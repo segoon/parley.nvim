@@ -38,10 +38,13 @@ local M = {}
 
 --- The result of mapping a single PR-diff-space line to a local buffer line.
 --- @class parley.anchor.Mapping
---- @field local_line integer|nil  Corresponding line in local buffer; nil when
----                                the anchored lines were deleted entirely.
---- @field confidence number       1.0 = exact mapping; 0.0 = stale/deleted.
---- @field stale      boolean      true when pr_line was inside a changed hunk.
+--- @field local_line     integer|nil  Corresponding line in local buffer; nil when
+---                                    the anchored lines were deleted entirely.
+--- @field local_end_line integer|nil  End of the mapped local range for multi-line
+---                                    anchors; nil for single-line anchors or when
+---                                    the end line was deleted entirely.
+--- @field confidence     number       1.0 = exact mapping; 0.0 = stale/deleted.
+--- @field stale          boolean      true when pr_line was inside a changed hunk.
 
 -- ---------------------------------------------------------------------------
 -- Injectable runner seam
@@ -213,7 +216,11 @@ function M.map_discussions(repo_root, base_commit, discussions)
     end
 
     for _, disc in ipairs(file_discussions) do
-      mappings[disc.id] = M.remap_line(disc.line, hunks)
+      local mapping = M.remap_line(disc.line, hunks)
+      if disc.end_line then
+        mapping.local_end_line = M.remap_line(disc.end_line, hunks).local_line
+      end
+      mappings[disc.id] = mapping
     end
   end
 

@@ -102,6 +102,50 @@ M._select_reaction = function(items, on_choice)
   }, on_choice)
 end
 
+local PICKER_PREVIEW_WIDTH = 60
+
+---@param discussion parley.Discussion
+---@return string
+function M._format_discussion_picker_item(discussion)
+  local first = discussion.comments and discussion.comments[1] or nil
+  if not first then
+    return "(no comments) (?)"
+  end
+
+  local body = first.body and first.body.text or ""
+  local first_line = vim.split(body, "\n", { plain = true })[1] or ""
+  first_line = vim.trim(first_line)
+  if first_line == "" then
+    first_line = "(empty)"
+  end
+  if vim.fn.strdisplaywidth(first_line) > PICKER_PREVIEW_WIDTH then
+    first_line = vim.fn.strcharpart(first_line, 0, PICKER_PREVIEW_WIDTH - 1) .. "…"
+  end
+
+  local extras = math.max(0, #discussion.comments - 1)
+  local suffix
+  if extras == 0 then
+    suffix = ""
+  elseif extras == 1 then
+    suffix = " (1 more comment)"
+  else
+    suffix = string.format(" (%d more comments)", extras)
+  end
+
+  return string.format("%s (%s)%s", first_line, first.author, suffix)
+end
+
+--- Discussion picker hook; replace in tests.
+--- @type fun(items: parley.Discussion[], source_winid: integer|nil,
+---           on_choice: fun(item: parley.Discussion|nil): nil): nil
+M._select_discussion = function(items, source_winid, on_choice)
+  require("parley.reaction_picker_window").open(items, {
+    prompt = "Choose discussion",
+    source_winid = source_winid,
+    render_item = M._format_discussion_picker_item,
+  }, on_choice)
+end
+
 ---@param timestamp string
 ---@return string
 local function format_timestamp(timestamp)
@@ -174,13 +218,17 @@ M.resolve_source_bufnr = resolve_source_bufnr
 ---@param cursor_line integer
 ---@return parley.Discussion[]
 local function discussions_for_line(state, cursor_line)
+  local hits = {}
   for _, discussion in ipairs(state.discussions) do
     local mapping = state.mappings[discussion.id]
-    if mapping and mapping.local_line == cursor_line then
-      return { discussion }
+    if mapping and mapping.local_line then
+      local end_row = mapping.local_end_line or mapping.local_line
+      if cursor_line >= mapping.local_line and cursor_line <= end_row then
+        hits[#hits + 1] = discussion
+      end
     end
   end
-  return {}
+  return hits
 end
 
 ---@param state { discussions: parley.Discussion[] }
@@ -315,7 +363,17 @@ function M.open_current_line(bufnr, opts)
     return false
   end
 
-  return open_discussions(bufnr, discussions, state.mappings or {}, source_winid, cursor_line)
+  if #discussions == 1 then
+    return open_discussions(bufnr, discussions, state.mappings or {}, source_winid, cursor_line)
+  end
+
+  M._select_discussion(discussions, source_winid, function(chosen)
+    if not chosen then
+      return
+    end
+    open_discussions(bufnr, { chosen }, state.mappings or {}, source_winid, cursor_line)
+  end)
+  return true
 end
 
 --- Open a specific discussion for `bufnr`.

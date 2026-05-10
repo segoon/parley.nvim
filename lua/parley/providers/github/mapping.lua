@@ -3,6 +3,7 @@
 --- Converts raw GitHub REST API objects (review comments, reactions, reviews)
 --- into parley model types.  No I/O; all functions are pure.
 
+local dbg = require("parley.debug")
 local model = require("parley.model")
 
 local M = {}
@@ -109,6 +110,17 @@ end
 function M.build_top_level_fields(file, anchor, body, write_context)
   local start_line = anchor.start_line
   local end_line = anchor.end_line
+  dbg.trace(
+    "github.mapping",
+    "build_top_level_fields: file="
+      .. tostring(file)
+      .. " start_line="
+      .. tostring(start_line)
+      .. " end_line="
+      .. tostring(end_line)
+      .. " head_sha="
+      .. tostring(write_context.head_sha)
+  )
   local fields = {
     "-f",
     "body=" .. body.text,
@@ -134,6 +146,7 @@ function M.build_top_level_fields(file, anchor, body, write_context)
     fields[#fields + 1] = "subject_type=line"
   end
 
+  dbg.trace("github.mapping", "build_top_level_fields: fields=" .. vim.inspect(fields))
   return fields
 end
 

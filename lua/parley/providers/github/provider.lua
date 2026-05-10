@@ -260,6 +260,17 @@ end
 --- @return parley.Comment
 function GitHubProvider:post_top_level_comment(review, file, anchor, body)
   local write_context = review.write_context
+  dbg.trace(
+    "github.provider",
+    "post_top_level_comment: pr="
+      .. tostring(write_context.number)
+      .. " file="
+      .. tostring(file)
+      .. " anchor="
+      .. vim.inspect(anchor)
+      .. " head_sha="
+      .. tostring(write_context.head_sha)
+  )
   local url = repo_path(self) .. "/pulls/" .. write_context.number .. "/comments"
   local cmd = { "gh", "api", "--method", "POST", url }
   vim.list_extend(cmd, mapping.build_top_level_fields(file, anchor, body, write_context))
@@ -278,6 +289,17 @@ end
 --- @return { cancel: fun(): nil }
 function GitHubProvider:begin_post_top_level_comment(review, file, anchor, body, callback)
   local write_context = review.write_context
+  dbg.trace(
+    "github.provider",
+    "begin_post_top_level_comment: pr="
+      .. tostring(write_context.number)
+      .. " file="
+      .. tostring(file)
+      .. " anchor="
+      .. vim.inspect(anchor)
+      .. " head_sha="
+      .. tostring(write_context.head_sha)
+  )
   local url = repo_path(self) .. "/pulls/" .. write_context.number .. "/comments"
   local cmd = { "gh", "api", "--method", "POST", url }
   vim.list_extend(cmd, mapping.build_top_level_fields(file, anchor, body, write_context))

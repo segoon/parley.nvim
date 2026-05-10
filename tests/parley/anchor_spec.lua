@@ -42,11 +42,12 @@ end
 
 --- Minimal valid discussion anchored at a given file and line.
 ---
---- @param id     string
---- @param file   string
---- @param line   integer
+--- @param id       string
+--- @param file     string
+--- @param line     integer
+--- @param end_line integer|nil  Optional end of multi-line range
 --- @return parley.Discussion
-local function make_discussion(id, file, line)
+local function make_discussion(id, file, line, end_line)
   local comment = model.new_comment({
     id = id .. "-c",
     author = "alice",
@@ -58,6 +59,7 @@ local function make_discussion(id, file, line)
     id = id,
     file = file,
     line = line,
+    end_line = end_line,
     comments = { comment },
   })
 end
@@ -481,6 +483,43 @@ a.describe("parley.anchor.map_discussions", function()
     -- Line 15 is after the hunk with net +1: 15+1=16.
     assert.equals(16, result["after"].local_line)
     assert.is_false(result["after"].stale)
+  end)
+
+  a.it("single-line discussion has nil local_end_line", function()
+    local mock = make_runner("")
+    anchor._runner = mock.runner
+    local discussions = { make_discussion("d1", "src/foo.lua", 7) }
+
+    local result = anchor.map_discussions("/repo", "abc123", discussions)
+
+    assert.equals(7, result["d1"].local_line)
+    assert.is_nil(result["d1"].local_end_line)
+  end)
+
+  a.it("multi-line discussion outside hunks gets shifted local_end_line", function()
+    -- Hunk before the range adds +2 lines.
+    local diff = diff_with("@@ -2,1 +2,3 @@")
+    local mock = make_runner(diff)
+    anchor._runner = mock.runner
+    local discussions = { make_discussion("d1", "src/foo.lua", 10, 14) }
+
+    local result = anchor.map_discussions("/repo", "abc123", discussions)
+
+    assert.equals(12, result["d1"].local_line) -- 10 + 2
+    assert.equals(16, result["d1"].local_end_line) -- 14 + 2
+  end)
+
+  a.it("multi-line discussion with end_line in a deletion hunk gets nil local_end_line", function()
+    -- Pure deletion at lines 14-15.
+    local diff = diff_with("@@ -14,2 +14,0 @@")
+    local mock = make_runner(diff)
+    anchor._runner = mock.runner
+    local discussions = { make_discussion("d1", "src/foo.lua", 10, 14) }
+
+    local result = anchor.map_discussions("/repo", "abc123", discussions)
+
+    assert.equals(10, result["d1"].local_line)
+    assert.is_nil(result["d1"].local_end_line)
   end)
 
   a.it("stale discussion on one file does not affect result on another file", function()

@@ -14,6 +14,9 @@ quality:
 
 UI:
 - mark comment as stale (outdated position)
+- cancelling new discussion => empty discussion window, weird
+- (no comments in the discussion yet) text
+- 'stale anchor' verbatim
 
 documentation:
 - test on 'all commands/options/highlights are covered'

@@ -79,6 +79,23 @@ describe("parley.reaction_picker_window", function()
     assert.equals(source_winid, vim.api.nvim_get_current_win())
   end)
 
+  it("uses opts.render_item when provided to format entries", function()
+    local source_winid = vim.api.nvim_get_current_win()
+
+    reaction_picker_window.open({
+      { name = "alpha", count = 3 },
+      { name = "beta", count = 7 },
+    }, {
+      prompt = "Pick one",
+      source_winid = source_winid,
+      render_item = function(item)
+        return string.format("%s -> %d", item.name, item.count)
+      end,
+    }, function() end)
+
+    assert.same({ "alpha -> 3", "beta -> 7" }, vim.api.nvim_buf_get_lines(reaction_picker_window._bufnr, 0, -1, false))
+  end)
+
   it("cancels without a selection and restores focus", function()
     local source_bufnr = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_set_current_buf(source_bufnr)

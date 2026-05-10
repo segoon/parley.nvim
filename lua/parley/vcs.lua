@@ -63,6 +63,52 @@ end
 -- Public API
 -- ---------------------------------------------------------------------------
 
+--- Check that the local repo is in a state suitable for posting a new comment.
+---
+--- Two checks are performed in order; the first failure short-circuits:
+---   1. Local HEAD matches the PR `head_sha` — no unpushed commits.
+---   2. The file at `rel_path` has no uncommitted changes.
+---
+--- Must be called inside a plenary.async coroutine.
+---
+--- @param root     string  Absolute repo root (cwd for git commands)
+--- @param rel_path string  Repo-relative path of the file being commented on
+--- @param head_sha string  PR head SHA received from GitHub
+--- @return { ok: boolean, err?: string }
+function M.check_sync_state(root, rel_path, head_sha)
+  local run = M._runner
+
+  -- ── 1. Unpushed commits ───────────────────────────────────────────────────
+  local head_result = run({ "git", "rev-parse", "HEAD" }, root)
+  if head_result.code ~= 0 then
+    return { ok = false, err = "Cannot comment: failed to read local HEAD (" .. (head_result.stderr or "") .. ")" }
+  end
+  local local_sha = trim(head_result.stdout)
+  if local_sha ~= head_sha then
+    return {
+      ok = false,
+      err = "Cannot comment: local branch has commits not yet pushed to the remote. Push first and retry.",
+    }
+  end
+
+  -- ── 2. Uncommitted changes in the file ───────────────────────────────────
+  local status_result = run({ "git", "status", "--porcelain", "--", rel_path }, root)
+  if status_result.code ~= 0 then
+    return {
+      ok = false,
+      err = "Cannot comment: failed to check file status (" .. (status_result.stderr or "") .. ")",
+    }
+  end
+  if (status_result.stdout or "") ~= "" then
+    return {
+      ok = false,
+      err = "Cannot comment: '" .. rel_path .. "' has uncommitted changes. Commit or stash them and retry.",
+    }
+  end
+
+  return { ok = true }
+end
+
 --- Detect VCS information for the file at `path`.
 ---
 --- Must be called inside a plenary.async coroutine.  Returns nil when `path`

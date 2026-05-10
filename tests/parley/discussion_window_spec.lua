@@ -66,6 +66,7 @@ local function save_seams()
   saved.utc_offset = discussion_window._utc_offset
   saved.confirm_discard = discussion_window._confirm_discard
   saved.select = discussion_window._select_reaction
+  saved.select_discussion = discussion_window._select_discussion
   saved.reaction_picker_window = package.loaded["parley.reaction_picker_window"]
   saved.write = package.loaded["parley.services.write"]
 end
@@ -79,6 +80,7 @@ local function restore_seams()
   discussion_window._utc_offset = saved.utc_offset
   discussion_window._confirm_discard = saved.confirm_discard
   discussion_window._select_reaction = saved.select
+  discussion_window._select_discussion = saved.select_discussion
   package.loaded["parley.reaction_picker_window"] = saved.reaction_picker_window
   package.loaded["parley.services.write"] = saved.write
 end
@@ -123,6 +125,9 @@ describe("parley.discussion_window", function()
       return 0
     end
     discussion_window._select_reaction = function(_items, on_choice)
+      on_choice(nil)
+    end
+    discussion_window._select_discussion = function(_items, _source_winid, on_choice)
       on_choice(nil)
     end
     for bufnr in pairs(discussion_window._instances) do
@@ -302,7 +307,7 @@ describe("parley.discussion_window", function()
     assert.is_not_nil(vim.tbl_contains(lines, "  Reactions: 👍, ❤️ x2 (you)"))
   end)
 
-  it("renders only the first discussion on a commented line", function()
+  it("invokes the picker when multiple discussions share a line and opens the chosen one", function()
     local bufnr = scratch(10)
     vim.api.nvim_win_set_cursor(0, { 3, 0 })
 
@@ -319,12 +324,160 @@ describe("parley.discussion_window", function()
       },
     })
 
-    discussion_window.open_current_line(bufnr)
+    local picker_items
+    discussion_window._select_discussion = function(items, _source_winid, on_choice)
+      picker_items = items
+      on_choice(items[2])
+    end
+
+    assert.is_true(discussion_window.open_current_line(bufnr))
+
+    assert.is_not_nil(picker_items)
+    assert.equals(2, #picker_items)
+    assert.equals("d1", picker_items[1].id)
+    assert.equals("d2", picker_items[2].id)
+
     local instance = discussion_window._instances[bufnr]
     local lines = vim.api.nvim_buf_get_lines(instance.bufnr, 0, -1, false)
+    assert.is_false(vim.tbl_contains(lines, "First discussion"))
+    assert.is_not_nil(vim.tbl_contains(lines, "Second discussion"))
+    assert.equals("d2", discussion_ui_state.get(bufnr).current_discussion_id)
+  end)
 
-    assert.is_not_nil(vim.tbl_contains(lines, "First discussion"))
-    assert.is_false(vim.tbl_contains(lines, "Second discussion"))
+  it("does not invoke the picker when only one discussion matches the line", function()
+    local bufnr = scratch(10)
+    vim.api.nvim_win_set_cursor(0, { 3, 0 })
+
+    review_repository._seed(bufnr, {
+      status = "ready",
+      stale = false,
+      discussions = { make_discussion({ id = "d1", line = 3, text = "Only one" }) },
+      mappings = {
+        d1 = { local_line = 3, stale = false, confidence = 1.0 },
+      },
+    })
+
+    local picker_called = false
+    discussion_window._select_discussion = function(_items, _source_winid, _on_choice)
+      picker_called = true
+    end
+
+    assert.is_true(discussion_window.open_current_line(bufnr))
+    assert.is_false(picker_called)
+    assert.equals("d1", discussion_ui_state.get(bufnr).current_discussion_id)
+  end)
+
+  it("cancelling the picker leaves no window open", function()
+    local bufnr = scratch(10)
+    vim.api.nvim_win_set_cursor(0, { 3, 0 })
+
+    review_repository._seed(bufnr, {
+      status = "ready",
+      stale = false,
+      discussions = {
+        make_discussion({ id = "d1", line = 3, text = "First discussion" }),
+        make_discussion({ id = "d2", line = 3, text = "Second discussion" }),
+      },
+      mappings = {
+        d1 = { local_line = 3, stale = false, confidence = 1.0 },
+        d2 = { local_line = 3, stale = false, confidence = 1.0 },
+      },
+    })
+
+    discussion_window._select_discussion = function(_items, _source_winid, on_choice)
+      on_choice(nil)
+    end
+
+    assert.is_true(discussion_window.open_current_line(bufnr))
+    assert.is_false(discussion_window.is_open(bufnr))
+    assert.equals(0, #notify_calls)
+  end)
+
+  it("treats the cursor as inside a multi-line discussion's range", function()
+    local bufnr = scratch(10)
+    vim.api.nvim_win_set_cursor(0, { 5, 0 })
+
+    review_repository._seed(bufnr, {
+      status = "ready",
+      stale = false,
+      discussions = {
+        make_discussion({ id = "single", line = 5, text = "Single-line one" }),
+        model.new_discussion({
+          id = "ranged",
+          file = "src/foo.lua",
+          line = 3,
+          end_line = 7,
+          comments = { make_comment({ id = "rc", text = "Range covers line 5" }) },
+        }),
+      },
+      mappings = {
+        single = { local_line = 5, stale = false, confidence = 1.0 },
+        ranged = { local_line = 3, local_end_line = 7, stale = false, confidence = 1.0 },
+      },
+    })
+
+    local picker_items
+    discussion_window._select_discussion = function(items, _source_winid, on_choice)
+      picker_items = items
+      on_choice(nil)
+    end
+
+    discussion_window.open_current_line(bufnr)
+
+    assert.is_not_nil(picker_items)
+    assert.equals(2, #picker_items)
+    local ids = { picker_items[1].id, picker_items[2].id }
+    table.sort(ids)
+    assert.same({ "ranged", "single" }, ids)
+  end)
+
+  describe("_format_discussion_picker_item", function()
+    it("formats a single-comment discussion without a 'more' suffix", function()
+      local d = make_discussion({
+        comments = { make_comment({ id = "c1", author = "alice", text = "Needs a null check" }) },
+      })
+      assert.equals("Needs a null check (alice)", discussion_window._format_discussion_picker_item(d))
+    end)
+
+    it("uses singular '(1 more comment)' for two comments", function()
+      local d = make_discussion({
+        comments = {
+          make_comment({ id = "c1", author = "alice", text = "Top" }),
+          make_comment({ id = "c2", author = "bob", text = "Reply" }),
+        },
+      })
+      assert.equals("Top (alice) (1 more comment)", discussion_window._format_discussion_picker_item(d))
+    end)
+
+    it("uses plural 'N more comments' for three or more comments", function()
+      local d = make_discussion({
+        comments = {
+          make_comment({ id = "c1", author = "alice", text = "Top" }),
+          make_comment({ id = "c2", author = "bob", text = "r1" }),
+          make_comment({ id = "c3", author = "carol", text = "r2" }),
+        },
+      })
+      assert.equals("Top (alice) (2 more comments)", discussion_window._format_discussion_picker_item(d))
+    end)
+
+    it("uses only the first line of a multi-line body", function()
+      local d = make_discussion({
+        comments = {
+          make_comment({ id = "c1", author = "alice", text = "First line\nsecond line\nthird" }),
+        },
+      })
+      assert.equals("First line (alice)", discussion_window._format_discussion_picker_item(d))
+    end)
+
+    it("truncates long bodies with an ellipsis", function()
+      local long = string.rep("x", 80)
+      local d = make_discussion({
+        comments = { make_comment({ id = "c1", author = "alice", text = long }) },
+      })
+      local label = discussion_window._format_discussion_picker_item(d)
+      assert.is_truthy(label:find("…", 1, true))
+      assert.is_truthy(label:find("(alice)", 1, true))
+    end)
   end)
 
   it("opens a specific discussion on a commented line", function()
