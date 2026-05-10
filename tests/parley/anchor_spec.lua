@@ -166,6 +166,105 @@ describe("parley.anchor.parse_hunks", function()
 end)
 
 -- ---------------------------------------------------------------------------
+-- Suite: is_line_in_hunk — pure unit tests
+-- ---------------------------------------------------------------------------
+
+describe("parley.anchor.is_line_in_hunk", function()
+  -- No hunks -----------------------------------------------------------------
+
+  it("returns false when hunk list is empty", function()
+    assert.is_false(anchor.is_line_in_hunk(1, {}))
+  end)
+
+  -- Single added-line hunk (new_count = 1) -----------------------------------
+
+  it("returns true for the only line of a single-line hunk", function()
+    -- @@ -5,1 +5,1 @@ — new region [5, 6)
+    local hunks = { { old_start = 5, old_count = 1, new_start = 5, new_count = 1 } }
+    assert.is_true(anchor.is_line_in_hunk(5, hunks))
+  end)
+
+  it("returns false for the line just before a hunk", function()
+    local hunks = { { old_start = 5, old_count = 1, new_start = 5, new_count = 1 } }
+    assert.is_false(anchor.is_line_in_hunk(4, hunks))
+  end)
+
+  it("returns false for the line just after a hunk", function()
+    -- new region [5, 6) — line 6 is outside
+    local hunks = { { old_start = 5, old_count = 1, new_start = 5, new_count = 1 } }
+    assert.is_false(anchor.is_line_in_hunk(6, hunks))
+  end)
+
+  -- Multi-line hunk ----------------------------------------------------------
+
+  it("returns true for first line of a multi-line hunk", function()
+    local hunks = { { old_start = 10, old_count = 3, new_start = 10, new_count = 5 } }
+    assert.is_true(anchor.is_line_in_hunk(10, hunks))
+  end)
+
+  it("returns true for last line of a multi-line hunk", function()
+    -- new region [10, 15) — last line is 14
+    local hunks = { { old_start = 10, old_count = 3, new_start = 10, new_count = 5 } }
+    assert.is_true(anchor.is_line_in_hunk(14, hunks))
+  end)
+
+  it("returns true for a middle line of a multi-line hunk", function()
+    local hunks = { { old_start = 10, old_count = 3, new_start = 10, new_count = 5 } }
+    assert.is_true(anchor.is_line_in_hunk(12, hunks))
+  end)
+
+  it("returns false for the line immediately after a multi-line hunk", function()
+    -- new region [10, 15) — line 15 is outside
+    local hunks = { { old_start = 10, old_count = 3, new_start = 10, new_count = 5 } }
+    assert.is_false(anchor.is_line_in_hunk(15, hunks))
+  end)
+
+  -- Pure deletion hunk (new_count = 0) ---------------------------------------
+
+  it("returns false for any line when the only hunk is a pure deletion", function()
+    -- new region [5, 5) — empty
+    local hunks = { { old_start = 5, old_count = 3, new_start = 5, new_count = 0 } }
+    assert.is_false(anchor.is_line_in_hunk(5, hunks))
+    assert.is_false(anchor.is_line_in_hunk(6, hunks))
+    assert.is_false(anchor.is_line_in_hunk(7, hunks))
+  end)
+
+  -- Pure insertion hunk ------------------------------------------------------
+
+  it("returns true for inserted lines", function()
+    -- @@ -5,0 +6,3 @@ — new region [6, 9)
+    local hunks = { { old_start = 5, old_count = 0, new_start = 6, new_count = 3 } }
+    assert.is_true(anchor.is_line_in_hunk(6, hunks))
+    assert.is_true(anchor.is_line_in_hunk(7, hunks))
+    assert.is_true(anchor.is_line_in_hunk(8, hunks))
+  end)
+
+  it("returns false for lines outside a pure insertion hunk", function()
+    local hunks = { { old_start = 5, old_count = 0, new_start = 6, new_count = 3 } }
+    assert.is_false(anchor.is_line_in_hunk(5, hunks))
+    assert.is_false(anchor.is_line_in_hunk(9, hunks))
+  end)
+
+  -- Two hunks — line between them --------------------------------------------
+
+  it("returns false for a line between two hunks", function()
+    local hunks = {
+      { old_start = 5, old_count = 1, new_start = 5, new_count = 1 },
+      { old_start = 20, old_count = 1, new_start = 20, new_count = 1 },
+    }
+    assert.is_false(anchor.is_line_in_hunk(10, hunks))
+  end)
+
+  it("returns true for a line in the second of two hunks", function()
+    local hunks = {
+      { old_start = 5, old_count = 1, new_start = 5, new_count = 1 },
+      { old_start = 20, old_count = 1, new_start = 20, new_count = 3 },
+    }
+    assert.is_true(anchor.is_line_in_hunk(21, hunks))
+  end)
+end)
+
+-- ---------------------------------------------------------------------------
 -- Suite: remap_line — pure unit tests
 -- ---------------------------------------------------------------------------
 

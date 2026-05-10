@@ -14,10 +14,10 @@ end
 ---@param lines string[]
 ---@param float_cfg parley.FloatConfig
 ---@param source_winid integer
----@param source_line integer  unused for positioning; retained for API stability
+---@param _source_line integer  unused for positioning; retained for API stability
 ---@param title string|nil
 ---@return vim.api.keyset.win_config
-function M.make_win_config(lines, float_cfg, source_winid, source_line, title)
+function M.make_win_config(lines, float_cfg, source_winid, _source_line, title)
   local width = window_width(lines, float_cfg.max_width)
   local height = math.min(float_cfg.max_height, math.max(1, #lines))
 

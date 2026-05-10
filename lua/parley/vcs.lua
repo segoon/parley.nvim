@@ -13,6 +13,7 @@
 ---     so additional VCS backends can be added in later phases.
 
 local await = require("parley.runtime.await")
+local anchor = require("parley.anchor")
 
 local M = {}
 
@@ -104,6 +105,59 @@ function M.check_sync_state(root, rel_path, head_sha)
       ok = false,
       err = "Cannot comment: '" .. rel_path .. "' has uncommitted changes. Commit or stash them and retry.",
     }
+  end
+
+  return { ok = true }
+end
+
+--- Check that the anchor lines fall within the PR diff for a given file.
+---
+--- Runs `git diff --unified=0 origin/{base_branch}...HEAD -- {rel_path}` to
+--- obtain the diff between the PR base and the current HEAD, then validates
+--- that every line in the anchor appears within a changed hunk on the new
+--- (RIGHT) side.
+---
+--- Must be called inside a plenary.async coroutine.
+---
+--- @param root        string        Absolute repo root (cwd for git commands)
+--- @param base_branch string        PR base branch name (e.g. "main")
+--- @param rel_path    string        Repo-relative path of the file being commented on
+--- @param anch        parley.Anchor
+--- @return { ok: boolean, err?: string }
+function M.check_anchor_in_diff(root, base_branch, rel_path, anch)
+  local run = M._runner
+  local base_ref = "origin/" .. base_branch
+
+  local result = run({ "git", "diff", "--unified=0", base_ref .. "...HEAD", "--", rel_path }, root)
+
+  if result.code ~= 0 then
+    -- Git error (e.g. unknown base branch): allow the comment through rather
+    -- than silently blocking the user.
+    return { ok = true }
+  end
+
+  if result.stdout == "" then
+    -- No diff output → file is unchanged in this PR.
+    return {
+      ok = false,
+      err = "Cannot comment: '" .. rel_path .. "' has no changes in this PR. Only changed lines can be commented on.",
+    }
+  end
+
+  local hunks = anchor.parse_hunks(result.stdout)
+
+  local function line_err(line)
+    return "Cannot comment: line "
+      .. tostring(line)
+      .. " is not part of the PR diff. Move the cursor to a changed line."
+  end
+
+  if not anchor.is_line_in_hunk(anch.start_line, hunks) then
+    return { ok = false, err = line_err(anch.start_line) }
+  end
+
+  if anch.end_line and not anchor.is_line_in_hunk(anch.end_line, hunks) then
+    return { ok = false, err = line_err(anch.end_line) }
   end
 
   return { ok = true }

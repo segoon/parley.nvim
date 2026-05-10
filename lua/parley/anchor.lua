@@ -95,6 +95,27 @@ function M.parse_hunks(diff_output)
   return hunks
 end
 
+--- Return true iff `line` falls within any hunk's new-side (RIGHT) region.
+---
+--- The new-side region of a hunk is [new_start, new_start + new_count).
+--- Pure deletions (new_count = 0) have an empty region and are never valid
+--- comment targets on the RIGHT side.
+---
+--- Used on the write path to validate that a cursor line is actually part of
+--- the PR diff before sending it to the GitHub API.
+---
+--- @param line  integer               Line number in the file at HEAD (1-indexed)
+--- @param hunks parley.anchor.Hunk[]
+--- @return boolean
+function M.is_line_in_hunk(line, hunks)
+  for _, h in ipairs(hunks) do
+    if h.new_count > 0 and line >= h.new_start and line < h.new_start + h.new_count then
+      return true
+    end
+  end
+  return false
+end
+
 --- Remap a single PR-diff-space line through a list of hunks.
 ---
 --- Hunks must be sorted by old_start in ascending order (parse_hunks guarantees

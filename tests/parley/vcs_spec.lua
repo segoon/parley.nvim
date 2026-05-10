@@ -432,3 +432,154 @@ a.describe("parley.vcs check_sync_state", function()
     assert.is_not_nil(result.err)
   end)
 end)
+
+-- ---------------------------------------------------------------------------
+-- Suite: check_anchor_in_diff
+-- ---------------------------------------------------------------------------
+
+--- Build a simple unified diff with one hunk.
+--- new_start/new_count define which lines on the new (RIGHT) side are changed.
+---
+--- @param new_start integer
+--- @param new_count integer
+--- @return string
+local function diff_hunk(new_start, new_count)
+  return string.format(
+    "diff --git a/f.lua b/f.lua\n--- a/f.lua\n+++ b/f.lua\n@@ -1,%d +%d,%d @@\n",
+    new_count,
+    new_start,
+    new_count
+  )
+end
+
+a.describe("parley.vcs check_anchor_in_diff", function()
+  a.before_each(function()
+    original_runner = vcs._runner
+  end)
+
+  a.after_each(function()
+    vcs._runner = original_runner
+  end)
+
+  -- ── Happy path: line inside hunk ─────────────────────────────────────────
+
+  a.it("returns ok=true when start_line is inside a diff hunk", function()
+    -- Hunk covers new lines 5–7 (new_start=5, new_count=3)
+    local mock = make_runner({ { code = 0, stdout = diff_hunk(5, 3), stderr = "" } })
+    vcs._runner = mock.runner
+
+    local result = vcs.check_anchor_in_diff("/repo", "main", "f.lua", { start_line = 5, end_line = nil })
+
+    assert.is_true(result.ok)
+    assert.is_nil(result.err)
+  end)
+
+  a.it("returns ok=true for last line of hunk range", function()
+    -- Hunk covers new lines 5–7; last valid line is 7
+    local mock = make_runner({ { code = 0, stdout = diff_hunk(5, 3), stderr = "" } })
+    vcs._runner = mock.runner
+
+    local result = vcs.check_anchor_in_diff("/repo", "main", "f.lua", { start_line = 7, end_line = nil })
+
+    assert.is_true(result.ok)
+  end)
+
+  a.it("returns ok=true for a multi-line anchor fully inside one hunk", function()
+    -- Hunk covers new lines 10–14; anchor is 11–13
+    local mock = make_runner({ { code = 0, stdout = diff_hunk(10, 5), stderr = "" } })
+    vcs._runner = mock.runner
+
+    local result = vcs.check_anchor_in_diff("/repo", "main", "f.lua", { start_line = 11, end_line = 13 })
+
+    assert.is_true(result.ok)
+  end)
+
+  -- ── Line not in diff ──────────────────────────────────────────────────────
+
+  a.it("returns ok=false when start_line is before the hunk", function()
+    -- Hunk covers new lines 10–12; line 5 is outside
+    local mock = make_runner({ { code = 0, stdout = diff_hunk(10, 3), stderr = "" } })
+    vcs._runner = mock.runner
+
+    local result = vcs.check_anchor_in_diff("/repo", "main", "f.lua", { start_line = 5, end_line = nil })
+
+    assert.is_false(result.ok)
+    assert.is_not_nil(result.err)
+    assert.is_truthy(result.err:find("5", 1, true))
+  end)
+
+  a.it("returns ok=false when start_line is after the hunk", function()
+    -- Hunk covers new lines 5–7; line 20 is outside
+    local mock = make_runner({ { code = 0, stdout = diff_hunk(5, 3), stderr = "" } })
+    vcs._runner = mock.runner
+
+    local result = vcs.check_anchor_in_diff("/repo", "main", "f.lua", { start_line = 20, end_line = nil })
+
+    assert.is_false(result.ok)
+    assert.is_truthy(result.err:find("20", 1, true))
+  end)
+
+  a.it("error message mentions 'changed line'", function()
+    local mock = make_runner({ { code = 0, stdout = diff_hunk(10, 3), stderr = "" } })
+    vcs._runner = mock.runner
+
+    local result = vcs.check_anchor_in_diff("/repo", "main", "f.lua", { start_line = 1, end_line = nil })
+
+    assert.is_truthy(result.err:find("changed", 1, true))
+  end)
+
+  -- ── Multi-line anchor with end_line outside hunk ──────────────────────────
+
+  a.it("returns ok=false when end_line is outside the hunk", function()
+    -- Hunk covers new lines 10–12; end_line 15 is outside
+    local mock = make_runner({ { code = 0, stdout = diff_hunk(10, 3), stderr = "" } })
+    vcs._runner = mock.runner
+
+    local result = vcs.check_anchor_in_diff("/repo", "main", "f.lua", { start_line = 10, end_line = 15 })
+
+    assert.is_false(result.ok)
+    assert.is_truthy(result.err:find("15", 1, true))
+  end)
+
+  -- ── No diff (file unchanged) ──────────────────────────────────────────────
+
+  a.it("returns ok=false when git diff output is empty (file unchanged in PR)", function()
+    local mock = make_runner({ { code = 0, stdout = "", stderr = "" } })
+    vcs._runner = mock.runner
+
+    local result = vcs.check_anchor_in_diff("/repo", "main", "unchanged.lua", { start_line = 1, end_line = nil })
+
+    assert.is_false(result.ok)
+    assert.is_truthy(result.err:find("unchanged.lua", 1, true))
+  end)
+
+  -- ── Git failure ───────────────────────────────────────────────────────────
+
+  a.it("returns ok=true (allows through) when git diff fails", function()
+    -- Unknown base branch or other git error: don't block the user.
+    local mock = make_runner({ { code = 128, stdout = "", stderr = "fatal: unknown revision" } })
+    vcs._runner = mock.runner
+
+    local result = vcs.check_anchor_in_diff("/repo", "unknown-base", "f.lua", { start_line = 5, end_line = nil })
+
+    assert.is_true(result.ok)
+  end)
+
+  -- ── Command shape ─────────────────────────────────────────────────────────
+
+  a.it("runs git diff --unified=0 origin/<base_branch>...HEAD -- <rel_path>", function()
+    local mock = make_runner({ { code = 0, stdout = diff_hunk(5, 3), stderr = "" } })
+    vcs._runner = mock.runner
+
+    vcs.check_anchor_in_diff("/my/repo", "main", "src/foo.lua", { start_line = 5, end_line = nil })
+
+    local cmd = mock.calls[1].cmd
+    assert.equals("git", cmd[1])
+    assert.equals("diff", cmd[2])
+    assert.equals("--unified=0", cmd[3])
+    assert.equals("origin/main...HEAD", cmd[4])
+    assert.equals("--", cmd[5])
+    assert.equals("src/foo.lua", cmd[6])
+    assert.equals("/my/repo", mock.calls[1].cwd)
+  end)
+end)

@@ -45,6 +45,10 @@ end
 --- @type fun(root: string, rel_path: string, head_sha: string): { ok: boolean, err?: string }
 M._check_sync_state = vcs.check_sync_state
 
+--- Anchor-in-diff check seam; replace in tests to avoid real git calls.
+--- @type fun(root: string, base_branch: string, rel_path: string, anch: parley.Anchor): { ok: boolean, err?: string }
+M._check_anchor_in_diff = vcs.check_anchor_in_diff
+
 M._next_progress_id = 0
 
 --- @param bufnr integer
@@ -328,6 +332,19 @@ function M.open_new_comment_input(bufnr, opts)
     if not check.ok then
       vim.schedule(function()
         M._notify(check.err, vim.log.levels.WARN)
+      end)
+      return
+    end
+
+    local diff_check = M._check_anchor_in_diff(
+      write_context.root or "",
+      write_context.review.pr.base_branch,
+      write_context.rel_path,
+      anchor
+    )
+    if not diff_check.ok then
+      vim.schedule(function()
+        M._notify(diff_check.err, vim.log.levels.WARN)
       end)
       return
     end
