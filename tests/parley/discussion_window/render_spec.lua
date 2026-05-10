@@ -61,13 +61,11 @@ describe("parley.discussion_window.render", function()
       },
     })
 
-    local lines, ranges = render.render_lines({ discussion }, { d1 = { stale = true } }, {
+    local lines, ranges, title = render.render_lines({ discussion }, { d1 = { stale = true } }, {
       format_timestamp = formatter,
     })
 
     assert.same({
-      "unresolved · stale anchor",
-      "",
       "- **alice** · formatted:2024-01-01T10:00:00Z",
       "  Root comment",
       "  ---",
@@ -77,9 +75,10 @@ describe("parley.discussion_window.render", function()
       "    Reply comment",
     }, lines)
     assert.same({
-      c1 = { start_line = 3, end_line = 6 },
-      c2 = { start_line = 8, end_line = 9 },
+      c1 = { start_line = 1, end_line = 4 },
+      c2 = { start_line = 6, end_line = 7 },
     }, ranges)
+    assert.equals("unresolved · stale anchor", title)
   end)
 
   it("builds reaction picker items with counts and viewer state", function()

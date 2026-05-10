@@ -107,11 +107,57 @@ function M._truncate(text, max_width)
   -- Keep (max_width - 1) bytes then append the ellipsis.
   -- NOTE: this is byte-level truncation; multi-byte characters may be split.
   -- For the virtual-text use-case (ASCII-dominant comment snippets) this is
-  -- acceptable and avoids pulling in a full Unicode library.
+  -- acceptable and avoids pulling in a full Unicode library. Because byte
+  -- length >= display width for any UTF-8 text, the result always fits in
+  -- `max_width` display columns, so right-padding to `max_width` is safe.
   if max_width <= 1 then
     return "…"
   end
   return text:sub(1, max_width - 1) .. "…"
+end
+
+--- Right-pad `text` with spaces to exactly `width` display columns.
+---
+--- Uses `vim.fn.strdisplaywidth` so multi-byte glyphs (e.g. "·") align.
+--- If the text is already wider than `width`, returns it unchanged.
+---
+--- @param text  string
+--- @param width integer
+--- @return string
+function M._pad_to_width(text, width)
+  local pad = width - vim.fn.strdisplaywidth(text)
+  if pad <= 0 then
+    return text
+  end
+  return text .. string.rep(" ", pad)
+end
+
+--- Build the bottom-border virt_line for a discussion block.
+---
+--- Layout (total display width = `inner_width + 4`):
+---   • no extra comments:   "└" + "─"*(inner_width+2) + "┘"
+---   • with extra comments: "└── (N more comment[s]) " + "─"*remaining + "┘"
+---
+--- When the counter doesn't fit (pathological narrow `inner_width`), falls
+--- back to the plain rule.
+---
+--- @param inner_width    integer  Display width of the box interior (== max_width)
+--- @param more_comments  integer  Count of additional comments (>= 0)
+--- @return string
+function M._bottom_rule(inner_width, more_comments)
+  local total = inner_width + 4
+  if more_comments > 0 then
+    local suffix = more_comments == 1 and "comment" or "comments"
+    local label = string.format("(%d more %s)", more_comments, suffix)
+    local prefix = "└── " .. label .. " "
+    local prefix_w = vim.fn.strdisplaywidth(prefix)
+    local dashes = total - prefix_w - 1 -- minus 1 for the closing "┘"
+    if dashes >= 0 then
+      return prefix .. string.rep("─", dashes) .. "┘"
+    end
+    -- Fallthrough: counter too long for the box; emit the plain rule.
+  end
+  return "└" .. string.rep("─", total - 2) .. "┘"
 end
 
 ---@param timestamp string
@@ -176,30 +222,31 @@ function M.render(bufnr, discussions, mappings, opts)
     end
 
     -- Virtual lines below the anchored line: metadata, full multiline body,
-    -- then a compact summary when the discussion has additional comments.
+    -- then a bottom rule that doubles as the "(N more comments)" indicator.
+    -- Each interior row is wrapped in side bars so the whole block reads as
+    -- a left/right/bottom-bordered box (no top rule — meta is the first row).
     if opts.virtual_text.enabled then
       local first = model.first_comment(disc)
       if first then
+        local width = opts.virtual_text.max_width
+        local bar_l = { "│ ", hl_vtext }
+        local bar_r = { " │", hl_vtext }
+
+        local meta_text = string.format("%s · %s", first.author, format_comment_timestamp(first.created_at))
         ext_opts.virt_lines = {
-          {
-            {
-              string.format("%s · %s", first.author, format_comment_timestamp(first.created_at)),
-              hl_vtext_meta,
-            },
-          },
+          { bar_l, { M._pad_to_width(M._truncate(meta_text, width), width), hl_vtext_meta }, bar_r },
         }
         for _, line in ipairs(vim.split(first.body.text, "\n", { plain = true })) do
           ext_opts.virt_lines[#ext_opts.virt_lines + 1] = {
-            { M._truncate(line, opts.virtual_text.max_width), hl_vtext },
+            bar_l,
+            { M._pad_to_width(M._truncate(line, width), width), hl_vtext },
+            bar_r,
           }
         end
         local more_comments = model.comment_count(disc) - 1
-        if more_comments > 0 then
-          local suffix = more_comments == 1 and "comment" or "comments"
-          ext_opts.virt_lines[#ext_opts.virt_lines + 1] = {
-            { string.format("(%d more %s)", more_comments, suffix), hl_vtext },
-          }
-        end
+        ext_opts.virt_lines[#ext_opts.virt_lines + 1] = {
+          { M._bottom_rule(width, more_comments), hl_vtext },
+        }
       end
     end
 

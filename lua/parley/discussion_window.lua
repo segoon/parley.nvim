@@ -231,13 +231,14 @@ local function open_discussions(bufnr, discussions, mappings, source_winid, sour
     max_width = 80,
     max_height = 30,
   }
-  local lines, comment_ranges = render.render_lines(discussions, mappings, {
+  local lines, comment_ranges, title = render.render_lines(discussions, mappings, {
     format_timestamp = format_timestamp,
   })
   local instance = window_helpers.ensure_instance(M._instances, bufnr, lines, float_cfg, source_winid, source_line, {
     hide_input = input_controller.hide_input,
     input_height = INPUT_HEIGHT,
     on_cursor_moved = sync_selected_comment,
+    title = title,
   })
   instance.comment_ranges = comment_ranges
   write_lines(bufnr, instance, lines)
@@ -347,7 +348,7 @@ function M.open_discussion(bufnr, discussion_id)
   end
 
   local mapping = state.mappings and state.mappings[discussion.id] or nil
-  local source_line = (mapping and mapping.local_line) or discussion.line
+  local source_line = mapping and mapping.local_line or nil
   return open_discussions(bufnr, { discussion }, state.mappings or {}, source_winid, source_line)
 end
 
@@ -538,13 +539,14 @@ function M.show_new_comment_input(bufnr, opts)
     end
     local discussions = state and discussions_for_line(state, opts.cursor_line) or {}
     if #discussions > 0 then
-      local lines, comment_ranges = render.render_lines(discussions, state.mappings, {
+      local lines, comment_ranges, title = render.render_lines(discussions, state.mappings, {
         format_timestamp = format_timestamp,
       })
       instance = window_helpers.ensure_instance(M._instances, bufnr, lines, float_cfg, source_winid, opts.cursor_line, {
         hide_input = input_controller.hide_input,
         input_height = INPUT_HEIGHT,
         on_cursor_moved = sync_selected_comment,
+        title = title,
       })
       instance.comment_ranges = comment_ranges
       write_lines(bufnr, instance, lines)

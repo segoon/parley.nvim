@@ -282,9 +282,18 @@ describe("signs.render", function()
     assert.equal(1, #marks)
     local virt_lines = marks[1][4].virt_lines
     assert.is_not_nil(virt_lines)
-    assert.is_true(#virt_lines > 0)
-    assert.equals("alice · 2026-05-08 15:08:38 (MSK) (1 min ago)", virt_lines[1][1][1])
-    assert.equals("check the nil guard here", virt_lines[2][1][1])
+    -- meta + 1 body row + bottom rule.
+    assert.equals(3, #virt_lines)
+    -- Each interior row: { left_bar, content, right_bar }.
+    assert.equals("│ ", virt_lines[1][1][1])
+    assert.equals(" │", virt_lines[1][3][1])
+    assert.matches("^alice · 2026%-05%-08 15:08:38 %(MSK%) %(1 min ago%) +$", virt_lines[1][2][1])
+    assert.matches("^check the nil guard here +$", virt_lines[2][2][1])
+    -- Bottom rule occupies a single chunk; starts with └, ends with ┘.
+    assert.equals(1, #virt_lines[3])
+    local bottom = virt_lines[3][1][1]
+    assert.is_true(vim.startswith(bottom, "└"))
+    assert.is_true(vim.endswith(bottom, "┘"))
   end)
 
   it("truncates long comment text in virtual lines", function()
@@ -298,7 +307,8 @@ describe("signs.render", function()
     signs.render(bufnr, { disc }, mappings, opts)
     local marks = all_extmarks(bufnr)
     local virt_lines = marks[1][4].virt_lines
-    assert.equal("…", virt_lines[2][1][1]:sub(-3))
+    -- Truncated body text now lives in chunk[2] of the bordered row.
+    assert.equal("…", virt_lines[2][2][1]:sub(-3))
   end)
 
   it("renders multiline comments as multiple virtual lines", function()
@@ -309,11 +319,15 @@ describe("signs.render", function()
     signs.render(bufnr, { disc }, mappings, default_opts())
     local virt_lines = all_extmarks(bufnr)[1][4].virt_lines
 
-    assert.equals(4, #virt_lines)
-    assert.equals("alice · 2026-05-08 15:08:38 (MSK) (1 min ago)", virt_lines[1][1][1])
-    assert.equals("line one", virt_lines[2][1][1])
-    assert.equals("line two", virt_lines[3][1][1])
-    assert.equals("line three", virt_lines[4][1][1])
+    -- meta + 3 body rows + bottom rule.
+    assert.equals(5, #virt_lines)
+    assert.matches("^alice · 2026%-05%-08 15:08:38 %(MSK%) %(1 min ago%) +$", virt_lines[1][2][1])
+    assert.matches("^line one +$", virt_lines[2][2][1])
+    assert.matches("^line two +$", virt_lines[3][2][1])
+    assert.matches("^line three +$", virt_lines[4][2][1])
+    local bottom = virt_lines[5][1][1]
+    assert.is_true(vim.startswith(bottom, "└"))
+    assert.is_true(vim.endswith(bottom, "┘"))
   end)
 
   it("adds a summary virtual line when the discussion has additional comments", function()
@@ -354,10 +368,13 @@ describe("signs.render", function()
     local marks = all_extmarks(bufnr)
     local virt_lines = marks[1][4].virt_lines
 
+    -- meta + 1 body row + bottom rule (which now carries the more-comments label).
     assert.equals(3, #virt_lines)
-    assert.equals("alice · 2026-05-08 15:08:38 (MSK) (1 min ago)", virt_lines[1][1][1])
-    assert.equals("first", virt_lines[2][1][1])
-    assert.equals("(2 more comments)", virt_lines[3][1][1])
+    assert.matches("^alice · 2026%-05%-08 15:08:38 %(MSK%) %(1 min ago%) +$", virt_lines[1][2][1])
+    assert.matches("^first +$", virt_lines[2][2][1])
+    local bottom = virt_lines[3][1][1]
+    assert.is_true(vim.startswith(bottom, "└── (2 more comments) "))
+    assert.is_true(vim.endswith(bottom, "┘"))
   end)
 
   it("omits virt_text when virtual_text.enabled = false", function()
@@ -390,8 +407,12 @@ describe("signs.render", function()
     assert.equal("ParleyStaleSign", det.sign_hl_group)
     local virt_lines = det.virt_lines
     assert.is_not_nil(virt_lines)
-    assert.equal("ParleyStaleVirtualTextMeta", virt_lines[1][1][2])
-    assert.equal("ParleyStaleVirtualText", virt_lines[2][1][2])
+    -- Side bars + bottom rule reuse the body highlight (stale variant).
+    assert.equal("ParleyStaleVirtualText", virt_lines[1][1][2])
+    assert.equal("ParleyStaleVirtualTextMeta", virt_lines[1][2][2])
+    assert.equal("ParleyStaleVirtualText", virt_lines[1][3][2])
+    assert.equal("ParleyStaleVirtualText", virt_lines[2][2][2])
+    assert.equal("ParleyStaleVirtualText", virt_lines[#virt_lines][1][2])
   end)
 
   it("uses normal highlight groups for non-stale mappings", function()
@@ -404,8 +425,8 @@ describe("signs.render", function()
     local det = marks[1][4]
     assert.equal("ParleySign", det.sign_hl_group)
     local virt_lines = det.virt_lines
-    assert.equal("ParleyVirtualTextMeta", virt_lines[1][1][2])
-    assert.equal("ParleyVirtualText", virt_lines[2][1][2])
+    assert.equal("ParleyVirtualTextMeta", virt_lines[1][2][2])
+    assert.equal("ParleyVirtualText", virt_lines[2][2][2])
   end)
 
   -- -------------------------------------------------------------------------

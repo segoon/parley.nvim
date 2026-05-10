@@ -131,7 +131,11 @@ describe("parley Telescope integration", function()
     assert.equals("Parley Discussions (File)", captured.spec.prompt_title)
   end)
 
-  it("jumps to the selected discussion and opens the float", function()
+  --- Build the harness shared by every cursor-jump scenario.
+  --- @param refresh_snapshot table|nil  Snapshot value passed to refresh_async's callback
+  --- @param target_lines integer        Line count for the buffer M._edit creates
+  --- @return table  { run, edits, cursors, refreshed, opened, telescope_integration }
+  local function setup_jump_harness(refresh_snapshot, target_lines)
     local selected_entry
     local select_default
     local edits = {}
@@ -153,7 +157,7 @@ describe("parley Telescope integration", function()
       refresh_async = function(bufnr, opts, callback)
         refreshed[#refreshed + 1] = { bufnr = bufnr, opts = opts }
         if callback then
-          callback({})
+          callback(refresh_snapshot)
         end
       end,
     }
@@ -203,27 +207,84 @@ describe("parley Telescope integration", function()
     telescope_integration._edit = function(path)
       edits[#edits + 1] = path
       local target = vim.api.nvim_create_buf(false, true)
+      local filler = {}
+      for i = 1, target_lines do
+        filler[i] = "line " .. i
+      end
+      vim.api.nvim_buf_set_lines(target, 0, -1, false, filler)
       vim.api.nvim_set_current_buf(target)
     end
     telescope_integration._set_cursor = function(line)
       cursors[#cursors + 1] = line
     end
 
-    telescope_integration.discussions()
-
-    selected_entry = {
-      value = {
-        discussion = make_discussion("d2", "src/bar.lua", 20, "bar"),
-        path = "/repo/src/bar.lua",
-      },
+    return {
+      run = function()
+        telescope_integration.discussions()
+        selected_entry = {
+          value = {
+            discussion = make_discussion("d2", "src/bar.lua", 20, "bar"),
+            path = "/repo/src/bar.lua",
+          },
+        }
+        select_default()
+      end,
+      edits = edits,
+      cursors = cursors,
+      refreshed = refreshed,
+      opened = opened,
     }
-    select_default()
+  end
 
-    assert.same({ "/repo/src/bar.lua" }, edits)
-    assert.same({ 20 }, cursors)
-    assert.equals(1, #refreshed)
-    assert.same({ force = true, notify_errors = true }, refreshed[1].opts)
-    assert.equals("d2", opened[1].discussion_id)
+  it("jumps to the mapped local line and opens the float", function()
+    local h = setup_jump_harness({
+      mappings = {
+        d2 = { local_line = 5, stale = false, confidence = 1.0 },
+      },
+    }, 30)
+
+    h.run()
+
+    assert.same({ "/repo/src/bar.lua" }, h.edits)
+    assert.same({ 5 }, h.cursors)
+    assert.equals(1, #h.refreshed)
+    assert.same({ force = true, notify_errors = true }, h.refreshed[1].opts)
+    assert.equals("d2", h.opened[1].discussion_id)
+  end)
+
+  it("opens the float without moving the cursor when the anchor was deleted locally", function()
+    local h = setup_jump_harness({
+      mappings = {
+        d2 = { local_line = nil, stale = true, confidence = 0.0 },
+      },
+    }, 30)
+
+    h.run()
+
+    assert.same({}, h.cursors)
+    assert.equals("d2", h.opened[1].discussion_id)
+  end)
+
+  it("opens the float without moving the cursor when no mapping is available", function()
+    local h = setup_jump_harness({}, 30)
+
+    h.run()
+
+    assert.same({}, h.cursors)
+    assert.equals("d2", h.opened[1].discussion_id)
+  end)
+
+  it("clamps the cursor to the buffer's last line when the mapping exceeds it", function()
+    local h = setup_jump_harness({
+      mappings = {
+        d2 = { local_line = 999, stale = false, confidence = 1.0 },
+      },
+    }, 8)
+
+    h.run()
+
+    assert.same({ 8 }, h.cursors)
+    assert.equals("d2", h.opened[1].discussion_id)
   end)
 
   it("registers Telescope extension shims for both picker names", function()

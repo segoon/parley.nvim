@@ -242,10 +242,11 @@ end
 
 --- Restore shared review data from the on-disk cache. Returns a shared-shaped
 --- table (no per-file data) or nil when the cache is cold or incomplete.
+--- @param bufnr integer
 --- @param ctx table
 --- @param provider_snapshot table
 --- @return table|nil
-local function restore_cached_snapshot(ctx, provider_snapshot)
+local function restore_cached_snapshot(bufnr, ctx, provider_snapshot)
   local provider = provider_snapshot.provider
   local p_opts = provider_snapshot.opts
   local branch = ctx.vcs_info and ctx.vcs_info.branch or nil
@@ -270,7 +271,7 @@ local function restore_cached_snapshot(ctx, provider_snapshot)
     return nil
   end
 
-  provider_repository.store(ctx.bufnr or 0, provider, p_opts)
+  provider_repository.store(bufnr, provider, p_opts)
   return {
     status = "ready",
     stale = true,
@@ -395,7 +396,7 @@ function M.refresh(bufnr, opts)
 
   -- Restore from disk cache (stale-while-revalidate).
   if not opts.force then
-    local restored = restore_cached_snapshot(ctx, provider_snapshot)
+    local restored = restore_cached_snapshot(bufnr, ctx, provider_snapshot)
     if restored then
       publish_shared(review_key, restored)
     end

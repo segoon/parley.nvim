@@ -14,21 +14,36 @@ end
 ---@param lines string[]
 ---@param float_cfg parley.FloatConfig
 ---@param source_winid integer
----@param source_line integer
+---@param source_line integer  unused for positioning; retained for API stability
+---@param title string|nil
 ---@return vim.api.keyset.win_config
-function M.make_win_config(lines, float_cfg, source_winid, source_line)
-  return {
+function M.make_win_config(lines, float_cfg, source_winid, source_line, title)
+  local width = window_width(lines, float_cfg.max_width)
+  local height = math.min(float_cfg.max_height, math.max(1, #lines))
+
+  local win_width = vim.api.nvim_win_get_width(source_winid)
+  local win_height = vim.api.nvim_win_get_height(source_winid)
+  width = math.min(width, math.max(12, win_width - 4))
+  height = math.min(height, math.max(1, win_height - 2))
+
+  local config = {
     relative = "win",
     win = source_winid,
-    bufpos = { source_line - 1, 0 },
-    row = 1,
-    col = 0,
+    row = math.max(0, math.floor((win_height - height) / 2)),
+    col = math.max(0, math.floor((win_width - width) / 2)),
     style = "minimal",
     border = float_cfg.border,
-    width = window_width(lines, float_cfg.max_width),
-    height = math.min(float_cfg.max_height, math.max(1, #lines)),
+    width = width,
+    height = height,
     focusable = true,
   }
+
+  if title and title ~= "" then
+    config.title = title
+    config.title_pos = "left"
+  end
+
+  return config
 end
 
 ---@param discussion_winid integer
@@ -110,10 +125,10 @@ end
 ---@param float_cfg parley.FloatConfig
 ---@param source_winid integer
 ---@param source_line integer
----@param opts { hide_input: fun(instance: parley.DiscussionWindowInstance, force: boolean): boolean }
+---@param opts { hide_input: fun(instance: parley.DiscussionWindowInstance, force: boolean): boolean, title?: string }
 ---@return parley.DiscussionWindowInstance
 function M.create_instance(lines, float_cfg, source_winid, source_line, opts)
-  local config = M.make_win_config(lines, float_cfg, source_winid, source_line)
+  local config = M.make_win_config(lines, float_cfg, source_winid, source_line, opts.title)
   local bufnr = vim.api.nvim_create_buf(false, true)
   local winid = vim.api.nvim_open_win(bufnr, true, config)
   local closed = false
@@ -215,6 +230,7 @@ end
 ---@param hide_input fun(instance: parley.DiscussionWindowInstance, force: boolean): boolean,
 ---@param input_height integer,
 ---@param on_cursor_moved fun(bufnr: integer): nil,
+---@param title? string|nil,
 ---@param }
 ---@return parley.DiscussionWindowInstance
 function M.ensure_instance(instances, bufnr, lines, float_cfg, source_winid, source_line, opts)
@@ -222,7 +238,10 @@ function M.ensure_instance(instances, bufnr, lines, float_cfg, source_winid, sou
   if instance then
     instance.source_bufnr = bufnr
     instance.source_winid = source_winid
-    vim.api.nvim_win_set_config(instance.winid, M.make_win_config(lines, float_cfg, source_winid, source_line))
+    vim.api.nvim_win_set_config(
+      instance.winid,
+      M.make_win_config(lines, float_cfg, source_winid, source_line, opts.title)
+    )
     if instance.input_winid and vim.api.nvim_win_is_valid(instance.input_winid) then
       local discussion_cfg = vim.api.nvim_win_get_config(instance.winid)
       vim.api.nvim_win_set_config(
@@ -241,6 +260,7 @@ function M.ensure_instance(instances, bufnr, lines, float_cfg, source_winid, sou
 
   instance = M.create_instance(lines, float_cfg, source_winid, source_line, {
     hide_input = opts.hide_input,
+    title = opts.title,
   })
   instance.source_bufnr = bufnr
   instances[bufnr] = instance

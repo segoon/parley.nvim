@@ -92,19 +92,17 @@ end
 ---@param out string[]
 ---@param ranges table<string, { start_line: integer, end_line: integer }>
 ---@param deps { format_timestamp: fun(timestamp: string): string }
+---@return string
 local function render_discussion(discussion, mapping, out, ranges, deps)
-  local status = discussion.resolved and "resolved" or "unresolved"
-  local header = status
+  local title = discussion.resolved and "resolved" or "unresolved"
   if mapping and mapping.stale then
-    header = header .. " · stale anchor"
+    title = title .. " · stale anchor"
   end
-  out[#out + 1] = header
-  out[#out + 1] = ""
 
   if #discussion.comments == 0 then
     out[#out + 1] = "_No comments in this thread._"
     out[#out + 1] = ""
-    return
+    return title
   end
 
   local by_id = {}
@@ -131,28 +129,30 @@ local function render_discussion(discussion, mapping, out, ranges, deps)
     ranges[comment.id] = { start_line = start_line, end_line = #out }
     out[#out + 1] = ""
   end
+
+  return title
 end
 
 ---@param discussions parley.Discussion[]
 ---@param mappings table<string, parley.anchor.Mapping>
 ---@param deps { format_timestamp: fun(timestamp: string): string }
----@return string[], table<string, { start_line: integer, end_line: integer }>
+---@return string[], table<string, { start_line: integer, end_line: integer }>, string|nil
 function M.render_lines(discussions, mappings, deps)
   local out = {}
   local ranges = {}
 
   local discussion = discussions[1]
   if not discussion then
-    return out, ranges
+    return out, ranges, nil
   end
 
-  render_discussion(discussion, mappings[discussion.id], out, ranges, deps)
+  local title = render_discussion(discussion, mappings[discussion.id], out, ranges, deps)
 
   while #out > 0 and out[#out] == "" do
     table.remove(out)
   end
 
-  return out, ranges
+  return out, ranges, title
 end
 
 return M

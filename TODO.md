@@ -19,6 +19,6 @@ documentation:
 - test on 'all commands/options/highlights are covered'
 - test on valid references
 
-Bugs:
-- multiple buffers with different repositories
+tests:
 - tests isolation (pending callbacks, subscriptions)
+- dependency restrictions: source directory

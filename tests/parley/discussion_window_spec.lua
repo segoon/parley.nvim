@@ -182,8 +182,15 @@ describe("parley.discussion_window", function()
     local lines = vim.api.nvim_buf_get_lines(instance.bufnr, 0, -1, false)
     assert.is_false(vim.tbl_contains(lines, "# Parley Discussion"))
     assert.is_false(vim.tbl_contains(lines, "## Thread 1 · unresolved"))
-    assert.is_not_nil(vim.tbl_contains(lines, "unresolved"))
+    assert.is_false(vim.tbl_contains(lines, "unresolved"))
     assert.is_not_nil(vim.tbl_contains(lines, "Review this nil guard"))
+
+    local cfg = vim.api.nvim_win_get_config(instance.winid)
+    local title_text = type(cfg.title) == "string" and cfg.title
+      or (cfg.title and cfg.title[1] and cfg.title[1][1])
+      or ""
+    assert.is_truthy(title_text:find("unresolved"))
+    assert.equal("left", cfg.title_pos)
   end)
 
   it("notifies and stays closed when the current line has no discussions", function()
@@ -684,18 +691,22 @@ describe("parley.discussion_window", function()
     local instance = discussion_window._instances[bufnr]
 
     vim.api.nvim_set_current_win(instance.winid)
-    vim.api.nvim_win_set_cursor(instance.winid, { 2, 0 })
+    vim.api.nvim_win_set_cursor(instance.winid, { 1, 0 })
     discussion_window.open_current_line(bufnr, { cursor_line = 3 })
 
     local cfg = vim.api.nvim_win_get_config(instance.winid)
     local before = vim.api.nvim_win_get_position(instance.winid)
 
-    vim.api.nvim_win_set_cursor(instance.winid, { 3, 0 })
+    vim.api.nvim_win_set_cursor(instance.winid, { 2, 0 })
     local after = vim.api.nvim_win_get_position(instance.winid)
 
     assert.equals("win", cfg.relative)
     assert.equals(source_winid, cfg.win)
-    assert.same({ 2, 0 }, cfg.bufpos)
+    assert.is_nil(cfg.bufpos)
+    local win_w = vim.api.nvim_win_get_width(source_winid)
+    local win_h = vim.api.nvim_win_get_height(source_winid)
+    assert.equals(math.max(0, math.floor((win_w - cfg.width) / 2)), cfg.col)
+    assert.equals(math.max(0, math.floor((win_h - cfg.height) / 2)), cfg.row)
     assert.same(before, after)
   end)
 

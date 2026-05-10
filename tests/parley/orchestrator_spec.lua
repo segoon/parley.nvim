@@ -745,3 +745,317 @@ describe("parley.services.read refresh_async", function()
     assert.equals(1, #s.provider.calls.detect_pr)
   end)
 end)
+
+-- ---------------------------------------------------------------------------
+-- Two buffers, two repos, two providers
+-- ---------------------------------------------------------------------------
+--
+-- Verifies the per-buffer / per-(provider,owner,repo,branch) isolation
+-- property: when two buffers belong to different repos served by different
+-- providers, their context, provider snapshot, review_key, signs, and view
+-- state must not collide.
+
+describe("parley.services.read multi-repo", function()
+  before_each(function()
+    save_seams()
+    progress_ui_state.clear()
+  end)
+
+  after_each(function()
+    vim.wait(20, function()
+      return false
+    end)
+    restore_seams()
+    registry.reset()
+    progress_ui_state.clear()
+  end)
+
+  --- Two-repo setup. Each bufnr maps to its own path/vcs_info/provider.
+  ---
+  --- @param o {
+  ---   buf_a: integer, path_a: string,
+  ---   buf_b: integer, path_b: string,
+  ---   pr_a: parley.PR, discussions_a: parley.Discussion[],
+  ---   pr_b: parley.PR, discussions_b: parley.Discussion[],
+  --- }
+  local function setup_two_repos(o)
+    local vcs_a = {
+      vcs = "git",
+      root = "/repo-a",
+      branch = "feature-a",
+      remote_url = "git@host-a.example.com:owner-a/repo-a.git",
+    }
+    local vcs_b = {
+      vcs = "git",
+      root = "/repo-b",
+      branch = "feature-b",
+      remote_url = "git@host-b.example.com:owner-b/repo-b.git",
+    }
+
+    buffer_context._get_buf_props = function(bufnr)
+      if bufnr == o.buf_a then
+        return { filetype = "", name = o.path_a, buftype = "" }
+      elseif bufnr == o.buf_b then
+        return { filetype = "", name = o.path_b, buftype = "" }
+      end
+      return { filetype = "", name = "", buftype = "" }
+    end
+    buffer_context._vcs_detect = function(path)
+      if path == o.path_a then
+        return vcs_a
+      elseif path == o.path_b then
+        return vcs_b
+      end
+      return nil
+    end
+
+    anchor._runner = function(_cmd, _cwd)
+      return { code = 0, stdout = "", stderr = "" }
+    end
+
+    local render_calls = {}
+    signs.render = function(bufnr, discussions, mappings, opts)
+      table.insert(render_calls, {
+        bufnr = bufnr,
+        discussions = discussions,
+        mappings = mappings,
+        opts = opts,
+      })
+    end
+    local clear_calls = {}
+    signs.clear = function(bufnr)
+      table.insert(clear_calls, bufnr)
+    end
+
+    local fake_fs = make_fake_fs()
+    cache._fs = fake_fs
+    cache.setup({ cache_dir = "/cache" })
+
+    read_service._notify = function(_msg, _level) end
+    read_service._get_config = function()
+      return SAMPLE_CONFIG
+    end
+
+    async_operation._defer = function(_cb, _timeout) end
+    async_operation._get_config = function()
+      return { progress = { success_timeout = 2500, failed_timeout = 2500 } }
+    end
+
+    -- Reset all per-test state.
+    review_repository._reviews = {}
+    review_repository._views = {}
+    review_repository._bufnr_key = {}
+    review_repository._key_bufnrs = {}
+    review_repository._in_flight = {}
+    review_repository._pending_force = {}
+    review_repository._subscribers = {}
+    context_repository._entries = {}
+    provider_repository._entries = {}
+    read_service._subscriptions = {}
+
+    -- Two providers, two specs. detect() inspects the remote URL.
+    local provider_a = mock_provider.new({
+      pr = o.pr_a,
+      head_sha = "deadbeef",
+      write_context = { number = tonumber(o.pr_a.id), head_sha = "deadbeef" },
+      discussions = o.discussions_a,
+    })
+    provider_a._cache_provider = "host-a"
+
+    local provider_b = mock_provider.new({
+      pr = o.pr_b,
+      head_sha = "deadbeef",
+      write_context = { number = tonumber(o.pr_b.id), head_sha = "deadbeef" },
+      discussions = o.discussions_b,
+    })
+    provider_b._cache_provider = "host-b"
+
+    registry.reset()
+    registry.register({
+      name = "MockHostA",
+      detect = function(vcs)
+        if vcs.remote_url:find("host-a", 1, true) then
+          return { host = "host-a", owner = "owner-a", repo = "repo-a" }
+        end
+        return nil
+      end,
+      factory = function(_opts)
+        return provider_a
+      end,
+    })
+    registry.register({
+      name = "MockHostB",
+      detect = function(vcs)
+        if vcs.remote_url:find("host-b", 1, true) then
+          return { host = "host-b", owner = "owner-b", repo = "repo-b" }
+        end
+        return nil
+      end,
+      factory = function(_opts)
+        return provider_b
+      end,
+    })
+
+    return {
+      provider_a = provider_a,
+      provider_b = provider_b,
+      render_calls = render_calls,
+      clear_calls = clear_calls,
+    }
+  end
+
+  it("isolates state across two buffers in different repos with different providers", function()
+    local pr_a = model.new_pr({
+      id = "10",
+      title = "A",
+      state = "open",
+      base_branch = "main",
+      head_branch = "feature-a",
+      author = "alice",
+      url = "https://host-a.example.com/owner-a/repo-a/pull/10",
+      review_status = "pending",
+    })
+    local pr_b = model.new_pr({
+      id = "20",
+      title = "B",
+      state = "open",
+      base_branch = "main",
+      head_branch = "feature-b",
+      author = "bob",
+      url = "https://host-b.example.com/owner-b/repo-b/pull/20",
+      review_status = "pending",
+    })
+
+    local s = setup_two_repos({
+      buf_a = 101,
+      path_a = "/repo-a/src/foo.lua",
+      buf_b = 202,
+      path_b = "/repo-b/lib/bar.lua",
+      pr_a = pr_a,
+      discussions_a = {
+        make_discussion(1, "src/foo.lua", 10, "from A"),
+      },
+      pr_b = pr_b,
+      discussions_b = {
+        make_discussion(2, "lib/bar.lua", 5, "from B"),
+      },
+    })
+
+    read_service.refresh_async(101)
+    read_service.refresh_async(202)
+
+    assert.is_true(vim.wait(500, function()
+      return #s.provider_a.calls.detect_pr >= 1 and #s.provider_b.calls.detect_pr >= 1 and #s.render_calls >= 2
+    end))
+
+    -- Each provider was hit for its own repo only.
+    assert.equals(1, #s.provider_a.calls.detect_pr)
+    assert.equals(1, #s.provider_b.calls.detect_pr)
+    assert.equals("/repo-a", s.provider_a.calls.detect_pr[1].repo_root)
+    assert.equals("feature-a", s.provider_a.calls.detect_pr[1].branch)
+    assert.equals("/repo-b", s.provider_b.calls.detect_pr[1].repo_root)
+    assert.equals("feature-b", s.provider_b.calls.detect_pr[1].branch)
+
+    -- Two render calls, one per buffer, each with its own discussions.
+    local rc_a, rc_b
+    for _, rc in ipairs(s.render_calls) do
+      if rc.bufnr == 101 then
+        rc_a = rc
+      elseif rc.bufnr == 202 then
+        rc_b = rc
+      end
+    end
+    assert.is_not_nil(rc_a, "expected a render for bufnr 101")
+    assert.is_not_nil(rc_b, "expected a render for bufnr 202")
+    assert.equals(1, #rc_a.discussions)
+    assert.equals("1", rc_a.discussions[1].id)
+    assert.equals(1, #rc_b.discussions)
+    assert.equals("2", rc_b.discussions[1].id)
+
+    -- Per-buffer provider snapshots.
+    local snap_a = provider_repository.get(101)
+    local snap_b = provider_repository.get(202)
+    assert.is_not_nil(snap_a)
+    assert.is_not_nil(snap_b)
+    assert.equals("host-a", snap_a.provider._cache_provider)
+    assert.equals("host-b", snap_b.provider._cache_provider)
+    assert.are_not.equal(snap_a.provider, snap_b.provider)
+    assert.equals("owner-a", snap_a.opts.owner)
+    assert.equals("owner-b", snap_b.opts.owner)
+
+    -- Composite review keys are distinct and both present.
+    local key_a = "host-a/owner-a/repo-a/feature-a"
+    local key_b = "host-b/owner-b/repo-b/feature-b"
+    assert.is_not_nil(review_repository._reviews[key_a])
+    assert.is_not_nil(review_repository._reviews[key_b])
+    assert.equals(key_a, review_repository._bufnr_key[101])
+    assert.equals(key_b, review_repository._bufnr_key[202])
+
+    -- Reverse index: each key holds exactly its own bufnr.
+    assert.is_true(review_repository._key_bufnrs[key_a][101])
+    assert.is_nil(review_repository._key_bufnrs[key_a][202])
+    assert.is_true(review_repository._key_bufnrs[key_b][202])
+    assert.is_nil(review_repository._key_bufnrs[key_b][101])
+
+    -- Per-buffer state surfaces the right PR.
+    local state_a = read_service.get_buffer_state(101)
+    local state_b = read_service.get_buffer_state(202)
+    assert.equals("10", state_a.pr.id)
+    assert.equals("20", state_b.pr.id)
+  end)
+
+  it("a refresh on one repo does not republish into the other repo's buffers", function()
+    local pr_a = model.new_pr({
+      id = "10",
+      title = "A",
+      state = "open",
+      base_branch = "main",
+      head_branch = "feature-a",
+      author = "alice",
+      url = "https://host-a.example.com/owner-a/repo-a/pull/10",
+      review_status = "pending",
+    })
+    local pr_b = model.new_pr({
+      id = "20",
+      title = "B",
+      state = "open",
+      base_branch = "main",
+      head_branch = "feature-b",
+      author = "bob",
+      url = "https://host-b.example.com/owner-b/repo-b/pull/20",
+      review_status = "pending",
+    })
+
+    local s = setup_two_repos({
+      buf_a = 101,
+      path_a = "/repo-a/src/foo.lua",
+      buf_b = 202,
+      path_b = "/repo-b/lib/bar.lua",
+      pr_a = pr_a,
+      discussions_a = { make_discussion(1, "src/foo.lua", 10, "from A") },
+      pr_b = pr_b,
+      discussions_b = { make_discussion(2, "lib/bar.lua", 5, "from B") },
+    })
+
+    read_service.refresh_async(101)
+    read_service.refresh_async(202)
+    assert.is_true(vim.wait(500, function()
+      return #s.render_calls >= 2
+    end))
+
+    -- Drop renders observed during the initial fetch, then force a refresh
+    -- on repo A only and verify no extra render lands on bufnr 202.
+    local renders_before = #s.render_calls
+    read_service.refresh_async(101, { force = true })
+    assert.is_true(vim.wait(500, function()
+      return #s.provider_a.calls.detect_pr >= 2
+    end))
+
+    assert.equals(2, #s.provider_a.calls.detect_pr, "repo A re-fetched")
+    assert.equals(1, #s.provider_b.calls.detect_pr, "repo B should NOT re-fetch")
+
+    for i = renders_before + 1, #s.render_calls do
+      assert.equals(101, s.render_calls[i].bufnr, "only bufnr 101 should re-render")
+    end
+  end)
+end)

@@ -73,7 +73,13 @@ local function open_selection(entry)
   local bufnr = M._current_buf()
   require("parley.services.read").refresh_async(bufnr, { force = true, notify_errors = true }, function(snapshot)
     local mapping = snapshot and snapshot.mappings and snapshot.mappings[discussion.id] or nil
-    M._set_cursor((mapping and mapping.local_line) or discussion.line)
+    local local_line = mapping and mapping.local_line or nil
+    if local_line then
+      local line_count = vim.api.nvim_buf_line_count(bufnr)
+      if line_count >= 1 then
+        M._set_cursor(math.max(1, math.min(local_line, line_count)))
+      end
+    end
     require("parley.discussion_window").open_discussion(bufnr, discussion.id)
   end)
 end
