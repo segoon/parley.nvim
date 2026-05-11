@@ -4,7 +4,6 @@ features:
 
 features (2):
 - `X-RateLimit-*`, 429, 403 from gh
-- arcanum provider
 - diffview.nvim integration
 - consistent opts for setup()
 

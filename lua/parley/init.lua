@@ -135,7 +135,7 @@ local PARLEY_GROUPS = {
   nav = { "buf-next", "buf-prev", "review-next", "review-prev" },
 }
 
-local PARLEY_TOP_LEVEL = { "discussion", "comment", "nav", "refresh" }
+local PARLEY_TOP_LEVEL = { "discussion", "comment", "nav", "quickfix", "refresh" }
 
 --- @param items string[]
 --- @param prefix string
@@ -194,6 +194,14 @@ function M._dispatch_parley(fargs, bufnr, cmd_opts)
 
   if group == "refresh" then
     read_service.refresh_async(bufnr, { force = true, progress = true })
+    return
+  end
+
+  if group == "quickfix" then
+    if action ~= nil and action ~= "" then
+      error("parley: quickfix does not accept subcommands", 0)
+    end
+    require("parley.quickfix").open(bufnr)
     return
   end
 

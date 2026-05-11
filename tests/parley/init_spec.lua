@@ -10,7 +10,7 @@ local progress_popup = require("parley.progress_popup")
 describe("parley command completion", function()
   it("returns top-level groups for the first argument", function()
     local items = parley._complete_parley("", ":Parley ")
-    assert.same({ "discussion", "comment", "nav", "refresh" }, items)
+    assert.same({ "discussion", "comment", "nav", "quickfix", "refresh" }, items)
   end)
 
   it("returns discussion actions for the second argument", function()
@@ -197,17 +197,20 @@ end)
 describe("parley command dispatch", function()
   local saved_discussion
   local saved_nav
+  local saved_quickfix
   local saved_write
 
   before_each(function()
     saved_discussion = package.loaded["parley.discussion_window"]
     saved_nav = package.loaded["parley.nav"]
+    saved_quickfix = package.loaded["parley.quickfix"]
     saved_write = package.loaded["parley.services.write"]
   end)
 
   after_each(function()
     package.loaded["parley.discussion_window"] = saved_discussion
     package.loaded["parley.nav"] = saved_nav
+    package.loaded["parley.quickfix"] = saved_quickfix
     package.loaded["parley.services.write"] = saved_write
   end)
 
@@ -298,6 +301,19 @@ describe("parley command dispatch", function()
     }, calls)
   end)
 
+  it("dispatches quickfix without subcommands", function()
+    local calls = {}
+    package.loaded["parley.quickfix"] = {
+      open = function(bufnr)
+        calls[#calls + 1] = bufnr
+      end,
+    }
+
+    parley._dispatch_parley({ "quickfix" }, 31)
+
+    assert.same({ 31 }, calls)
+  end)
+
   it("errors on an unknown group", function()
     assert.has_error(function()
       parley._dispatch_parley({ "nope", "open" }, 1)
@@ -338,5 +354,11 @@ describe("parley command dispatch", function()
     assert.has_error(function()
       parley._dispatch_parley({ "nav" }, 1)
     end, "parley: expected a nav action")
+  end)
+
+  it("errors when quickfix has a subcommand", function()
+    assert.has_error(function()
+      parley._dispatch_parley({ "quickfix", "nope" }, 1)
+    end, "parley: quickfix does not accept subcommands")
   end)
 end)

@@ -311,6 +311,8 @@ describe("parley.services.read refresh", function()
     assert.is_not_nil(state)
     assert.equals(2, #state.discussions)
     assert.equals(10, state.mappings["1"].local_line)
+    assert.equals(3, vim.tbl_count(state.all_mappings or {}))
+    assert.equals(5, state.all_mappings["3"].local_line)
   end)
 
   it("lists discussions for the current file or the whole PR", function()

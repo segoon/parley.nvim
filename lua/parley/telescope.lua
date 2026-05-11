@@ -1,5 +1,7 @@
 --- parley.telescope — optional Telescope pickers for Parley discussions.
 
+local entries = require("parley.discussion_entries")
+
 local M = {}
 
 M._notify = function(msg, level)
@@ -32,31 +34,20 @@ local function load_telescope()
   return pickers, finders, config.values, actions, action_state
 end
 
---- @param text string
---- @return string
-local function snippet(text)
-  text = (text or ""):gsub("%s+", " ")
-  if #text <= 60 then
-    return text
-  end
-  return text:sub(1, 57) .. "..."
-end
-
---- @param root string
+--- @param state table
 --- @param discussion parley.Discussion
 --- @return table
-local function make_entry(root, discussion)
-  local first_comment = discussion.comments and discussion.comments[1] or nil
-  local preview = first_comment and snippet(first_comment.body.text) or ""
-  local status = discussion.resolved and "resolved" or "unresolved"
-  local display = string.format("%s:%d [%s] %s", discussion.file, discussion.line, status, preview)
+local function make_entry(state, discussion)
+  local location = entries.location(discussion, state.vcs_info.root, state.all_mappings)
+  local display = string.format("%s:%d [%s] %s", discussion.file, location.line, location.status, location.preview)
   return {
     value = {
       discussion = discussion,
-      path = root .. "/" .. discussion.file,
+      path = location.path,
+      line = location.line,
     },
     display = display,
-    ordinal = table.concat({ discussion.file, tostring(discussion.line), status, preview }, " "),
+    ordinal = table.concat({ discussion.file, tostring(location.line), location.status, location.preview }, " "),
   }
 end
 
@@ -65,18 +56,27 @@ local function open_selection(entry)
   local value = entry and (entry.value or entry) or nil
   local discussion = value and value.discussion or nil
   local path = value and value.path or nil
+  local line = value and value.line or nil
   if not discussion or not path then
     return
   end
 
   M._edit(path)
   local bufnr = M._current_buf()
+  if line then
+    local line_count = vim.api.nvim_buf_line_count(bufnr)
+    if line_count >= 1 then
+      M._set_cursor(math.max(1, math.min(line, line_count)))
+    end
+  end
   require("parley.services.read").refresh_async(bufnr, { force = true, notify_errors = true }, function(snapshot)
-    local mapping = snapshot and snapshot.mappings and snapshot.mappings[discussion.id] or nil
-    local local_line = mapping and mapping.local_line or nil
-    if local_line then
+    if not line then
+      local mapping = snapshot and snapshot.all_mappings and snapshot.all_mappings[discussion.id]
+        or snapshot and snapshot.mappings and snapshot.mappings[discussion.id]
+        or nil
+      local local_line = mapping and mapping.local_line or nil
       local line_count = vim.api.nvim_buf_line_count(bufnr)
-      if line_count >= 1 then
+      if local_line and line_count >= 1 then
         M._set_cursor(math.max(1, math.min(local_line, line_count)))
       end
     end
@@ -105,15 +105,13 @@ local function open_picker(scope, prompt_title, opts)
   end
 
   local discussions = read_service.list_discussions(bufnr, { scope = scope })
-  local root = state.vcs_info.root
-
   pickers
     .new(opts, {
       prompt_title = prompt_title,
       finder = finders.new_table({
         results = discussions,
         entry_maker = function(discussion)
-          return make_entry(root, discussion)
+          return make_entry(state, discussion)
         end,
       }),
       sorter = conf.generic_sorter(opts),

@@ -26,6 +26,7 @@ local M = {}
 ---   review: parley.DetectedReview|nil,
 ---   pr: parley.PR|nil,
 ---   all_discussions: parley.Discussion[],
+---   all_mappings: table<string, parley.anchor.Mapping>,
 ---   summary: { unresolved_count: integer },
 ---   error: string|nil,
 ---   head_sha: string,
@@ -151,6 +152,7 @@ local function composite(shared, view)
     pr = shared.pr,
     discussions = view.discussions,
     all_discussions = shared.all_discussions,
+    all_mappings = shared.all_mappings,
     mappings = view.mappings,
     summary = shared.summary,
     error = shared.error,
@@ -169,10 +171,16 @@ local function compute_view(bufnr, shared)
     return { discussions = {}, mappings = {} }
   end
   local file_discussions = filter_for_file(shared.all_discussions or {}, rel_path)
-  local vcs_root = ctx.vcs_info and ctx.vcs_info.root or ""
+  local mappings = {}
+  for _, discussion in ipairs(file_discussions) do
+    local mapping = shared.all_mappings and shared.all_mappings[discussion.id] or nil
+    if mapping then
+      mappings[discussion.id] = mapping
+    end
+  end
   return {
     discussions = file_discussions,
-    mappings = anchor.map_discussions(vcs_root, shared.head_sha or "", file_discussions),
+    mappings = mappings,
   }
 end
 
@@ -278,6 +286,7 @@ local function restore_cached_snapshot(bufnr, ctx, provider_snapshot)
     review = review,
     pr = pr,
     all_discussions = discussions_entry.data,
+    all_mappings = anchor.map_discussions(ctx.vcs_info.root, review.head_sha or "", discussions_entry.data),
     summary = build_summary(discussions_entry.data),
     error = nil,
     head_sha = review.head_sha or "",
@@ -416,6 +425,7 @@ function M.refresh(bufnr, opts)
     })
 
     local discussions = provider:fetch_discussions(review)
+    local all_mappings = anchor.map_discussions(ctx.vcs_info.root, review.head_sha or "", discussions)
     cache.set_async(discussions_cache_key(provider, provider_opts, review.pr.id), discussions)
     provider_repository.store(bufnr, provider, provider_opts)
 
@@ -425,6 +435,7 @@ function M.refresh(bufnr, opts)
       review = review,
       pr = review.pr,
       all_discussions = discussions,
+      all_mappings = all_mappings,
       summary = build_summary(discussions),
       error = nil,
       head_sha = review.head_sha or "",
@@ -448,6 +459,7 @@ function M.refresh(bufnr, opts)
         review = nil,
         pr = nil,
         all_discussions = {},
+        all_mappings = {},
         summary = { unresolved_count = 0 },
         error = tostring(result),
         head_sha = "",
@@ -538,6 +550,7 @@ function M._seed(bufnr, snapshot, review_key)
     review = snapshot.review,
     pr = snapshot.pr or (snapshot.review and snapshot.review.pr or nil),
     all_discussions = snapshot.all_discussions or {},
+    all_mappings = snapshot.all_mappings or snapshot.mappings or {},
     summary = snapshot.summary or build_summary(snapshot.all_discussions or {}),
     error = snapshot.error,
     head_sha = snapshot.head_sha or "",

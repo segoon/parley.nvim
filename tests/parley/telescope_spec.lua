@@ -149,6 +149,9 @@ describe("parley Telescope integration", function()
           pr = { id = "42", title = "Add feature" },
           vcs_info = { root = "/repo" },
           rel_path = "src/foo.lua",
+          all_mappings = {
+            d2 = { local_line = 7, stale = false, confidence = 1.0 },
+          },
         }
       end,
       list_discussions = function()
@@ -266,7 +269,7 @@ describe("parley Telescope integration", function()
   end)
 
   it("opens the float without moving the cursor when no mapping is available", function()
-    local h = setup_jump_harness({}, 30)
+    local h = setup_jump_harness({ all_mappings = {} }, 30)
 
     h.run()
 
@@ -275,16 +278,110 @@ describe("parley Telescope integration", function()
   end)
 
   it("clamps the cursor to the buffer's last line when the mapping exceeds it", function()
-    local h = setup_jump_harness({
-      mappings = {
-        d2 = { local_line = 999, stale = false, confidence = 1.0 },
+    local saved_telescope = package.loaded["parley.telescope"]
+    package.loaded["parley.telescope"] = nil
+
+    local selected_entry
+    local select_default
+    local edits = {}
+    local cursors = {}
+    local refreshed = {}
+    local opened = {}
+
+    package.loaded["parley.services.read"] = {
+      get_buffer_state = function(_bufnr)
+        return {
+          pr = { id = "42", title = "Add feature" },
+          vcs_info = { root = "/repo" },
+          rel_path = "src/foo.lua",
+          all_mappings = {
+            d2 = { local_line = 999, stale = false, confidence = 1.0 },
+          },
+        }
+      end,
+      list_discussions = function()
+        return { make_discussion("d2", "src/bar.lua", 20, "bar") }
+      end,
+      refresh_async = function(bufnr, opts, callback)
+        refreshed[#refreshed + 1] = { bufnr = bufnr, opts = opts }
+        if callback then
+          callback({})
+        end
+      end,
+    }
+    package.loaded["parley.discussion_window"] = {
+      open_discussion = function(bufnr, discussion_id)
+        opened[#opened + 1] = { bufnr = bufnr, discussion_id = discussion_id }
+      end,
+    }
+    package.loaded["telescope.finders"] = {
+      new_table = function(spec)
+        return spec
+      end,
+    }
+    package.loaded["telescope.config"] = {
+      values = {
+        generic_sorter = function(_opts)
+          return "sorter"
+        end,
       },
-    }, 8)
+    }
+    package.loaded["telescope.actions"] = {
+      close = function(_prompt_bufnr) end,
+      select_default = {
+        replace = function(_, fn)
+          select_default = fn
+        end,
+      },
+    }
+    package.loaded["telescope.actions.state"] = {
+      get_selected_entry = function()
+        return selected_entry
+      end,
+    }
+    package.loaded["telescope.pickers"] = {
+      new = function(_opts, spec)
+        return {
+          find = function()
+            spec.attach_mappings(91)
+          end,
+        }
+      end,
+    }
 
-    h.run()
+    local bufnr = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_set_current_buf(bufnr)
+    local telescope_integration = require("parley.telescope")
+    telescope_integration._edit = function(path)
+      edits[#edits + 1] = path
+      local target = vim.api.nvim_create_buf(false, true)
+      local filler = {}
+      for i = 1, 8 do
+        filler[i] = "line " .. i
+      end
+      vim.api.nvim_buf_set_lines(target, 0, -1, false, filler)
+      vim.api.nvim_set_current_buf(target)
+    end
+    telescope_integration._set_cursor = function(line)
+      cursors[#cursors + 1] = line
+    end
 
-    assert.same({ 8 }, h.cursors)
-    assert.equals("d2", h.opened[1].discussion_id)
+    telescope_integration.discussions()
+    selected_entry = {
+      value = {
+        discussion = make_discussion("d2", "src/bar.lua", 20, "bar"),
+        path = "/repo/src/bar.lua",
+        line = 999,
+      },
+    }
+    select_default()
+
+    assert.same({ "/repo/src/bar.lua" }, edits)
+    assert.same({ 8 }, cursors)
+    assert.equals(1, #refreshed)
+    assert.equals("d2", opened[1].discussion_id)
+
+    package.loaded["parley.telescope"] = saved_telescope
   end)
 
   it("registers Telescope extension shims for both picker names", function()

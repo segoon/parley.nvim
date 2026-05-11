@@ -145,6 +145,11 @@ All Parley commands support tab completion.
     Jump to the previous comment across all files in the review.
     Mirror of `:Parley nav review-next`. Wraps around at the start.
 
+:Parley quickfix                                     *:Parley-quickfix*
+    Fill the quickfix list with all discussion locations from the active
+    review and open the quickfix window. Entries use review-wide anchor
+    mappings when available, with PR line numbers as fallback.
+
 ==============================================================================
 5. KEYMAPS                                           *parley-keymaps*
 
