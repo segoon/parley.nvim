@@ -717,10 +717,20 @@ end)
 describe("nav from discussion float buffer", function()
   local saved_discussion_window
   local saved_window_helpers
+  local saved_schedule
 
-  --- Stub both modules that nav uses when called from a float:
-  ---   • discussion_window.resolve_source_bufnr  — maps float → source bufnr
-  ---   • discussion_window.window.resolve_source_winid — maps source bufnr → winid
+  -- Spies populated by stub_float.
+  local close_calls = {}
+  local open_calls = {}
+
+  --- Stub the modules nav uses when called from a float:
+  ---   • discussion_window.resolve_source_bufnr — maps float → source bufnr
+  ---   • discussion_window.close               — spy: records (bufnr)
+  ---   • discussion_window.open_current_line   — spy: records (bufnr, opts)
+  ---   • discussion_window.window.resolve_source_winid — returns source winid
+  ---
+  --- vim.schedule is replaced with an immediate call so the deferred reopen
+  --- runs synchronously and is observable within the same test.
   ---
   --- `source_winid` defaults to 0 (current window) when not provided.
   ---@param float_bufnr integer
@@ -728,6 +738,8 @@ describe("nav from discussion float buffer", function()
   ---@param source_winid? integer
   local function stub_float(float_bufnr, source_bufnr, source_winid)
     local winid = source_winid or 0
+    close_calls = {}
+    open_calls = {}
 
     saved_discussion_window = package.loaded["parley.discussion_window"]
     package.loaded["parley.discussion_window"] = {
@@ -737,6 +749,12 @@ describe("nav from discussion float buffer", function()
         end
         return bufnr
       end,
+      close = function(bufnr)
+        close_calls[#close_calls + 1] = bufnr
+      end,
+      open_current_line = function(bufnr, opts)
+        open_calls[#open_calls + 1] = { bufnr = bufnr, opts = opts }
+      end,
     }
 
     saved_window_helpers = package.loaded["parley.discussion_window.window"]
@@ -745,11 +763,21 @@ describe("nav from discussion float buffer", function()
         return winid
       end,
     }
+
+    -- Execute scheduled callbacks immediately so reopen is testable.
+    saved_schedule = vim.schedule
+    vim.schedule = function(fn)
+      fn()
+    end
   end
 
   local function restore_stubs()
     package.loaded["parley.discussion_window"] = saved_discussion_window
     package.loaded["parley.discussion_window.window"] = saved_window_helpers
+    if saved_schedule then
+      vim.schedule = saved_schedule
+      saved_schedule = nil
+    end
   end
 
   before_each(install_notify_spy)
@@ -759,25 +787,30 @@ describe("nav from discussion float buffer", function()
     teardown_review_stubs()
   end)
 
-  it("buf_next resolves float bufnr to source and sets cursor in source window", function()
+  it("buf_next: closes float, moves cursor, reopens discussion", function()
     local source_bufnr = scratch(10)
     place_mark(source_bufnr, 3) -- row 3 → line 4
     place_mark(source_bufnr, 7) -- row 7 → line 8
 
-    -- scratch() made source_bufnr current, so window 0 shows it.
-    -- The float is a separate scratch buf — its line count is 1.
     local float_bufnr = vim.api.nvim_create_buf(false, true)
     stub_float(float_bufnr, source_bufnr) -- source_winid = 0 (current)
 
-    set_cursor(1) -- cursor in source window, above all marks
+    set_cursor(1) -- above all marks
 
     nav.buf_next(float_bufnr)
 
     assert.equal(4, cursor_row()) -- moved to row 3 → line 4
     assert.equal(0, #notify_calls)
+    -- close was called with the source bufnr
+    assert.equal(1, #close_calls)
+    assert.equal(source_bufnr, close_calls[1])
+    -- open_current_line was called with the target line
+    assert.equal(1, #open_calls)
+    assert.equal(source_bufnr, open_calls[1].bufnr)
+    assert.equal(4, open_calls[1].opts.cursor_line)
   end)
 
-  it("buf_prev resolves float bufnr to source and sets cursor in source window", function()
+  it("buf_prev: closes float, moves cursor, reopens discussion", function()
     local source_bufnr = scratch(10)
     place_mark(source_bufnr, 2) -- row 2 → line 3
     place_mark(source_bufnr, 6) -- row 6 → line 7
@@ -791,9 +824,14 @@ describe("nav from discussion float buffer", function()
 
     assert.equal(7, cursor_row()) -- moved to row 6 → line 7
     assert.equal(0, #notify_calls)
+    assert.equal(1, #close_calls)
+    assert.equal(source_bufnr, close_calls[1])
+    assert.equal(1, #open_calls)
+    assert.equal(source_bufnr, open_calls[1].bufnr)
+    assert.equal(7, open_calls[1].opts.cursor_line)
   end)
 
-  it("review_next resolves float bufnr to source and sets cursor in source window", function()
+  it("review_next: closes float, moves cursor, reopens discussion", function()
     local source_bufnr = scratch(20)
     local discussions = {
       { id = "1", file = "a.lua", line = 3, resolved = false, comments = {} },
@@ -820,10 +858,15 @@ describe("nav from discussion float buffer", function()
     -- cur_idx=0 → target=(0%2)+1=1 → disc[1] = line 3
     assert.equal(3, cursor_row())
     assert.equal(0, #notify_calls)
+    assert.equal(1, #close_calls)
+    assert.equal(source_bufnr, close_calls[1])
+    assert.equal(1, #open_calls)
+    assert.equal(source_bufnr, open_calls[1].bufnr)
+    assert.equal(3, open_calls[1].opts.cursor_line)
     restore_cmd()
   end)
 
-  it("review_prev resolves float bufnr to source and sets cursor in source window", function()
+  it("review_prev: closes float, moves cursor, reopens discussion", function()
     local source_bufnr = scratch(20)
     local discussions = {
       { id = "1", file = "a.lua", line = 3, resolved = false, comments = {} },
@@ -850,6 +893,28 @@ describe("nav from discussion float buffer", function()
     -- cur_idx=2 > 1 → target=1 → disc[1] = line 3
     assert.equal(3, cursor_row())
     assert.equal(0, #notify_calls)
+    assert.equal(1, #close_calls)
+    assert.equal(source_bufnr, close_calls[1])
+    assert.equal(1, #open_calls)
+    assert.equal(source_bufnr, open_calls[1].bufnr)
+    assert.equal(3, open_calls[1].opts.cursor_line)
     restore_cmd()
+  end)
+
+  it("buf_next from source buffer does not close or reopen", function()
+    -- When called directly from the source buffer (not a float), the
+    -- close/reopen path must NOT be triggered.
+    local source_bufnr = scratch(10)
+    place_mark(source_bufnr, 4) -- row 4 → line 5
+
+    -- Stub with matching float_bufnr == source_bufnr so original == resolved.
+    stub_float(source_bufnr, source_bufnr)
+    set_cursor(1)
+
+    nav.buf_next(source_bufnr)
+
+    assert.equal(5, cursor_row())
+    assert.equal(0, #close_calls)
+    assert.equal(0, #open_calls)
   end)
 end)
