@@ -2,6 +2,12 @@
 
 local M = {}
 
+--- @param timestamp string
+--- @return string
+local function normalize_timestamp(timestamp)
+  return (timestamp:gsub("^(%d%d%d%d%-%d%d%-%d%dT%d%d:%d%d:%d%d)%.%d+(Z)$", "%1%2"))
+end
+
 --- @param seconds integer
 --- @param unit string
 --- @return string
@@ -27,11 +33,12 @@ end
 ---}
 ---@return string
 function M.format(timestamp, hooks)
-  local epoch = hooks.strptime("%Y-%m-%dT%H:%M:%SZ", timestamp)
-  if not epoch then
+  local normalized = normalize_timestamp(timestamp)
+  local epoch = hooks.strptime("%Y-%m-%dT%H:%M:%SZ", normalized)
+  if not epoch or epoch <= 0 then
     return timestamp
   end
-  if timestamp:sub(-1) == "Z" then
+  if normalized:sub(-1) == "Z" then
     local offset = hooks.utc_offset and hooks.utc_offset(epoch) or M.utc_offset(epoch)
     epoch = epoch + offset
   end
