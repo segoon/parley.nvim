@@ -706,3 +706,139 @@ describe("nav.review_prev", function()
     assert.equal(0, #notify_calls)
   end)
 end)
+
+-- ---------------------------------------------------------------------------
+-- Navigation from discussion float buffer
+-- ---------------------------------------------------------------------------
+-- When any nav function is called with the bufnr of a discussion float (or its
+-- input pane), resolve_source_bufnr must map it back to the owning source
+-- buffer so that extmarks / review context are found correctly.
+
+describe("nav from discussion float buffer", function()
+  local saved_discussion_window
+
+  --- Install a stub for discussion_window.resolve_source_bufnr so we can
+  --- simulate the float→source mapping without actually opening any window.
+  ---@param float_bufnr integer
+  ---@param source_bufnr integer
+  local function stub_resolve(float_bufnr, source_bufnr)
+    saved_discussion_window = package.loaded["parley.discussion_window"]
+    package.loaded["parley.discussion_window"] = {
+      resolve_source_bufnr = function(bufnr)
+        if bufnr == float_bufnr then
+          return source_bufnr
+        end
+        return bufnr
+      end,
+    }
+  end
+
+  local function restore_resolve()
+    package.loaded["parley.discussion_window"] = saved_discussion_window
+  end
+
+  before_each(install_notify_spy)
+  after_each(function()
+    restore_notify()
+    restore_resolve()
+    teardown_review_stubs()
+  end)
+
+  it("buf_next resolves float bufnr to source and finds marks", function()
+    local source_bufnr = scratch(10)
+    place_mark(source_bufnr, 3) -- line 4
+    place_mark(source_bufnr, 7) -- line 8
+
+    -- Simulate a float buffer that resolve_source_bufnr maps to source_bufnr.
+    local float_bufnr = vim.api.nvim_create_buf(false, true)
+    stub_resolve(float_bufnr, source_bufnr)
+
+    -- Cursor must be in a window showing source_bufnr for nvim_win_set_cursor to work.
+    vim.api.nvim_set_current_buf(source_bufnr)
+    set_cursor(1) -- above all marks
+
+    nav.buf_next(float_bufnr)
+
+    assert.equal(4, cursor_row()) -- jumped to row 3 → line 4
+    assert.equal(0, #notify_calls)
+  end)
+
+  it("buf_prev resolves float bufnr to source and finds marks", function()
+    local source_bufnr = scratch(10)
+    place_mark(source_bufnr, 2) -- line 3
+    place_mark(source_bufnr, 6) -- line 7
+
+    local float_bufnr = vim.api.nvim_create_buf(false, true)
+    stub_resolve(float_bufnr, source_bufnr)
+
+    vim.api.nvim_set_current_buf(source_bufnr)
+    set_cursor(10) -- below all marks
+
+    nav.buf_prev(float_bufnr)
+
+    assert.equal(7, cursor_row()) -- jumped to row 6 → line 7
+    assert.equal(0, #notify_calls)
+  end)
+
+  it("review_next resolves float bufnr to source and navigates", function()
+    local source_bufnr = scratch(20)
+    local discussions = {
+      { id = "1", file = "a.lua", line = 3, resolved = false, comments = {} },
+      { id = "2", file = "a.lua", line = 10, resolved = false, comments = {} },
+    }
+    local mappings = {
+      ["1"] = { local_line = 3 },
+      ["2"] = { local_line = 10 },
+    }
+    setup_review_stubs(
+      { rel_path = "a.lua", vcs_info = { root = "/repo" } },
+      { [source_bufnr] = { mappings = mappings } },
+      discussions
+    )
+
+    local float_bufnr = vim.api.nvim_create_buf(false, true)
+    stub_resolve(float_bufnr, source_bufnr)
+
+    install_cmd_spy()
+    vim.api.nvim_set_current_buf(source_bufnr)
+    set_cursor(1) -- above both discussions; _current_index = 0
+
+    nav.review_next(float_bufnr)
+
+    -- cur_idx=0 → target=(0%2)+1=1 → disc[1] = line 3
+    assert.equal(3, cursor_row())
+    assert.equal(0, #notify_calls)
+    restore_cmd()
+  end)
+
+  it("review_prev resolves float bufnr to source and navigates", function()
+    local source_bufnr = scratch(20)
+    local discussions = {
+      { id = "1", file = "a.lua", line = 3, resolved = false, comments = {} },
+      { id = "2", file = "a.lua", line = 10, resolved = false, comments = {} },
+    }
+    local mappings = {
+      ["1"] = { local_line = 3 },
+      ["2"] = { local_line = 10 },
+    }
+    setup_review_stubs(
+      { rel_path = "a.lua", vcs_info = { root = "/repo" } },
+      { [source_bufnr] = { mappings = mappings } },
+      discussions
+    )
+
+    local float_bufnr = vim.api.nvim_create_buf(false, true)
+    stub_resolve(float_bufnr, source_bufnr)
+
+    install_cmd_spy()
+    vim.api.nvim_set_current_buf(source_bufnr)
+    set_cursor(10) -- on disc 2; cur_idx = 2
+
+    nav.review_prev(float_bufnr)
+
+    -- cur_idx=2 > 1 → target=1 → disc[1] = line 3
+    assert.equal(3, cursor_row())
+    assert.equal(0, #notify_calls)
+    restore_cmd()
+  end)
+end)

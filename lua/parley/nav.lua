@@ -109,6 +109,9 @@ end
 --- @param bufnr integer  Buffer to navigate within (usually the current buffer)
 function M.buf_next(bufnr)
   bufnr = require("parley.discussion_window").resolve_source_bufnr(bufnr)
+  local window_helpers = require("parley.discussion_window.window")
+  local winid = window_helpers.resolve_source_winid(bufnr, nil) or 0
+
   local rows = M._unique_rows(bufnr)
 
   if #rows == 0 then
@@ -117,7 +120,7 @@ function M.buf_next(bufnr)
   end
 
   -- Current cursor row, 0-indexed.
-  local cursor = vim.api.nvim_win_get_cursor(0)[1] - 1
+  local cursor = vim.api.nvim_win_get_cursor(winid)[1] - 1
 
   -- Find the first row strictly greater than the cursor.
   local target = nil
@@ -133,7 +136,7 @@ function M.buf_next(bufnr)
     target = rows[1]
   end
 
-  vim.api.nvim_win_set_cursor(0, { target + 1, 0 })
+  vim.api.nvim_win_set_cursor(winid, { target + 1, 0 })
 end
 
 --- Jump to the previous commented line before the cursor in the current buffer.
@@ -149,6 +152,9 @@ end
 --- @param bufnr integer  Buffer to navigate within (usually the current buffer)
 function M.buf_prev(bufnr)
   bufnr = require("parley.discussion_window").resolve_source_bufnr(bufnr)
+  local window_helpers = require("parley.discussion_window.window")
+  local winid = window_helpers.resolve_source_winid(bufnr, nil) or 0
+
   local rows = M._unique_rows(bufnr)
 
   if #rows == 0 then
@@ -157,7 +163,7 @@ function M.buf_prev(bufnr)
   end
 
   -- Current cursor row, 0-indexed.
-  local cursor = vim.api.nvim_win_get_cursor(0)[1] - 1
+  local cursor = vim.api.nvim_win_get_cursor(winid)[1] - 1
 
   -- Find the last row strictly less than the cursor (walk in reverse).
   local target = nil
@@ -173,7 +179,7 @@ function M.buf_prev(bufnr)
     target = rows[#rows]
   end
 
-  vim.api.nvim_win_set_cursor(0, { target + 1, 0 })
+  vim.api.nvim_win_set_cursor(winid, { target + 1, 0 })
 end
 
 -- ---------------------------------------------------------------------------
@@ -194,6 +200,9 @@ end
 --- @param bufnr integer  Source buffer (used to look up review data)
 function M.review_next(bufnr)
   bufnr = require("parley.discussion_window").resolve_source_bufnr(bufnr)
+  local window_helpers = require("parley.discussion_window.window")
+  local winid = window_helpers.resolve_source_winid(bufnr, nil) or 0
+
   local context_repository = require("parley.repositories.context")
   local review_repository = require("parley.repositories.review")
 
@@ -209,7 +218,7 @@ function M.review_next(bufnr)
     return
   end
 
-  local cursor = vim.api.nvim_win_get_cursor(0)[1] - 1
+  local cursor = vim.api.nvim_win_get_cursor(winid)[1] - 1
   local views = review_repository._views[bufnr]
   local mappings = views and views.mappings or {}
   local cur_idx = M._current_index(sorted, ctx.rel_path, cursor, mappings)
@@ -225,7 +234,7 @@ function M.review_next(bufnr)
   if disc.file ~= ctx.rel_path then
     vim.cmd("edit " .. vim.fn.fnameescape(vcs_root .. "/" .. disc.file))
   end
-  vim.api.nvim_win_set_cursor(0, { target_line, 0 })
+  vim.api.nvim_win_set_cursor(winid, { target_line, 0 })
 end
 
 --- Jump to the previous discussion across all files in the review.
@@ -239,6 +248,9 @@ end
 --- @param bufnr integer  Source buffer (used to look up review data)
 function M.review_prev(bufnr)
   bufnr = require("parley.discussion_window").resolve_source_bufnr(bufnr)
+  local window_helpers = require("parley.discussion_window.window")
+  local winid = window_helpers.resolve_source_winid(bufnr, nil) or 0
+
   local context_repository = require("parley.repositories.context")
   local review_repository = require("parley.repositories.review")
 
@@ -254,7 +266,7 @@ function M.review_prev(bufnr)
     return
   end
 
-  local cursor = vim.api.nvim_win_get_cursor(0)[1] - 1
+  local cursor = vim.api.nvim_win_get_cursor(winid)[1] - 1
   local views = review_repository._views[bufnr]
   local mappings = views and views.mappings or {}
   local cur_idx = M._current_index(sorted, ctx.rel_path, cursor, mappings)
@@ -276,7 +288,7 @@ function M.review_prev(bufnr)
   if disc.file ~= ctx.rel_path then
     vim.cmd("edit " .. vim.fn.fnameescape(vcs_root .. "/" .. disc.file))
   end
-  vim.api.nvim_win_set_cursor(0, { target_line, 0 })
+  vim.api.nvim_win_set_cursor(winid, { target_line, 0 })
 end
 
 return M
