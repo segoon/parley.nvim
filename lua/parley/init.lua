@@ -48,8 +48,10 @@ local M = {}
 --- @field spinner_interval  integer
 
 --- @class parley.KeymapsConfig
---- @field next_comment string  Jump to next commented line
---- @field prev_comment string  Jump to previous commented line
+--- @field buf_next    string  Jump to next commented line in buffer
+--- @field buf_prev    string  Jump to previous commented line in buffer
+--- @field review_next string  Jump to next comment in the whole review
+--- @field review_prev string  Jump to previous comment in the whole review
 
 --- @class parley.GitHubProviderConfig
 --- @field timeout_ms integer
@@ -89,8 +91,10 @@ local defaults = {
     spinner_interval = 100,
   },
   keymaps = {
-    next_comment = "]c",
-    prev_comment = "[c",
+    buf_next = "]c",
+    buf_prev = "[c",
+    review_next = "]C",
+    review_prev = "[C",
   },
   providers = {
     github = {
@@ -114,7 +118,7 @@ end
 local PARLEY_GROUPS = {
   discussion = { "open", "close", "toggle", "new", "reply" },
   comment = { "react", "edit", "delete" },
-  nav = { "next", "prev" },
+  nav = { "buf-next", "buf-prev", "review-next", "review-prev" },
 }
 
 local PARLEY_TOP_LEVEL = { "discussion", "comment", "nav", "refresh" }
@@ -216,12 +220,20 @@ function M._dispatch_parley(fargs, bufnr, cmd_opts)
     if action == nil or action == "" then
       error("parley: expected a nav action", 0)
     end
-    if action == "next" then
-      nav_mod.next(bufnr)
+    if action == "buf-next" then
+      nav_mod.buf_next(bufnr)
       return
     end
-    if action == "prev" then
-      nav_mod.prev(bufnr)
+    if action == "buf-prev" then
+      nav_mod.buf_prev(bufnr)
+      return
+    end
+    if action == "review-next" then
+      nav_mod.review_next(bufnr)
+      return
+    end
+    if action == "review-prev" then
+      nav_mod.review_prev(bufnr)
       return
     end
     error("parley: unknown nav action: " .. tostring(action), 0)
@@ -312,15 +324,25 @@ function M.setup(opts)
 
   -- Register navigation keymaps (global; act on the current buffer at call time).
   -- An empty string disables the keymap.
-  if M.config.keymaps.next_comment ~= "" then
-    vim.keymap.set("n", M.config.keymaps.next_comment, function()
-      nav.next(vim.api.nvim_get_current_buf())
-    end, { desc = "Jump to next Parley comment" })
+  if M.config.keymaps.buf_next ~= "" then
+    vim.keymap.set("n", M.config.keymaps.buf_next, function()
+      nav.buf_next(vim.api.nvim_get_current_buf())
+    end, { desc = "Jump to next Parley comment in buffer" })
   end
-  if M.config.keymaps.prev_comment ~= "" then
-    vim.keymap.set("n", M.config.keymaps.prev_comment, function()
-      nav.prev(vim.api.nvim_get_current_buf())
-    end, { desc = "Jump to previous Parley comment" })
+  if M.config.keymaps.buf_prev ~= "" then
+    vim.keymap.set("n", M.config.keymaps.buf_prev, function()
+      nav.buf_prev(vim.api.nvim_get_current_buf())
+    end, { desc = "Jump to previous Parley comment in buffer" })
+  end
+  if M.config.keymaps.review_next ~= "" then
+    vim.keymap.set("n", M.config.keymaps.review_next, function()
+      nav.review_next(vim.api.nvim_get_current_buf())
+    end, { desc = "Jump to next Parley comment in review" })
+  end
+  if M.config.keymaps.review_prev ~= "" then
+    vim.keymap.set("n", M.config.keymaps.review_prev, function()
+      nav.review_prev(vim.api.nvim_get_current_buf())
+    end, { desc = "Jump to previous Parley comment in review" })
   end
 
   -- BufEnter triggers a refresh; the read service's classify step decides

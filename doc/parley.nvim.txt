@@ -79,7 +79,7 @@ Quick start: ~
   2. Authenticate GitHub CLI: `gh auth login`.
   3. Open a file in a git repo whose current branch has an open PR.
   4. Run `:Parley refresh` or re-enter the buffer.
-  5. Navigate with `]c` / `[c` (|parley-keymaps|).
+  5. Navigate with `]c` / `[c` / `]C` / `[C` (|parley-keymaps|).
   6. Toggle the discussion window with `:Parley discussion toggle`.
 
 If no matching PR is found, Parley stays silent and inactive.
@@ -122,22 +122,35 @@ All Parley commands support tab completion.
     Delete the selected comment with a confirmation prompt.
     Only works on your own comments.
 
-:Parley nav next                                     *:Parley-nav-next*
-    Jump to the next commented line. Wraps around at the end.
+:Parley nav buf-next                                 *:Parley-nav-buf-next*
+    Jump to the next commented line in the current buffer.
+    Wraps around at the end.
 
-:Parley nav prev                                     *:Parley-nav-prev*
-    Jump to the previous commented line. Wraps around at the start.
+:Parley nav buf-prev                                 *:Parley-nav-buf-prev*
+    Jump to the previous commented line in the current buffer.
+    Wraps around at the start.
+
+:Parley nav review-next                              *:Parley-nav-review-next*
+    Jump to the next comment across all files in the review.
+    Discussions are ordered by (file, line). When the next comment is in a
+    different file, that file is opened with `:edit`. Wraps around at the end.
+
+:Parley nav review-prev                              *:Parley-nav-review-prev*
+    Jump to the previous comment across all files in the review.
+    Mirror of `:Parley nav review-next`. Wraps around at the start.
 
 ==============================================================================
 5. KEYMAPS                                           *parley-keymaps*
 
 Global keymaps (registered in setup): ~
 
-    Key      Action
-    `]c`       Jump to the next commented line
-    `[c`       Jump to the previous commented line
+    Key    Action
+    `]c`     Jump to the next commented line in the buffer
+    `[c`     Jump to the previous commented line in the buffer
+    `]C`     Jump to the next comment in the whole review (cross-file)
+    `[C`     Jump to the previous comment in the whole review (cross-file)
 
-    Both are configurable via |parley-config-keymaps|. Set to `""` to
+    All four are configurable via |parley-config-keymaps|. Set to `""` to
     disable.
 
 Discussion window keymaps: ~
@@ -251,8 +264,8 @@ The full default configuration:
         spinner_interval = 100,
       },
       keymaps = {
-        buf_next    = "]c",
-        buf_prev    = "[c",
+        buf_next = "]c",
+        buf_prev = "[c",
         review_next = "]C",
         review_prev = "[C",
       },

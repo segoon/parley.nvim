@@ -15,7 +15,7 @@ Inline pull request discussions for Neovim.
 - Open a floating discussion window for the current line
 - Add new top-level comments on a line or range
 - Reply to, edit, delete, and react to comments
-- Navigate commented lines with `]c` and `[c`
+- Navigate commented lines within a buffer (`]c` / `[c`) or across the whole review (`]C` / `[C`)
 - Expose a statusline component with PR number, review state, and unresolved count
 - Cache PR and discussion data on disk
 - Refresh asynchronously on `BufEnter` and on demand
@@ -79,7 +79,7 @@ require("parley").setup({
 2. Authenticate GitHub CLI with `gh auth login`.
 3. Open a file inside a git repository whose current branch has an open PR.
 4. Run `:Parley refresh` once, or just re-enter the buffer.
-5. Use `]c` and `[c` to move between commented lines.
+5. Use `]c` / `[c` to move between commented lines in the buffer, or `]C` / `[C` to jump across all files in the review.
 6. Use `:Parley discussion toggle` to open the discussion window for the current line.
 
 If no matching PR is found, Parley stays silent and inactive.
@@ -104,7 +104,8 @@ See `:help parley-commands` for the full list.
 
 | Key | Context | Description |
 | --- | --- | --- |
-| `]c` / `[c` | global | Jump between commented lines |
+| `]c` / `[c` | global | Jump between commented lines in the buffer |
+| `]C` / `[C` | global | Jump between comments across all review files |
 | `q` | discussion | Close window |
 | `r` | discussion | Reply |
 | `R` | discussion | React |
@@ -168,8 +169,10 @@ require("parley").setup({
   refresh_interval = 120,          -- seconds (0 = disabled)
   telescope = false,               -- disable Telescope extensions
   keymaps = {
-    next_comment = "]c",           -- "" to disable
-    prev_comment = "[c",
+    buf_next    = "]c",   -- "" to disable
+    buf_prev    = "[c",
+    review_next = "]C",
+    review_prev = "[C",
   },
 })
 ```

@@ -25,7 +25,7 @@ describe("parley command completion", function()
 
   it("returns nav actions for the second argument", function()
     local items = parley._complete_parley("", ":Parley nav ")
-    assert.same({ "next", "prev" }, items)
+    assert.same({ "buf-next", "buf-prev", "review-next", "review-prev" }, items)
   end)
 end)
 
@@ -268,23 +268,33 @@ describe("parley command dispatch", function()
     }, calls)
   end)
 
-  it("dispatches nav next/prev", function()
+  it("dispatches nav buf-next/buf-prev/review-next/review-prev", function()
     local calls = {}
     package.loaded["parley.nav"] = {
-      next = function(bufnr)
-        calls[#calls + 1] = { action = "next", bufnr = bufnr }
+      buf_next = function(bufnr)
+        calls[#calls + 1] = { action = "buf-next", bufnr = bufnr }
       end,
-      prev = function(bufnr)
-        calls[#calls + 1] = { action = "prev", bufnr = bufnr }
+      buf_prev = function(bufnr)
+        calls[#calls + 1] = { action = "buf-prev", bufnr = bufnr }
+      end,
+      review_next = function(bufnr)
+        calls[#calls + 1] = { action = "review-next", bufnr = bufnr }
+      end,
+      review_prev = function(bufnr)
+        calls[#calls + 1] = { action = "review-prev", bufnr = bufnr }
       end,
     }
 
-    parley._dispatch_parley({ "nav", "next" }, 21)
-    parley._dispatch_parley({ "nav", "prev" }, 22)
+    parley._dispatch_parley({ "nav", "buf-next" }, 21)
+    parley._dispatch_parley({ "nav", "buf-prev" }, 22)
+    parley._dispatch_parley({ "nav", "review-next" }, 23)
+    parley._dispatch_parley({ "nav", "review-prev" }, 24)
 
     assert.same({
-      { action = "next", bufnr = 21 },
-      { action = "prev", bufnr = 22 },
+      { action = "buf-next", bufnr = 21 },
+      { action = "buf-prev", bufnr = 22 },
+      { action = "review-next", bufnr = 23 },
+      { action = "review-prev", bufnr = 24 },
     }, calls)
   end)
 
