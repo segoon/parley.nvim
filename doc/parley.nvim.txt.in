@@ -33,7 +33,7 @@ browsing), see |octo.nvim| or |gh.nvim|.
 
 Current state: ~
 
-  - GitHub is the only built-in provider
+  - Built-in providers: GitHub (git repos) and Arcanum (Arc/Arcadia repos)
   - Regular file buffers are supported
   - diffview.nvim integration is planned
 
@@ -41,9 +41,15 @@ Current state: ~
 2. REQUIREMENTS                                      *parley-requirements*
 
   - Neovim >= 0.10
+  - plenary.nvim (https://github.com/nvim-lua/plenary.nvim)
+
+GitHub provider: ~
   - git
   - gh (GitHub CLI, https://cli.github.com)
-  - plenary.nvim (https://github.com/nvim-lua/plenary.nvim)
+
+Arcanum provider: ~
+  - arc (Arcadia VCS CLI)
+  - Network access to arcanum.yandex.net
 
 Optional: ~
 
@@ -292,6 +298,61 @@ Provider options: ~
 GitHub-specific options live under `providers.github` in the setup call.
 See |parley-configuration|.
 
+Limitations: ~
+
+  - `resolve` / `unresolve` are not supported (require GraphQL).
+  - `submit_review` is supported: "approve", "request_changes", "comment".
+
+------------------------------------------------------------------------------
+
+Arcanum                                              *parley-provider-arcanum*
+
+The built-in Arcanum provider supports Arc (Arcadia VCS) repositories via
+the Arcanum public REST API at arcanum.yandex.net.
+
+The provider is activated automatically when the current buffer belongs to an
+Arc repository (detected via `arc root`).
+
+Authentication: ~
+
+OAuth tokens are resolved in the following order:
+
+  1. Environment variable: `ARCANUM_TOKEN`
+  2. File: `~/.arc/token` (plain text, single line)
+
+To obtain a token: https://a.yandex-team.ru/oauth/token
+
+User login detection: ~
+
+The current user login is derived from `arc config -l` output (user.email
+field). The login is used to filter PRs authored by the current user and to
+determine `is_own` on comments.
+
+Provider options: ~
+
+Arcanum-specific options live under `providers.arcanum` in the setup call: >lua
+    require("parley").setup({
+      providers = {
+        arcanum = {
+          timeout_ms = 10000,      -- HTTP request timeout in milliseconds
+          retry_count = 2,         -- Number of retries on transient errors
+          retry_base_delay_ms = 250,
+          retry_max_delay_ms = 2000,
+          host = "arcanum.yandex.net",  -- API hostname (rarely changed)
+        },
+      },
+    })
+<
+
+Limitations: ~
+
+  - `resolve` / `unresolve` are not supported by the Arcanum public API.
+  - `react` (reactions) are not supported by the Arcanum public API.
+  - `submit_review` (verdicts) is not supported by the Arcanum public API.
+  - Attempting any unsupported operation shows a "not supported" error.
+
+------------------------------------------------------------------------------
+
 Custom providers: ~
 
 After calling `setup()`, you can register additional providers: >lua
@@ -305,6 +366,16 @@ After calling `setup()`, you can register additional providers: >lua
 
 The provider must implement all methods defined in `parley.Provider`.
 See `lua/parley/provider.lua` for the full interface.
+
+Custom VCS detectors: ~
+
+To support a custom VCS, register a detector via `parley.vcs`: >lua
+    local vcs = require("parley.vcs")
+    vcs.register_detector("my-vcs", function(path)
+      -- Return a parley.VcsInfo table if path is inside your VCS, else nil.
+      -- This function runs in a plenary.async coroutine.
+    end)
+<
 
 ==============================================================================
 11. HEALTH CHECK                                     *parley-health*

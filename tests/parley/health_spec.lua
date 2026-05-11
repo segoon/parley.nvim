@@ -145,7 +145,7 @@ describe("parley.health.check", function()
     end
     health._parse_remote_url = function(url)
       assert.equals("https://github.com/owner/repo.git", url)
-      return { host = "github.com", owner = "owner", repo = "repo" }
+      return { host = "github.com", repository = "owner/repo" }
     end
     health._read_github_token = function(host)
       assert.equals("github.com", host)
@@ -336,7 +336,7 @@ describe("parley.health.check", function()
     end
     health._parse_remote_url = function(url)
       assert.equals("https://gitlab.com/owner/repo.git", url)
-      return { host = "gitlab.com", owner = "owner", repo = "repo" }
+      return { host = "gitlab.com", repository = "owner/repo" }
     end
 
     health.check()
@@ -382,7 +382,7 @@ describe("parley.health.check", function()
       return { code = 0, stdout = "https://github.com/owner/repo.git\n", stderr = "" }
     end
     health._parse_remote_url = function(_url)
-      return { host = "github.com", owner = "owner", repo = "repo" }
+      return { host = "github.com", repository = "owner/repo" }
     end
     health._read_github_token = function(host)
       assert.equals("github.com", host)

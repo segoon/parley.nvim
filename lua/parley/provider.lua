@@ -34,7 +34,7 @@ local M = {}
 --- Return the authentication token for API calls.
 --- @field auth fun(self: parley.Provider): string
 ---
---- Detect an open PR for the given repo root and branch.
+--- Detect an open PR for the given repo root and branch identifier.
 --- Returns nil when no PR is found (plugin should silently deactivate).
 --- @field detect_pr fun(self: parley.Provider, repo_root: string, branch: string): parley.DetectedReview|nil
 ---

@@ -1,4 +1,4 @@
---- Tests for parley.vcs — VCS detection.
+--- Tests for parley.vcs — VCS detection dispatcher and git helpers.
 --- Run via: make test
 
 local a = require("plenary.async").tests
@@ -8,12 +8,7 @@ local vcs = require("parley.vcs")
 -- Helpers
 -- ---------------------------------------------------------------------------
 
---- Build a synchronous mock runner that plays back a sequence of responses,
---- one per call, in order.  Each entry is `{ code, stdout, stderr }`.
----
---- Also records every call as `{ cmd, cwd }` in the `.calls` list so tests
---- can assert on what was invoked.
----
+--- Build a synchronous mock runner that plays back a sequence of responses.
 --- @param responses { code: integer, stdout: string, stderr: string }[]
 --- @return { runner: fun(cmd: string[], cwd: string): table, calls: table[] }
 local function make_runner(responses)
@@ -29,267 +24,130 @@ local function make_runner(responses)
   return { runner = runner, calls = calls }
 end
 
---- Standard three-response sequence for a fully-successful git probe.
---- stdout values include a trailing newline as real git produces.
----
---- @param root       string  Repo root path
---- @param branch     string  Branch name
---- @param remote_url string  Remote URL
---- @return { code: integer, stdout: string, stderr: string }[]
-local function success_responses(root, branch, remote_url)
-  return {
-    { code = 0, stdout = root .. "\n", stderr = "" },
-    { code = 0, stdout = branch .. "\n", stderr = "" },
-    { code = 0, stdout = remote_url .. "\n", stderr = "" },
-  }
-end
-
 -- ---------------------------------------------------------------------------
 -- Test state
 -- ---------------------------------------------------------------------------
 
 local original_runner
+local original_detectors
 
 -- ---------------------------------------------------------------------------
--- Suite
+-- Suite: dispatcher (register_detector / detect)
 -- ---------------------------------------------------------------------------
 
-a.describe("parley.vcs detect", function()
+a.describe("parley.vcs dispatcher", function()
   a.before_each(function()
-    original_runner = vcs._runner
+    original_detectors = vcs.registered_detectors()
+    vcs.reset_detectors()
   end)
 
   a.after_each(function()
-    vcs._runner = original_runner
+    vcs.reset_detectors()
+    for _, d in ipairs(original_detectors) do
+      vcs.register_detector(d.name, d.fn)
+    end
   end)
 
-  -- -------------------------------------------------------------------------
-  -- Returns nil when not in a git repo
-  -- -------------------------------------------------------------------------
-
-  a.it("returns nil when git rev-parse exits non-zero (not a git repo)", function()
-    local mock = make_runner({
-      { code = 128, stdout = "", stderr = "fatal: not a git repository" },
-    })
-    vcs._runner = mock.runner
-
-    local result = vcs.detect("/some/random/path/file.lua")
-
+  a.it("returns nil when no detectors are registered", function()
+    local result = vcs.detect("/some/path/file.lua")
     assert.is_nil(result)
   end)
 
-  a.it("returns nil for an empty string path", function()
-    local mock = make_runner({
-      { code = 128, stdout = "", stderr = "fatal: not a git repository" },
-    })
-    vcs._runner = mock.runner
+  a.it("calls registered detector with the path", function()
+    local received_path = nil
+    vcs.register_detector("test", function(path)
+      received_path = path
+      return nil
+    end)
 
-    local result = vcs.detect("")
+    vcs.detect("/my/file.lua")
 
-    assert.is_nil(result)
+    assert.equals("/my/file.lua", received_path)
   end)
 
-  -- -------------------------------------------------------------------------
-  -- Successful detection — shape of returned value
-  -- -------------------------------------------------------------------------
+  a.it("returns first non-nil result", function()
+    vcs.register_detector("first", function(_path)
+      return nil
+    end)
+    vcs.register_detector("second", function(_path)
+      return { vcs = "git", root = "/repo", branch = "main", remote_url = nil }
+    end)
+    vcs.register_detector("third", function(_path)
+      return { vcs = "other", root = "/other", branch = nil, remote_url = nil }
+    end)
 
-  a.it("returns a table (VcsInfo) on success", function()
-    local mock = make_runner(success_responses("/repo", "main", "https://github.com/org/repo.git"))
-    vcs._runner = mock.runner
-
-    local result = vcs.detect("/repo/src/foo.lua")
-
-    assert.is_not_nil(result)
-    assert.equals("table", type(result))
-  end)
-
-  a.it("vcs field is 'git'", function()
-    local mock = make_runner(success_responses("/repo", "main", "https://github.com/org/repo.git"))
-    vcs._runner = mock.runner
-
-    local result = vcs.detect("/repo/src/foo.lua")
+    local result = vcs.detect("/some/file.lua")
 
     assert.equals("git", result.vcs)
   end)
 
-  a.it("root field equals trimmed stdout of rev-parse --show-toplevel", function()
-    local mock = make_runner(success_responses("/my/project", "feat/x", "git@github.com:org/repo.git"))
-    vcs._runner = mock.runner
+  a.it("stops at first non-nil result (does not call later detectors)", function()
+    local third_called = false
+    vcs.register_detector("first", function(_path)
+      return { vcs = "git", root = "/repo", branch = "main", remote_url = nil }
+    end)
+    vcs.register_detector("second", function(_path)
+      third_called = true
+      return nil
+    end)
 
-    local result = vcs.detect("/my/project/src/mod.lua")
+    vcs.detect("/file.lua")
 
-    assert.equals("/my/project", result.root)
+    assert.is_false(third_called)
   end)
 
-  a.it("branch field equals trimmed stdout of rev-parse --abbrev-ref", function()
-    local mock = make_runner(success_responses("/repo", "feature/awesome", "https://example.com/repo.git"))
-    vcs._runner = mock.runner
+  a.it("tries detectors in registration order", function()
+    local order = {}
+    vcs.register_detector("alpha", function(_path)
+      table.insert(order, "alpha")
+      return nil
+    end)
+    vcs.register_detector("beta", function(_path)
+      table.insert(order, "beta")
+      return nil
+    end)
+    vcs.register_detector("gamma", function(_path)
+      table.insert(order, "gamma")
+      return nil
+    end)
 
-    local result = vcs.detect("/repo/file.lua")
+    vcs.detect("/file.lua")
 
-    assert.equals("feature/awesome", result.branch)
+    assert.same({ "alpha", "beta", "gamma" }, order)
   end)
 
-  a.it("remote_url field is populated when git remote get-url origin succeeds", function()
-    local mock = make_runner(success_responses("/repo", "main", "https://github.com/org/repo.git"))
-    vcs._runner = mock.runner
+  a.it("reset_detectors removes all detectors", function()
+    vcs.register_detector("test", function(_path)
+      return { vcs = "test", root = "/", branch = nil, remote_url = nil }
+    end)
+    vcs.reset_detectors()
 
-    local result = vcs.detect("/repo/file.lua")
+    local result = vcs.detect("/file.lua")
 
-    assert.equals("https://github.com/org/repo.git", result.remote_url)
+    assert.is_nil(result)
   end)
 
-  -- -------------------------------------------------------------------------
-  -- remote_url nil cases
-  -- -------------------------------------------------------------------------
-
-  a.it("remote_url is nil when git remote get-url origin exits non-zero", function()
-    local mock = make_runner({
-      { code = 0, stdout = "/repo\n", stderr = "" },
-      { code = 0, stdout = "main\n", stderr = "" },
-      { code = 2, stdout = "", stderr = "error: No such remote 'origin'" },
-    })
-    vcs._runner = mock.runner
-
-    local result = vcs.detect("/repo/file.lua")
-
-    assert.is_nil(result.remote_url)
+  a.it("register_detector raises for empty name", function()
+    assert.has_error(function()
+      vcs.register_detector("", function() end)
+    end)
   end)
 
-  -- -------------------------------------------------------------------------
-  -- Detached HEAD
-  -- -------------------------------------------------------------------------
-
-  a.it("branch is nil when abbrev-ref returns literal 'HEAD' (detached)", function()
-    local mock = make_runner({
-      { code = 0, stdout = "/repo\n", stderr = "" },
-      { code = 0, stdout = "HEAD\n", stderr = "" },
-      { code = 0, stdout = "https://github.com/org/repo.git\n", stderr = "" },
-    })
-    vcs._runner = mock.runner
-
-    local result = vcs.detect("/repo/file.lua")
-
-    assert.is_nil(result.branch)
+  a.it("register_detector raises for non-function fn", function()
+    assert.has_error(function()
+      vcs.register_detector("test", "not-a-function")
+    end)
   end)
 
-  a.it("branch is nil when abbrev-ref exits non-zero", function()
-    local mock = make_runner({
-      { code = 0, stdout = "/repo\n", stderr = "" },
-      { code = 128, stdout = "", stderr = "fatal: no branch" },
-      { code = 0, stdout = "https://github.com/org/repo.git\n", stderr = "" },
-    })
-    vcs._runner = mock.runner
+  a.it("registered_detectors returns a copy in order", function()
+    vcs.register_detector("a", function() end)
+    vcs.register_detector("b", function() end)
 
-    local result = vcs.detect("/repo/file.lua")
+    local detectors = vcs.registered_detectors()
 
-    assert.is_nil(result.branch)
-  end)
-
-  -- -------------------------------------------------------------------------
-  -- Trailing newlines
-  -- -------------------------------------------------------------------------
-
-  a.it("strips trailing newlines from root", function()
-    local mock = make_runner({
-      { code = 0, stdout = "/repo\n\n", stderr = "" },
-      { code = 0, stdout = "main\n", stderr = "" },
-      { code = 0, stdout = "https://github.com/org/repo.git\n", stderr = "" },
-    })
-    vcs._runner = mock.runner
-
-    local result = vcs.detect("/repo/file.lua")
-
-    assert.equals("/repo", result.root)
-  end)
-
-  a.it("strips trailing newlines from branch", function()
-    local mock = make_runner({
-      { code = 0, stdout = "/repo\n", stderr = "" },
-      { code = 0, stdout = "main\n\n", stderr = "" },
-      { code = 0, stdout = "https://github.com/org/repo.git\n", stderr = "" },
-    })
-    vcs._runner = mock.runner
-
-    local result = vcs.detect("/repo/file.lua")
-
-    assert.equals("main", result.branch)
-  end)
-
-  a.it("strips trailing newlines from remote_url", function()
-    local mock = make_runner({
-      { code = 0, stdout = "/repo\n", stderr = "" },
-      { code = 0, stdout = "main\n", stderr = "" },
-      { code = 0, stdout = "https://github.com/org/repo.git\n\n", stderr = "" },
-    })
-    vcs._runner = mock.runner
-
-    local result = vcs.detect("/repo/file.lua")
-
-    assert.equals("https://github.com/org/repo.git", result.remote_url)
-  end)
-
-  -- -------------------------------------------------------------------------
-  -- cwd routing
-  -- -------------------------------------------------------------------------
-
-  a.it("first command (rev-parse --show-toplevel) receives directory of path as cwd", function()
-    local mock = make_runner(success_responses("/repo", "main", "https://github.com/org/repo.git"))
-    vcs._runner = mock.runner
-
-    vcs.detect("/repo/src/deep/file.lua")
-
-    -- cwd for first call must be the parent directory of the file
-    assert.equals("/repo/src/deep", mock.calls[1].cwd)
-  end)
-
-  a.it("second command (abbrev-ref) receives root as cwd", function()
-    local mock = make_runner(success_responses("/repo", "main", "https://github.com/org/repo.git"))
-    vcs._runner = mock.runner
-
-    vcs.detect("/repo/src/file.lua")
-
-    assert.equals("/repo", mock.calls[2].cwd)
-  end)
-
-  a.it("third command (remote get-url) receives root as cwd", function()
-    local mock = make_runner(success_responses("/repo", "main", "https://github.com/org/repo.git"))
-    vcs._runner = mock.runner
-
-    vcs.detect("/repo/src/file.lua")
-
-    assert.equals("/repo", mock.calls[3].cwd)
-  end)
-
-  -- -------------------------------------------------------------------------
-  -- Command content
-  -- -------------------------------------------------------------------------
-
-  a.it("first command is git rev-parse --show-toplevel", function()
-    local mock = make_runner(success_responses("/repo", "main", "https://github.com/org/repo.git"))
-    vcs._runner = mock.runner
-
-    vcs.detect("/repo/file.lua")
-
-    assert.same({ "git", "rev-parse", "--show-toplevel" }, mock.calls[1].cmd)
-  end)
-
-  a.it("second command is git rev-parse --abbrev-ref HEAD", function()
-    local mock = make_runner(success_responses("/repo", "main", "https://github.com/org/repo.git"))
-    vcs._runner = mock.runner
-
-    vcs.detect("/repo/file.lua")
-
-    assert.same({ "git", "rev-parse", "--abbrev-ref", "HEAD" }, mock.calls[2].cmd)
-  end)
-
-  a.it("third command is git remote get-url origin", function()
-    local mock = make_runner(success_responses("/repo", "main", "https://github.com/org/repo.git"))
-    vcs._runner = mock.runner
-
-    vcs.detect("/repo/file.lua")
-
-    assert.same({ "git", "remote", "get-url", "origin" }, mock.calls[3].cmd)
+    assert.equals(2, #detectors)
+    assert.equals("a", detectors[1].name)
+    assert.equals("b", detectors[2].name)
   end)
 end)
 
@@ -438,8 +296,6 @@ end)
 -- ---------------------------------------------------------------------------
 
 --- Build a simple unified diff with one hunk.
---- new_start/new_count define which lines on the new (RIGHT) side are changed.
----
 --- @param new_start integer
 --- @param new_count integer
 --- @return string
@@ -464,7 +320,6 @@ a.describe("parley.vcs check_anchor_in_diff", function()
   -- ── Happy path: line inside hunk ─────────────────────────────────────────
 
   a.it("returns ok=true when start_line is inside a diff hunk", function()
-    -- Hunk covers new lines 5–7 (new_start=5, new_count=3)
     local mock = make_runner({ { code = 0, stdout = diff_hunk(5, 3), stderr = "" } })
     vcs._runner = mock.runner
 
@@ -475,7 +330,6 @@ a.describe("parley.vcs check_anchor_in_diff", function()
   end)
 
   a.it("returns ok=true for last line of hunk range", function()
-    -- Hunk covers new lines 5–7; last valid line is 7
     local mock = make_runner({ { code = 0, stdout = diff_hunk(5, 3), stderr = "" } })
     vcs._runner = mock.runner
 
@@ -485,7 +339,6 @@ a.describe("parley.vcs check_anchor_in_diff", function()
   end)
 
   a.it("returns ok=true for a multi-line anchor fully inside one hunk", function()
-    -- Hunk covers new lines 10–14; anchor is 11–13
     local mock = make_runner({ { code = 0, stdout = diff_hunk(10, 5), stderr = "" } })
     vcs._runner = mock.runner
 
@@ -497,7 +350,6 @@ a.describe("parley.vcs check_anchor_in_diff", function()
   -- ── Line not in diff ──────────────────────────────────────────────────────
 
   a.it("returns ok=false when start_line is before the hunk", function()
-    -- Hunk covers new lines 10–12; line 5 is outside
     local mock = make_runner({ { code = 0, stdout = diff_hunk(10, 3), stderr = "" } })
     vcs._runner = mock.runner
 
@@ -509,7 +361,6 @@ a.describe("parley.vcs check_anchor_in_diff", function()
   end)
 
   a.it("returns ok=false when start_line is after the hunk", function()
-    -- Hunk covers new lines 5–7; line 20 is outside
     local mock = make_runner({ { code = 0, stdout = diff_hunk(5, 3), stderr = "" } })
     vcs._runner = mock.runner
 
@@ -531,7 +382,6 @@ a.describe("parley.vcs check_anchor_in_diff", function()
   -- ── Multi-line anchor with end_line outside hunk ──────────────────────────
 
   a.it("returns ok=false when end_line is outside the hunk", function()
-    -- Hunk covers new lines 10–12; end_line 15 is outside
     local mock = make_runner({ { code = 0, stdout = diff_hunk(10, 3), stderr = "" } })
     vcs._runner = mock.runner
 
@@ -556,7 +406,6 @@ a.describe("parley.vcs check_anchor_in_diff", function()
   -- ── Git failure ───────────────────────────────────────────────────────────
 
   a.it("returns ok=true (allows through) when git diff fails", function()
-    -- Unknown base branch or other git error: don't block the user.
     local mock = make_runner({ { code = 128, stdout = "", stderr = "fatal: unknown revision" } })
     vcs._runner = mock.runner
 

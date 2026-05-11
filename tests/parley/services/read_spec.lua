@@ -63,7 +63,7 @@ local PROVIDER_SNAPSHOT = {
       return "github.com"
     end,
   },
-  opts = { owner = "owner", repo = "repo", host = "github.com" },
+  opts = { repository = "owner/repo", host = "github.com" },
 }
 
 --- Seed standard VCS context for bufnr 1.

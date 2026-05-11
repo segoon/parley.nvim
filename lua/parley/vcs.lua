@@ -1,16 +1,21 @@
---- parley.vcs — VCS detection.
+--- parley.vcs — VCS detection dispatcher.
 ---
---- Detects whether a buffer path lives inside a recognised VCS repository
---- (git first) and extracts repo root, current branch, and remote URL.
+--- Provides a generic `detect(path)` function that iterates registered VCS
+--- detectors and returns the first match.  No built-in detectors are bundled
+--- here; each provider module is responsible for registering its own detector
+--- via `register_detector()` during `setup()`.
+---
+--- This design lets providers own their VCS probing logic while keeping the
+--- buffer-classification pipeline (buffer_context.lua) provider-agnostic.
 ---
 --- Design notes:
----   • Uses vim.system (Neovim ≥ 0.10) wrapped with plenary.async so the
----     call yields the coroutine instead of blocking Neovim.
----   • detect() must be called inside a plenary.async coroutine.
----   • M._runner is the single I/O seam; replace it in tests to avoid real
----     git invocations.
----   • Only git is supported today; the interface is intentionally generic
----     so additional VCS backends can be added in later phases.
+---   • detect() must be called inside a plenary.async coroutine because
+---     detector functions typically yield while running subprocesses.
+---   • Detectors are tried in registration order; first non-nil result wins.
+---   • reset_detectors() is provided for test isolation.
+---
+--- Non-VCS helpers (check_sync_state, check_anchor_in_diff) remain here
+--- because they are git-specific utilities shared across write-service flows.
 
 local await = require("parley.runtime.await")
 local anchor = require("parley.anchor")
@@ -24,19 +29,51 @@ local M = {}
 --- Information extracted from a VCS repository.
 ---
 --- @class parley.VcsInfo
---- @field vcs        string      VCS type identifier, e.g. "git"
+--- @field vcs        string      VCS type identifier, e.g. "git" or "arc"
 --- @field root       string      Absolute path to the repository root
---- @field branch     string|nil  Active branch name; nil when detached HEAD or unknown
---- @field remote_url string|nil  URL of the "origin" remote; nil when not configured
+--- @field branch     string|nil  Active branch name; for Arc this is the remote branch id from `arc info --json`
+--- @field remote_url string|nil  URL of the "origin" remote or arc remote; nil when not configured
 
 -- ---------------------------------------------------------------------------
--- Default async runner
+-- Detector registry
+-- ---------------------------------------------------------------------------
+
+--- @type { name: string, fn: fun(path: string): parley.VcsInfo|nil }[]
+local _detectors = {}
+
+--- Register a VCS detector function.
+---
+--- Detectors are called in registration order with the buffer file path.
+--- The first one that returns a non-nil VcsInfo wins.
+---
+--- @param name string   Human-readable identifier (e.g. "git", "arc")
+--- @param fn   fun(path: string): parley.VcsInfo|nil
+function M.register_detector(name, fn)
+  assert(type(name) == "string" and name ~= "", "vcs.register_detector: name must be a non-empty string")
+  assert(type(fn) == "function", "vcs.register_detector: fn must be a function")
+  table.insert(_detectors, { name = name, fn = fn })
+end
+
+--- Remove all registered detectors.  Intended for test isolation.
+function M.reset_detectors()
+  _detectors = {}
+end
+
+--- Return a shallow copy of registered detectors in registration order.
+--- @return { name: string, fn: fun(path: string): parley.VcsInfo|nil }[]
+function M.registered_detectors()
+  local copy = {}
+  for i, d in ipairs(_detectors) do
+    copy[i] = d
+  end
+  return copy
+end
+
+-- ---------------------------------------------------------------------------
+-- Default async runner (shared by check_sync_state / check_anchor_in_diff)
 -- ---------------------------------------------------------------------------
 
 --- Run a command asynchronously and return its result.
----
---- Wrapped with plenary.async.wrap so it yields the current coroutine while
---- the subprocess runs, keeping Neovim responsive.
 ---
 --- @type fun(cmd: string[], cwd: string): { code: integer, stdout: string, stderr: string }
 M._runner = function(cmd, cwd)
@@ -53,7 +90,6 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Strip trailing whitespace (including newlines) from a string.
----
 --- @param s string
 --- @return string
 local function trim(s)
@@ -63,6 +99,25 @@ end
 -- ---------------------------------------------------------------------------
 -- Public API
 -- ---------------------------------------------------------------------------
+
+--- Detect VCS information for the file at `path`.
+---
+--- Iterates registered detectors in order; returns the first non-nil result.
+--- Returns nil when no detector matches or when no detectors are registered.
+---
+--- Must be called inside a plenary.async coroutine.
+---
+--- @param  path string  Buffer file path to probe
+--- @return parley.VcsInfo|nil
+function M.detect(path)
+  for _, detector in ipairs(_detectors) do
+    local info = detector.fn(path)
+    if info ~= nil then
+      return info
+    end
+  end
+  return nil
+end
 
 --- Check that the local repo is in a state suitable for posting a new comment.
 ---
@@ -74,7 +129,7 @@ end
 ---
 --- @param root     string  Absolute repo root (cwd for git commands)
 --- @param rel_path string  Repo-relative path of the file being commented on
---- @param head_sha string  PR head SHA received from GitHub
+--- @param head_sha string  PR head SHA received from the provider
 --- @return { ok: boolean, err?: string }
 function M.check_sync_state(root, rel_path, head_sha)
   local run = M._runner
@@ -161,57 +216,6 @@ function M.check_anchor_in_diff(root, base_branch, rel_path, anch)
   end
 
   return { ok = true }
-end
-
---- Detect VCS information for the file at `path`.
----
---- Must be called inside a plenary.async coroutine.  Returns nil when `path`
---- is not inside a recognised VCS repository or when detection fails.
----
---- Currently only git is supported.  The returned `vcs` field is always
---- `"git"` when detection succeeds.
----
---- @param  path string  Buffer file path to probe
---- @return parley.VcsInfo|nil
-function M.detect(path)
-  local run = M._runner
-
-  -- Derive the working directory from the file path.  For a regular file
-  -- /a/b/c.lua this yields /a/b; for an empty string git will simply fail.
-  local cwd = vim.fn.fnamemodify(path, ":p:h")
-
-  -- ── Step 1: is this path inside a git repo? ──────────────────────────────
-  local root_result = run({ "git", "rev-parse", "--show-toplevel" }, cwd)
-  if root_result.code ~= 0 then
-    return nil
-  end
-  local root = trim(root_result.stdout)
-
-  -- ── Step 2: current branch ────────────────────────────────────────────────
-  local branch_result = run({ "git", "rev-parse", "--abbrev-ref", "HEAD" }, root)
-  local branch = nil
-  if branch_result.code == 0 then
-    local raw = trim(branch_result.stdout)
-    -- "HEAD" is what git returns for a detached HEAD state — not a real branch.
-    if raw ~= "HEAD" then
-      branch = raw
-    end
-  end
-
-  -- ── Step 3: origin remote URL ─────────────────────────────────────────────
-  local remote_result = run({ "git", "remote", "get-url", "origin" }, root)
-  local remote_url = nil
-  if remote_result.code == 0 then
-    remote_url = trim(remote_result.stdout)
-  end
-
-  --- @type parley.VcsInfo
-  return {
-    vcs = "git",
-    root = root,
-    branch = branch,
-    remote_url = remote_url,
-  }
 end
 
 return M

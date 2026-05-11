@@ -59,6 +59,13 @@ local M = {}
 --- @field retry_base_delay_ms integer
 --- @field retry_max_delay_ms integer
 
+--- @class parley.ArcanumProviderConfig
+--- @field timeout_ms integer
+--- @field retry_count integer
+--- @field retry_base_delay_ms integer
+--- @field retry_max_delay_ms integer
+--- @field host string  Arcanum API hostname (default: "arcanum.yandex.net")
+
 --- @type parley.Config
 local defaults = {
   refresh_interval = 300, -- 5 minutes
@@ -102,6 +109,13 @@ local defaults = {
       retry_count = 2,
       retry_base_delay_ms = 250,
       retry_max_delay_ms = 2000,
+    },
+    arcanum = {
+      timeout_ms = 10000,
+      retry_count = 2,
+      retry_base_delay_ms = 250,
+      retry_max_delay_ms = 2000,
+      host = "arcanum.yandex.net",
     },
   },
 }
@@ -293,12 +307,21 @@ function M.setup(opts)
   signs.setup_highlights()
   require("parley.progress_popup").setup()
 
-  -- Reset and re-populate the provider registry on every setup() call so
-  -- that calling setup() twice produces a clean, deterministic state.
-  -- Built-in provider specs are registered here as they are implemented
-  -- (Step 9+).  User-supplied providers can call registry.register() after
-  -- setup() if needed.
+  -- Reset and re-populate the provider registry and VCS detectors on every
+  -- setup() call so that calling setup() twice produces a clean state.
+  -- User-supplied providers can call registry.register() after setup() if needed.
   registry.reset()
+  local vcs = require("parley.vcs")
+  vcs.reset_detectors()
+
+  -- Register VCS detectors (order matters: first match wins).
+  -- Arc is checked before git so that Arc repos (which also have git metadata
+  -- on some setups) are correctly attributed to the Arcanum provider.
+  local arc_vcs = require("parley.providers.arcanum.vcs_detector")
+  vcs.register_detector("arc", arc_vcs.detect)
+
+  local git_vcs = require("parley.providers.github.vcs_detector")
+  vcs.register_detector("git", git_vcs.detect)
 
   -- Probe gh availability once so subsequent calls can fast-fail without
   -- spawning a subprocess.
@@ -310,6 +333,13 @@ function M.setup(opts)
     name = "GitHub",
     detect = gh.detect,
     factory = gh.new,
+  })
+
+  local arcanum = require("parley.providers.arcanum.provider")
+  registry.register({
+    name = "Arcanum",
+    detect = arcanum.detect,
+    factory = arcanum.new,
   })
 
   if M.config.telescope then

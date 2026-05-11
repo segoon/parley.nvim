@@ -85,12 +85,11 @@ GitHubProvider.__index = GitHubProvider
 
 --- Create a new GitHub provider.
 ---
---- Required opts: owner, repo.
+--- Required opts: repository.
 --- Optional opts: host (default "github.com"), api_base, _runner, _auth.
 ---
 --- @param opts {
----   owner: string,
----   repo: string,
+---   repository: string,
 ---   host?: string,
 ---   api_base?: string,
 ---   _runner?: fun(cmd: string[]): table,
@@ -107,8 +106,13 @@ GitHubProvider.__index = GitHubProvider
 --- @return parley.github.Provider
 function M.new(opts)
   opts = opts or {}
-  assert(type(opts.owner) == "string" and opts.owner ~= "", "parley.github: opts.owner must be a non-empty string")
-  assert(type(opts.repo) == "string" and opts.repo ~= "", "parley.github: opts.repo must be a non-empty string")
+  assert(
+    type(opts.repository) == "string" and opts.repository ~= "",
+    "parley.github: opts.repository must be a non-empty string"
+  )
+
+  local owner, repo = opts.repository:match("^([^/]+)/([^/]+)$")
+  assert(owner and repo, "parley.github: opts.repository must have the form 'owner/repo'")
 
   local host = opts.host or "github.com"
   local self
@@ -133,8 +137,8 @@ function M.new(opts)
 
   self = setmetatable({
     _host = host,
-    _owner = opts.owner,
-    _repo = opts.repo,
+    _owner = owner,
+    _repo = repo,
     _api_base = opts.api_base or api_base_for_host(host),
     _runner = opts._runner or default_runner,
     _spawn = opts._spawn or default_spawn,
@@ -565,13 +569,13 @@ end
 
 --- Detect whether a VcsInfo points at a GitHub repository.
 ---
---- Returns the opts table for M.new (host/owner/repo) on a match, or nil
+--- Returns the opts table for M.new (host/repository) on a match, or nil
 --- when the remote URL is missing or not a recognised GitHub URL.  Only
 --- github.com is recognised today; Enterprise hosts can be added later by
 --- extending the host check.
 ---
 --- @param vcs_info parley.VcsInfo
---- @return { host: string, owner: string, repo: string }|nil
+--- @return { host: string, repository: string }|nil
 function M.detect(vcs_info)
   if type(vcs_info) ~= "table" then
     return nil
@@ -583,7 +587,10 @@ function M.detect(vcs_info)
   if parsed.host ~= "github.com" then
     return nil
   end
-  return parsed
+  return {
+    host = parsed.host,
+    repository = parsed.owner .. "/" .. parsed.repo,
+  }
 end
 
 return M

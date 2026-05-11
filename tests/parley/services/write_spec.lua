@@ -135,7 +135,7 @@ describe("parley.services.write", function()
     provider_repository._entries[1] = {
       status = "ready",
       provider = provider,
-      opts = { owner = "owner", repo = "repo", host = "github.com" },
+      opts = { repository = "owner/repo", host = "github.com" },
     }
     review_repository._seed(1, {
       status = "ready",
@@ -164,7 +164,7 @@ describe("parley.services.write", function()
     provider_repository._entries[1] = {
       status = "ready",
       provider = provider,
-      opts = { owner = "owner", repo = "repo", host = "github.com" },
+      opts = { repository = "owner/repo", host = "github.com" },
     }
     review_repository._seed(1, {
       status = "ready",
@@ -224,7 +224,7 @@ describe("parley.services.write", function()
     provider_repository._entries[1] = {
       status = "ready",
       provider = provider,
-      opts = { owner = "owner", repo = "repo", host = "github.com" },
+      opts = { repository = "owner/repo", host = "github.com" },
     }
     review_repository._seed(1, {
       status = "ready",
@@ -300,7 +300,7 @@ describe("parley.services.write", function()
     provider_repository._entries[1] = {
       status = "ready",
       provider = provider,
-      opts = { owner = "owner", repo = "repo", host = "github.com" },
+      opts = { repository = "owner/repo", host = "github.com" },
     }
     review_repository._seed(1, {
       status = "ready",
@@ -349,7 +349,7 @@ describe("parley.services.write", function()
     provider_repository._entries[1] = {
       status = "ready",
       provider = provider,
-      opts = { owner = "owner", repo = "repo", host = "github.com" },
+      opts = { repository = "owner/repo", host = "github.com" },
     }
     review_repository._seed(1, {
       status = "ready",
@@ -587,7 +587,7 @@ describe("parley.services.write — open_new_comment_input sync-state check", fu
     provider_repository._entries[1] = {
       status = "ready",
       provider = provider,
-      opts = { owner = "owner", repo = "repo", host = "github.com" },
+      opts = { repository = "owner/repo", host = "github.com" },
     }
     review_repository._seed(1, {
       status = "ready",
@@ -737,7 +737,7 @@ describe("parley.services.write — open_new_comment_input anchor-in-diff check"
     provider_repository._entries[1] = {
       status = "ready",
       provider = provider,
-      opts = { owner = "owner", repo = "repo", host = "github.com" },
+      opts = { repository = "owner/repo", host = "github.com" },
     }
     review_repository._seed(1, {
       status = "ready",

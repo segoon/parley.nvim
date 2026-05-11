@@ -244,7 +244,7 @@ local function setup(o)
     registry.register({
       name = "MockGitHub",
       detect = function(_vcs)
-        return { host = "github.com", owner = "owner", repo = "repo" }
+        return { host = "github.com", repository = "owner/repo" }
       end,
       factory = function(_opts)
         return provider
@@ -875,7 +875,7 @@ describe("parley.services.read multi-repo", function()
       name = "MockHostA",
       detect = function(vcs)
         if vcs.remote_url:find("host-a", 1, true) then
-          return { host = "host-a", owner = "owner-a", repo = "repo-a" }
+          return { host = "host-a", repository = "owner-a/repo-a" }
         end
         return nil
       end,
@@ -887,7 +887,7 @@ describe("parley.services.read multi-repo", function()
       name = "MockHostB",
       detect = function(vcs)
         if vcs.remote_url:find("host-b", 1, true) then
-          return { host = "host-b", owner = "owner-b", repo = "repo-b" }
+          return { host = "host-b", repository = "owner-b/repo-b" }
         end
         return nil
       end,
@@ -980,8 +980,8 @@ describe("parley.services.read multi-repo", function()
     assert.equals("host-a", snap_a.provider._cache_provider)
     assert.equals("host-b", snap_b.provider._cache_provider)
     assert.are_not.equal(snap_a.provider, snap_b.provider)
-    assert.equals("owner-a", snap_a.opts.owner)
-    assert.equals("owner-b", snap_b.opts.owner)
+    assert.equals("owner-a/repo-a", snap_a.opts.repository)
+    assert.equals("owner-b/repo-b", snap_b.opts.repository)
 
     -- Composite review keys are distinct and both present.
     local key_a = "host-a/owner-a/repo-a/feature-a"

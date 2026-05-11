@@ -1,7 +1,7 @@
 --- parley.repositories.review — review data repository.
 ---
 --- Shared review data (PR, discussions) is keyed by a data-identity key
---- ("provider/owner/repo/branch"), not by bufnr. Per-file views (filtered
+--- ("provider/repository/branch"), not by bufnr. Per-file views (filtered
 --- discussions, anchor mappings) are derived per buffer. Multiple buffers in
 --- the same repo/branch share the underlying data and are all re-published
 --- when a refresh completes.
@@ -19,7 +19,7 @@ local M = {}
 -- Internal state
 -- ---------------------------------------------------------------------------
 
---- Shared review data keyed by review_key ("provider/owner/repo/branch").
+--- Shared review data keyed by review_key ("provider/repository/branch").
 --- @type table<string, {
 ---   status: 'ready'|'error',
 ---   stale: boolean,
@@ -76,7 +76,7 @@ end
 local function pr_cache_key(provider, opts, branch)
   return {
     provider = provider_name(provider),
-    repository = opts.owner .. "/" .. opts.repo,
+    repository = opts.repository,
     subkey = "pr_branch_" .. branch,
   }
 end
@@ -84,7 +84,7 @@ end
 local function discussions_cache_key(provider, opts, pr_id)
   return {
     provider = provider_name(provider),
-    repository = opts.owner .. "/" .. opts.repo,
+    repository = opts.repository,
     subkey = "discussions_" .. pr_id,
   }
 end
@@ -301,7 +301,7 @@ function M.make_key(provider_snapshot, ctx)
   end
   local name = provider_name(provider_snapshot.provider)
   local opts = provider_snapshot.opts
-  return name .. "/" .. opts.owner .. "/" .. opts.repo .. "/" .. ctx.vcs_info.branch
+  return name .. "/" .. opts.repository .. "/" .. ctx.vcs_info.branch
 end
 
 --- Check whether shared review data exists for the given key (in-memory).
@@ -523,9 +523,9 @@ end
 --- For test use only.
 --- @param bufnr integer
 --- @param snapshot table|nil  same shape as the old _entries[bufnr]
---- @param review_key? string  defaults to "test/owner/repo/branch"
+--- @param review_key? string  defaults to "test/repository/branch"
 function M._seed(bufnr, snapshot, review_key)
-  review_key = review_key or "test/owner/repo/branch"
+  review_key = review_key or "test/repository/branch"
   register_bufnr(bufnr, review_key)
   if not snapshot then
     M._reviews[review_key] = nil
