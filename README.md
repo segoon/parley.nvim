@@ -84,52 +84,17 @@ require("parley").setup({
 
 If no matching PR is found, Parley stays silent and inactive.
 
-## Usage
-
-### Commands
-
-| Command | Description |
-| --- | --- |
-| `:Parley refresh` | Force a refresh for the current buffer |
-| `:Parley discussion toggle` | Toggle the discussion window |
-| `:Parley discussion new` | Open a draft for a new comment |
-| `:Parley discussion reply` | Reply to the current thread |
-| `:Parley comment react` | React to the selected comment |
-| `:Parley comment edit` | Edit the selected comment |
-| `:Parley comment delete` | Delete the selected comment |
-
-See `:help parley-commands` for the full list.
-
-### Keymaps
-
-| Key | Context | Description |
-| --- | --- | --- |
-| `]c` / `[c` | global | Jump between commented lines in the buffer |
-| `]C` / `[C` | global | Jump between comments across all review files |
-| `q` | discussion | Close window |
-| `r` | discussion | Reply |
-| `R` | discussion | React |
-| `e` | discussion | Edit comment |
-| `d` | discussion | Delete comment |
-| `s` / `<C-s>` | draft | Submit |
-
-See `:help parley-keymaps` for the full reference.
-
 ## Telescope
 
-When `telescope = true` and Telescope is installed, Parley loads two extensions:
-
-- `parley_discussions`
-- `parley_discussions_file`
-
-Examples:
+When `telescope = true` (the default) and Telescope is installed, Parley loads two extensions:
 
 ```lua
+-- Show all discussions in the current PR
 require("telescope").extensions.parley_discussions.parley_discussions()
+-- Show all discussions in the current PR limited to the current file
 require("telescope").extensions.parley_discussions_file.parley_discussions_file()
 ```
 
-The first shows all discussions in the current PR. The second limits results to the current file.
 
 ## Statusline
 
@@ -207,25 +172,9 @@ Full reference documentation is available inside Neovim:
 :help parley.nvim
 ```
 
-## Current Limitations
-
-- GitHub is the only built-in provider today
-- Only regular file buffers are active right now
-- `diffview.nvim` integration is planned, not currently active
-- GitHub REST review comments do not expose thread resolved state
-- Because of that, unresolved counts are currently approximate
-- Resolve and unresolve are not available yet for GitHub
-- PR-level review submission exists in the provider layer, but does not yet have a user-facing workflow
-
 ## Roadmap
 
 - `diffview.nvim` integration
-- additional providers
+- Arcanum integration
 - real thread resolved state for GitHub via GraphQL
-- PR-level review actions
-
-## Why Parley?
-
-Existing plugins often focus on the full hosting platform surface.
-
-Parley focuses on one thing: line-level review discussion directly in the editing flow.
+- PR-level review actions (resolve / unresolve)
