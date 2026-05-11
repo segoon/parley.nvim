@@ -142,20 +142,20 @@ Global keymaps (registered in setup): ~
 
 Discussion window keymaps: ~
 
-    Key      Action
-    `q`        Close the discussion window
-    `r`        Reply to the current thread
-    `R`        React to the selected comment
-    `e`        Edit the selected comment
-    `d`        Delete the selected comment
+    Key          Action
+    `q` / `<Esc>`  Close the discussion window
+    `r`            Reply to the current thread
+    `R`            React to the selected comment
+    `e`            Edit the selected comment
+    `d`            Delete the selected comment
 
 Draft/input window keymaps: ~
 
-    Key      Mode    Action
-    `q`        n       Close draft (prompts if non-empty)
-    `s`        n       Submit the draft
-    `<C-s>`    i       Submit the draft
-    `C`        n       Cancel the in-flight request
+    Key          Mode    Action
+    `q` / `<Esc>`  n       Close draft (prompts if non-empty)
+    `s`            n       Submit the draft
+    `<C-s>`        i       Submit the draft
+    `C`            n       Cancel the in-flight request
 
 Reaction picker keymaps: ~
 

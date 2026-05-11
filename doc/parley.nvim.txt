@@ -142,20 +142,20 @@ Global keymaps (registered in setup): ~
 
 Discussion window keymaps: ~
 
-    Key      Action
-    `q`        Close the discussion window
-    `r`        Reply to the current thread
-    `R`        React to the selected comment
-    `e`        Edit the selected comment
-    `d`        Delete the selected comment
+    Key          Action
+    `q` / `<Esc>`  Close the discussion window
+    `r`            Reply to the current thread
+    `R`            React to the selected comment
+    `e`            Edit the selected comment
+    `d`            Delete the selected comment
 
 Draft/input window keymaps: ~
 
-    Key      Mode    Action
-    `q`        n       Close draft (prompts if non-empty)
-    `s`        n       Submit the draft
-    `<C-s>`    i       Submit the draft
-    `C`        n       Cancel the in-flight request
+    Key          Mode    Action
+    `q` / `<Esc>`  n       Close draft (prompts if non-empty)
+    `s`            n       Submit the draft
+    `<C-s>`        i       Submit the draft
+    `C`            n       Cancel the in-flight request
 
 Reaction picker keymaps: ~
 
@@ -251,8 +251,10 @@ The full default configuration:
         spinner_interval = 100,
       },
       keymaps = {
-        next_comment = "]c",
-        prev_comment = "[c",
+        buf_next    = "]c",
+        buf_prev    = "[c",
+        review_next = "]C",
+        review_prev = "[C",
       },
       providers = {
         github = {
@@ -333,11 +335,17 @@ progress ~                                           *parley-config-progress*
 
 keymaps ~                                             *parley-config-keymaps*
 
-    next_comment  (`string`)  Default: `"]c"`
-        Jump to next commented line
+    buf_next  (`string`)  Default: `"]c"`
+        Jump to next commented line in buffer
 
-    prev_comment  (`string`)  Default: `"[c"`
-        Jump to previous commented line
+    buf_prev  (`string`)  Default: `"[c"`
+        Jump to previous commented line in buffer
+
+    review_next  (`string`)  Default: `"]C"`
+        Jump to next comment in the whole review
+
+    review_prev  (`string`)  Default: `"[C"`
+        Jump to previous comment in the whole review
 
 <parley-configuration-end>
 
