@@ -108,6 +108,7 @@ end
 ---
 --- @param bufnr integer  Buffer to navigate within (usually the current buffer)
 function M.buf_next(bufnr)
+  local original_bufnr = bufnr
   bufnr = require("parley.discussion_window").resolve_source_bufnr(bufnr)
   local window_helpers = require("parley.discussion_window.window")
   local winid = window_helpers.resolve_source_winid(bufnr, nil) or 0
@@ -136,7 +137,18 @@ function M.buf_next(bufnr)
     target = rows[1]
   end
 
+  local from_float = original_bufnr ~= bufnr
+  if from_float then
+    require("parley.discussion_window").close(bufnr)
+  end
+  vim.api.nvim_set_current_win(winid)
   vim.api.nvim_win_set_cursor(winid, { target + 1, 0 })
+  if from_float then
+    local target_line = target + 1
+    vim.schedule(function()
+      require("parley.discussion_window").open_current_line(bufnr, { cursor_line = target_line })
+    end)
+  end
 end
 
 --- Jump to the previous commented line before the cursor in the current buffer.
@@ -151,6 +163,7 @@ end
 ---
 --- @param bufnr integer  Buffer to navigate within (usually the current buffer)
 function M.buf_prev(bufnr)
+  local original_bufnr = bufnr
   bufnr = require("parley.discussion_window").resolve_source_bufnr(bufnr)
   local window_helpers = require("parley.discussion_window.window")
   local winid = window_helpers.resolve_source_winid(bufnr, nil) or 0
@@ -179,7 +192,18 @@ function M.buf_prev(bufnr)
     target = rows[#rows]
   end
 
+  local from_float = original_bufnr ~= bufnr
+  if from_float then
+    require("parley.discussion_window").close(bufnr)
+  end
+  vim.api.nvim_set_current_win(winid)
   vim.api.nvim_win_set_cursor(winid, { target + 1, 0 })
+  if from_float then
+    local target_line = target + 1
+    vim.schedule(function()
+      require("parley.discussion_window").open_current_line(bufnr, { cursor_line = target_line })
+    end)
+  end
 end
 
 -- ---------------------------------------------------------------------------
@@ -199,6 +223,7 @@ end
 ---
 --- @param bufnr integer  Source buffer (used to look up review data)
 function M.review_next(bufnr)
+  local original_bufnr = bufnr
   bufnr = require("parley.discussion_window").resolve_source_bufnr(bufnr)
   local window_helpers = require("parley.discussion_window.window")
   local winid = window_helpers.resolve_source_winid(bufnr, nil) or 0
@@ -231,10 +256,20 @@ function M.review_next(bufnr)
   local mapping = mappings[disc.id]
   local target_line = (mapping and mapping.local_line) or disc.line
 
+  local from_float = original_bufnr ~= bufnr
+  if from_float then
+    require("parley.discussion_window").close(bufnr)
+  end
+  vim.api.nvim_set_current_win(winid)
   if disc.file ~= ctx.rel_path then
     vim.cmd("edit " .. vim.fn.fnameescape(vcs_root .. "/" .. disc.file))
   end
   vim.api.nvim_win_set_cursor(winid, { target_line, 0 })
+  if from_float then
+    vim.schedule(function()
+      require("parley.discussion_window").open_current_line(bufnr, { cursor_line = target_line })
+    end)
+  end
 end
 
 --- Jump to the previous discussion across all files in the review.
@@ -247,6 +282,7 @@ end
 ---
 --- @param bufnr integer  Source buffer (used to look up review data)
 function M.review_prev(bufnr)
+  local original_bufnr = bufnr
   bufnr = require("parley.discussion_window").resolve_source_bufnr(bufnr)
   local window_helpers = require("parley.discussion_window.window")
   local winid = window_helpers.resolve_source_winid(bufnr, nil) or 0
@@ -285,10 +321,20 @@ function M.review_prev(bufnr)
   local mapping = mappings[disc.id]
   local target_line = (mapping and mapping.local_line) or disc.line
 
+  local from_float = original_bufnr ~= bufnr
+  if from_float then
+    require("parley.discussion_window").close(bufnr)
+  end
+  vim.api.nvim_set_current_win(winid)
   if disc.file ~= ctx.rel_path then
     vim.cmd("edit " .. vim.fn.fnameescape(vcs_root .. "/" .. disc.file))
   end
   vim.api.nvim_win_set_cursor(winid, { target_line, 0 })
+  if from_float then
+    vim.schedule(function()
+      require("parley.discussion_window").open_current_line(bufnr, { cursor_line = target_line })
+    end)
+  end
 end
 
 return M
