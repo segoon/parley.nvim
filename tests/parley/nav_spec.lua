@@ -577,6 +577,26 @@ describe("nav.review_next", function()
     assert.equal(4, cursor_row())
     assert.equal(0, #cmd_calls)
   end)
+
+  it("warns and does not edit when target discussion has empty file", function()
+    local bufnr = scratch(20)
+    local discussions = {
+      { id = "1", file = "", line = 3, resolved = false, comments = {} },
+    }
+    setup_review_stubs(
+      { rel_path = "a.lua", vcs_info = { root = "/repo" } },
+      { [bufnr] = { mappings = {} } },
+      discussions
+    )
+    set_cursor(1)
+
+    nav.review_next(bufnr)
+
+    assert.equal(1, cursor_row())
+    assert.equal(1, #notify_calls)
+    assert.equal(vim.log.levels.WARN, notify_calls[1].level)
+    assert.equal(0, #cmd_calls)
+  end)
 end)
 
 -- ---------------------------------------------------------------------------
@@ -704,6 +724,26 @@ describe("nav.review_prev", function()
     assert.equal(1, #cmd_calls)
     assert.is_truthy(cmd_calls[1]:find("b.lua"))
     assert.equal(0, #notify_calls)
+  end)
+
+  it("warns and does not edit when target discussion has empty file", function()
+    local bufnr = scratch(20)
+    local discussions = {
+      { id = "1", file = "", line = 7, resolved = false, comments = {} },
+    }
+    setup_review_stubs(
+      { rel_path = "b.lua", vcs_info = { root = "/repo" } },
+      { [bufnr] = { mappings = {} } },
+      discussions
+    )
+    set_cursor(7)
+
+    nav.review_prev(bufnr)
+
+    assert.equal(7, cursor_row())
+    assert.equal(1, #notify_calls)
+    assert.equal(vim.log.levels.WARN, notify_calls[1].level)
+    assert.equal(0, #cmd_calls)
   end)
 end)
 

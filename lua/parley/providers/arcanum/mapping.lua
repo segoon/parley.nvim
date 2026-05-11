@@ -152,7 +152,17 @@ function M.extract_anchor_location(anchor)
 
   local path = file.path
   if not path or path == vim.NIL then
-    -- Try entry_id based path — not directly available, fall back
+    local entry_id = file.entry_id
+    local after = entry_id and entry_id.content_id_after or nil
+    local before = entry_id and entry_id.content_id_before or nil
+
+    path = after and after.path or nil
+    if not path or path == vim.NIL then
+      path = before and before.path or nil
+    end
+  end
+
+  if not path or path == vim.NIL or path == "" then
     return nil, nil, nil
   end
 

@@ -61,6 +61,34 @@ local function make_anchor(path, line, size)
   }
 end
 
+--- Build an anchor that carries the file path via entry_id content ids.
+--- @param after_path string|nil
+--- @param before_path string|nil
+--- @param line integer
+--- @param size? integer
+--- @return table
+local function make_entry_id_anchor(after_path, before_path, line, size)
+  return {
+    review_request = {
+      id = 1,
+      diff = {
+        diff_set_xid = "xid-123",
+        file = {
+          entry_id = {
+            content_id_after = after_path and { path = after_path } or nil,
+            content_id_before = before_path and { path = before_path } or nil,
+          },
+          position = {
+            line = line,
+            size = size or 1,
+            side = "new",
+          },
+        },
+      },
+    },
+  }
+end
+
 -- ---------------------------------------------------------------------------
 -- Suite: map_reactions
 -- ---------------------------------------------------------------------------
@@ -258,6 +286,22 @@ describe("parley.providers.arcanum.mapping — extract_anchor_location", functio
     local _, _, end_line = mapping.extract_anchor_location(anchor)
     assert.is_nil(end_line)
   end)
+
+  it("falls back to entry_id.content_id_after.path", function()
+    local anchor = make_entry_id_anchor("src/from-after.lua", nil, 8, 2)
+    local path, line, end_line = mapping.extract_anchor_location(anchor)
+    assert.equals("src/from-after.lua", path)
+    assert.equals(8, line)
+    assert.equals(9, end_line)
+  end)
+
+  it("falls back to entry_id.content_id_before.path", function()
+    local anchor = make_entry_id_anchor(nil, "src/from-before.lua", 13, 1)
+    local path, line, end_line = mapping.extract_anchor_location(anchor)
+    assert.equals("src/from-before.lua", path)
+    assert.equals(13, line)
+    assert.is_nil(end_line)
+  end)
 end)
 
 -- ---------------------------------------------------------------------------
@@ -304,6 +348,24 @@ describe("parley.providers.arcanum.mapping — group_comments_into_discussions",
     }
     local result = mapping.group_comments_into_discussions(comments, "")
     assert.equals("src/bar.lua", result[1].file)
+  end)
+
+  it("maps file path from entry_id content paths", function()
+    local comments = {
+      make_raw_comment({
+        id = 1,
+        anchor = make_entry_id_anchor(
+          "taxi/uservices/userver/chaotic/chaotic/back/cpp/templates/type.hpp.jinja",
+          nil,
+          55
+        ),
+        reply_to_id = vim.NIL,
+      }),
+    }
+    local result = mapping.group_comments_into_discussions(comments, "")
+    assert.equals(1, #result)
+    assert.equals("taxi/uservices/userver/chaotic/chaotic/back/cpp/templates/type.hpp.jinja", result[1].file)
+    assert.equals(55, result[1].line)
   end)
 
   it("maps line from anchor position", function()

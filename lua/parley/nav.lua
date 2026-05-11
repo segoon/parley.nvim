@@ -251,6 +251,10 @@ function M.review_next(bufnr)
   -- Next index with wrap-around.
   local target_idx = (cur_idx % #sorted) + 1
   local disc = sorted[target_idx]
+  if not disc.file or disc.file == "" then
+    vim.notify("Cannot navigate to a discussion without a file path", vim.log.levels.WARN)
+    return
+  end
 
   local vcs_root = ctx.vcs_info and ctx.vcs_info.root or ""
   local mapping = mappings[disc.id]
@@ -316,6 +320,10 @@ function M.review_prev(bufnr)
     target_idx = cur_idx - 1
   end
   local disc = sorted[target_idx]
+  if not disc.file or disc.file == "" then
+    vim.notify("Cannot navigate to a discussion without a file path", vim.log.levels.WARN)
+    return
+  end
 
   local vcs_root = ctx.vcs_info and ctx.vcs_info.root or ""
   local mapping = mappings[disc.id]
