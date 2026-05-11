@@ -716,12 +716,19 @@ end)
 
 describe("nav from discussion float buffer", function()
   local saved_discussion_window
+  local saved_window_helpers
 
-  --- Install a stub for discussion_window.resolve_source_bufnr so we can
-  --- simulate the float→source mapping without actually opening any window.
+  --- Stub both modules that nav uses when called from a float:
+  ---   • discussion_window.resolve_source_bufnr  — maps float → source bufnr
+  ---   • discussion_window.window.resolve_source_winid — maps source bufnr → winid
+  ---
+  --- `source_winid` defaults to 0 (current window) when not provided.
   ---@param float_bufnr integer
   ---@param source_bufnr integer
-  local function stub_resolve(float_bufnr, source_bufnr)
+  ---@param source_winid? integer
+  local function stub_float(float_bufnr, source_bufnr, source_winid)
+    local winid = source_winid or 0
+
     saved_discussion_window = package.loaded["parley.discussion_window"]
     package.loaded["parley.discussion_window"] = {
       resolve_source_bufnr = function(bufnr)
@@ -731,56 +738,62 @@ describe("nav from discussion float buffer", function()
         return bufnr
       end,
     }
+
+    saved_window_helpers = package.loaded["parley.discussion_window.window"]
+    package.loaded["parley.discussion_window.window"] = {
+      resolve_source_winid = function(_bufnr, _preferred)
+        return winid
+      end,
+    }
   end
 
-  local function restore_resolve()
+  local function restore_stubs()
     package.loaded["parley.discussion_window"] = saved_discussion_window
+    package.loaded["parley.discussion_window.window"] = saved_window_helpers
   end
 
   before_each(install_notify_spy)
   after_each(function()
     restore_notify()
-    restore_resolve()
+    restore_stubs()
     teardown_review_stubs()
   end)
 
-  it("buf_next resolves float bufnr to source and finds marks", function()
+  it("buf_next resolves float bufnr to source and sets cursor in source window", function()
     local source_bufnr = scratch(10)
-    place_mark(source_bufnr, 3) -- line 4
-    place_mark(source_bufnr, 7) -- line 8
+    place_mark(source_bufnr, 3) -- row 3 → line 4
+    place_mark(source_bufnr, 7) -- row 7 → line 8
 
-    -- Simulate a float buffer that resolve_source_bufnr maps to source_bufnr.
+    -- scratch() made source_bufnr current, so window 0 shows it.
+    -- The float is a separate scratch buf — its line count is 1.
     local float_bufnr = vim.api.nvim_create_buf(false, true)
-    stub_resolve(float_bufnr, source_bufnr)
+    stub_float(float_bufnr, source_bufnr) -- source_winid = 0 (current)
 
-    -- Cursor must be in a window showing source_bufnr for nvim_win_set_cursor to work.
-    vim.api.nvim_set_current_buf(source_bufnr)
-    set_cursor(1) -- above all marks
+    set_cursor(1) -- cursor in source window, above all marks
 
     nav.buf_next(float_bufnr)
 
-    assert.equal(4, cursor_row()) -- jumped to row 3 → line 4
+    assert.equal(4, cursor_row()) -- moved to row 3 → line 4
     assert.equal(0, #notify_calls)
   end)
 
-  it("buf_prev resolves float bufnr to source and finds marks", function()
+  it("buf_prev resolves float bufnr to source and sets cursor in source window", function()
     local source_bufnr = scratch(10)
-    place_mark(source_bufnr, 2) -- line 3
-    place_mark(source_bufnr, 6) -- line 7
+    place_mark(source_bufnr, 2) -- row 2 → line 3
+    place_mark(source_bufnr, 6) -- row 6 → line 7
 
     local float_bufnr = vim.api.nvim_create_buf(false, true)
-    stub_resolve(float_bufnr, source_bufnr)
+    stub_float(float_bufnr, source_bufnr)
 
-    vim.api.nvim_set_current_buf(source_bufnr)
     set_cursor(10) -- below all marks
 
     nav.buf_prev(float_bufnr)
 
-    assert.equal(7, cursor_row()) -- jumped to row 6 → line 7
+    assert.equal(7, cursor_row()) -- moved to row 6 → line 7
     assert.equal(0, #notify_calls)
   end)
 
-  it("review_next resolves float bufnr to source and navigates", function()
+  it("review_next resolves float bufnr to source and sets cursor in source window", function()
     local source_bufnr = scratch(20)
     local discussions = {
       { id = "1", file = "a.lua", line = 3, resolved = false, comments = {} },
@@ -797,10 +810,9 @@ describe("nav from discussion float buffer", function()
     )
 
     local float_bufnr = vim.api.nvim_create_buf(false, true)
-    stub_resolve(float_bufnr, source_bufnr)
+    stub_float(float_bufnr, source_bufnr)
 
     install_cmd_spy()
-    vim.api.nvim_set_current_buf(source_bufnr)
     set_cursor(1) -- above both discussions; _current_index = 0
 
     nav.review_next(float_bufnr)
@@ -811,7 +823,7 @@ describe("nav from discussion float buffer", function()
     restore_cmd()
   end)
 
-  it("review_prev resolves float bufnr to source and navigates", function()
+  it("review_prev resolves float bufnr to source and sets cursor in source window", function()
     local source_bufnr = scratch(20)
     local discussions = {
       { id = "1", file = "a.lua", line = 3, resolved = false, comments = {} },
@@ -828,10 +840,9 @@ describe("nav from discussion float buffer", function()
     )
 
     local float_bufnr = vim.api.nvim_create_buf(false, true)
-    stub_resolve(float_bufnr, source_bufnr)
+    stub_float(float_bufnr, source_bufnr)
 
     install_cmd_spy()
-    vim.api.nvim_set_current_buf(source_bufnr)
     set_cursor(10) -- on disc 2; cur_idx = 2
 
     nav.review_prev(float_bufnr)
