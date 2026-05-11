@@ -103,8 +103,12 @@ end
 --- navigation wraps silently to the first mark.  When there are no marks a
 --- notification is emitted and the cursor is unchanged.
 ---
+--- When called from a discussion float the buffer is transparently resolved to
+--- the owning source buffer so that navigation works regardless of focus.
+---
 --- @param bufnr integer  Buffer to navigate within (usually the current buffer)
 function M.buf_next(bufnr)
+  bufnr = require("parley.discussion_window").resolve_source_bufnr(bufnr)
   local rows = M._unique_rows(bufnr)
 
   if #rows == 0 then
@@ -139,8 +143,12 @@ end
 --- the navigation wraps silently to the last mark.  When there are no marks a
 --- notification is emitted and the cursor is unchanged.
 ---
+--- When called from a discussion float the buffer is transparently resolved to
+--- the owning source buffer so that navigation works regardless of focus.
+---
 --- @param bufnr integer  Buffer to navigate within (usually the current buffer)
 function M.buf_prev(bufnr)
+  bufnr = require("parley.discussion_window").resolve_source_bufnr(bufnr)
   local rows = M._unique_rows(bufnr)
 
   if #rows == 0 then
@@ -180,8 +188,12 @@ end
 --- the file is opened with `vim.cmd("edit …")` before placing the cursor.
 --- Navigation wraps silently at the end of the last file.
 ---
+--- When called from a discussion float the buffer is transparently resolved to
+--- the owning source buffer so that navigation works regardless of focus.
+---
 --- @param bufnr integer  Source buffer (used to look up review data)
 function M.review_next(bufnr)
+  bufnr = require("parley.discussion_window").resolve_source_bufnr(bufnr)
   local context_repository = require("parley.repositories.context")
   local review_repository = require("parley.repositories.review")
 
@@ -221,8 +233,12 @@ end
 --- Mirror of review_next: walks backward through the (file, line)-sorted
 --- discussion list with silent wrap-around.
 ---
+--- When called from a discussion float the buffer is transparently resolved to
+--- the owning source buffer so that navigation works regardless of focus.
+---
 --- @param bufnr integer  Source buffer (used to look up review data)
 function M.review_prev(bufnr)
+  bufnr = require("parley.discussion_window").resolve_source_bufnr(bufnr)
   local context_repository = require("parley.repositories.context")
   local review_repository = require("parley.repositories.review")
 
