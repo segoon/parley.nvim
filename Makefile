@@ -36,13 +36,7 @@ deps:
 	fi
 
 test:
-	@output=$$($(NEOVIM) --headless \
-		-u tests/minimal_init.lua \
-		-c "lua require('plenary.test_harness').test_directory('tests/', { minimal_init = 'tests/minimal_init.lua', sequential = true })" \
-		2>&1); \
-	exit_code=$$?; \
-	if [ $$exit_code -eq 0 ]; then echo "OK"; else printf '%s\n' "$$output"; fi; \
-	exit $$exit_code
+	@NEOVIM=$(NEOVIM) bash scripts/run_tests.sh
 
 # ─── Documentation ────────────────────────────────────────────────────────────
 
