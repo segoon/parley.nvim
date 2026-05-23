@@ -24,7 +24,10 @@ function M.system(cmd, opts)
   local system_opts = vim.deepcopy(opts)
   system_opts._system = nil
   return M.callback(function(callback)
-    system(cmd, system_opts, callback)
+    local ok, err = pcall(system, cmd, system_opts, callback)
+    if not ok then
+      callback({ code = 1, stdout = "", stderr = tostring(err) })
+    end
   end)
 end
 
