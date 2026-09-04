@@ -45,7 +45,7 @@ local M = {}
 --- ): vim.SystemObj|nil
 --- @field _sleep        fun(timeout_ms: integer): nil
 --- @field _defer        fun(callback: fun(), timeout_ms: integer): uv_timer_t|nil
---- @field _get_config   fun(): parley.Config|nil
+--- @field _config parley.GitHubProviderConfig
 --- @field _auth         table
 --- @field _viewer_login string|nil
 --- @field _cache_provider string
@@ -102,13 +102,14 @@ GitHubProvider.reaction_presentation = require("parley.providers.github.reaction
 ---   ): vim.SystemObj|nil,
 ---   _sleep?: fun(timeout_ms: integer): nil,
 ---   _defer?: fun(callback: fun(), timeout_ms: integer): uv_timer_t|nil,
----   _get_config?: fun(): parley.Config|nil,
+---   config?: parley.GitHubProviderConfig,
 ---   _system?: fun(cmd: string[], opts: table, callback: fun(result: vim.SystemCompleted)): vim.SystemObj,
 ---   _auth?: table,
 --- }
 --- @return parley.github.Provider
 function M.new(opts)
   opts = opts or {}
+  local config = require("parley.providers.github.config").resolve(opts.config)
   assert(
     type(opts.repository) == "string" and opts.repository ~= "",
     "parley.github: opts.repository must be a non-empty string"
@@ -147,9 +148,7 @@ function M.new(opts)
     _spawn = opts._spawn or default_spawn,
     _sleep = opts._sleep or await.sleep,
     _defer = opts._defer or vim.defer_fn,
-    _get_config = opts._get_config or function()
-      return require("parley").config
-    end,
+    _config = config,
     _auth = opts._auth or require("parley.providers.github.auth"),
     _viewer_login = nil,
     _cache_provider = "github",

@@ -308,7 +308,7 @@ end
 ---   ): vim.SystemObj|nil,
 ---   _sleep?: fun(timeout_ms: integer): nil,
 ---   _defer?: fun(callback: fun(), timeout_ms: integer): uv_timer_t|nil,
----   _get_config?: fun(): table|nil,
+---   config?: table,
 ---   _system?: fun(cmd: string[], opts: table, callback: fun(result: vim.SystemCompleted)): vim.SystemObj,
 --- }
 local function make_provider(opts)
@@ -322,7 +322,7 @@ local function make_provider(opts)
     _spawn = opts._spawn,
     _sleep = opts._sleep,
     _defer = opts._defer,
-    _get_config = opts._get_config,
+    config = opts.config,
     _system = opts._system,
     _auth = make_auth("ghp_TESTTOKEN"),
   })
@@ -466,9 +466,6 @@ async_tests.describe("parley.providers.github.provider — detect_pr", function(
         timeouts[#timeouts + 1] = opts.timeout
         callback({ code = 0, stdout = PR_LIST_EMPTY_JSON, stderr = "" })
         return { kill = function() end }
-      end,
-      _get_config = function()
-        return nil
       end,
     })
 

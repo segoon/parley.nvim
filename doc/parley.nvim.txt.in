@@ -243,6 +243,8 @@ With the built-in statusline: >vim
 <parley-configuration-start>
 <parley-configuration-end>
 
+Provider defaults are merged separately; see |parley-providers|.
+
 ==============================================================================
 9. HIGHLIGHTS                                        *parley-highlights*
 
@@ -318,8 +320,18 @@ Run `gh auth login` to set up authentication.
 
 Provider options: ~
 
-GitHub-specific options live under `providers.github` in the setup call.
-See |parley-configuration|.
+GitHub-specific options live under `providers.github` in the setup call. Defaults: >lua
+    require("parley").setup({
+      providers = {
+        github = {
+          timeout_ms = 5000,
+          retry_count = 2,
+          retry_base_delay_ms = 250,
+          retry_max_delay_ms = 2000,
+        },
+      },
+    })
+<
 
 Limitations: ~
 
@@ -375,6 +387,19 @@ Limitations: ~
   - Attempting any unsupported operation shows a "not supported" error.
 
 ------------------------------------------------------------------------------
+
+Provider configuration lifecycle: ~
+
+Built-in defaults and registration are owned by `parley.providers`. Each `setup()`
+binds a copy of the merged provider settings to its registered factories. Existing
+instances keep their settings when options or `require("parley").config` change.
+Call `setup()` again to apply changed settings to subsequently created instances.
+
+Direct built-in constructors accept `config = { ... }` with provider-specific
+options and copy it over that provider's defaults. Omitting `config` uses those
+defaults. Arcanum's explicit constructor `host` overrides `config.host`; both
+request URLs and cache identity use the selected host. `retry_count = 0` disables
+retries.
 
 Custom providers: ~
 

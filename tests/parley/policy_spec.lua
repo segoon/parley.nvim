@@ -168,7 +168,9 @@ local function internal_requires(file_path)
   local deps = {}
   for _, line in ipairs(vim.split(stripped, "\n", { plain = true })) do
     for module_name in line:gmatch("require%([\"'](parley%.[^\"']+)[\"']%)") do
-      deps[#deps + 1] = "lua/" .. module_name:gsub("%.", "/") .. ".lua"
+      local path = "lua/" .. module_name:gsub("%.", "/")
+      deps[#deps + 1] = vim.fn.filereadable(repo_root .. "/" .. path .. ".lua") == 1 and (path .. ".lua")
+        or (path .. "/init.lua")
     end
   end
   table.sort(deps)
@@ -246,6 +248,14 @@ local function cycle_violations(policy)
 end
 
 describe("architecture policy", function()
+  it("limits shared setup to the provider catalog", function()
+    for _, dep in ipairs(internal_requires("lua/parley/init.lua")) do
+      if dep:match("^lua/parley/providers/") then
+        assert.equals("lua/parley/providers/init.lua", dep)
+      end
+    end
+  end)
+
   it("keeps shared VCS code independent of concrete providers", function()
     local paths = { "lua/parley/vcs.lua", "lua/parley/anchor.lua", "lua/parley/local_content.lua" }
     vim.list_extend(paths, vim.fn.glob("lua/parley/vcs/**/*.lua", false, true))

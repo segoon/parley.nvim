@@ -17,7 +17,7 @@
 ---   • _http_run / _http_start: injectable transport seams.
 ---   • _auth: injectable auth module.
 ---   • _sleep / _defer: injectable timing seams.
----   • _get_config: injectable config seam.
+---   • config: explicit configuration snapshot.
 
 local dbg = require("parley.debug")
 local mapping = require("parley.providers.arcanum.mapping")
@@ -42,7 +42,7 @@ local PR_DETAIL_FIELDS = "id,summary,status,url,author,vcs"
 --- @field _auth         table
 --- @field _sleep        fun(timeout_ms: integer): nil
 --- @field _defer        fun(callback: fun(), timeout_ms: integer): uv_timer_t|nil
---- @field _get_config   fun(): parley.Config|nil
+--- @field _config parley.ArcanumProviderConfig
 --- @field _viewer_login string|nil
 --- @field _cache_provider string
 
@@ -64,7 +64,7 @@ ArcanumProvider.reaction_presentation = require("parley.providers.arcanum.reacti
 --- Create a new Arcanum provider.
 ---
 --- Required opts: branch (the current arc remote branch id), login (the arc user login).
---- Optional opts: host, _auth, _http_run, _http_start, _sleep, _defer, _get_config.
+--- Optional opts: host, _auth, _http_run, _http_start, _sleep, _defer, config.
 ---
 --- @param opts {
 ---   branch?:       string,
@@ -73,22 +73,21 @@ ArcanumProvider.reaction_presentation = require("parley.providers.arcanum.reacti
 ---   _auth?:        table,
 ---   _sleep?:       fun(timeout_ms: integer): nil,
 ---   _defer?:       fun(callback: fun(), timeout_ms: integer): uv_timer_t|nil,
----   _get_config?:  fun(): parley.Config|nil,
+---   config?: parley.ArcanumProviderConfig,
 --- }
 --- @return parley.arcanum.Provider
 function M.new(opts)
   opts = opts or {}
+  local config = require("parley.providers.arcanum.config").resolve(opts.config)
 
   local await = require("parley.runtime.await")
 
   local self = setmetatable({
-    _host = opts.host or "arcanum.yandex.net",
+    _host = opts.host or config.host,
     _auth = opts._auth or require("parley.providers.arcanum.auth"),
     _sleep = opts._sleep or await.sleep,
     _defer = opts._defer or vim.defer_fn,
-    _get_config = opts._get_config or function()
-      return require("parley").config
-    end,
+    _config = config,
     _viewer_login = opts.login or nil,
     _cache_provider = "arcanum",
     -- Detected from vcs_info at detect() time

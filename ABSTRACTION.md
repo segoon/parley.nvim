@@ -123,6 +123,15 @@ remain separate from checkout-specific local projections.
 
 ### 5. Shared setup owns provider defaults and initialization knowledge
 
+**Status: addressed.** The explicit catalog in `providers/init.lua` owns built-in
+registration and delegates defaults, configuration types, factories, and startup
+hooks to provider descriptors. Shared setup consumes its generic interface.
+Registered factories bind copied settings; constructors retain independent
+configuration snapshots, and transports no longer read global configuration.
+Arcanum's configured host now reaches request URLs and cache identity; an explicit
+constructor host takes precedence. Catalog, setup lifecycle, configuration, and
+boundary tests cover this change. The text below records the original finding.
+
 **Severity: 6/10. Effort: medium.**
 
 [`init.lua`](lua/parley/init.lua) defines concrete provider configuration types,

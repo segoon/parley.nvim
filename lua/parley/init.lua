@@ -53,19 +53,6 @@ local M = {}
 --- @field review_next string  Jump to next comment in the whole review
 --- @field review_prev string  Jump to previous comment in the whole review
 
---- @class parley.GitHubProviderConfig
---- @field timeout_ms integer
---- @field retry_count integer
---- @field retry_base_delay_ms integer
---- @field retry_max_delay_ms integer
-
---- @class parley.ArcanumProviderConfig
---- @field timeout_ms integer
---- @field retry_count integer
---- @field retry_base_delay_ms integer
---- @field retry_max_delay_ms integer
---- @field host string  Arcanum API hostname (default: "arcanum.yandex.net")
-
 --- @type parley.Config
 local defaults = {
   refresh_interval = 300, -- 5 minutes
@@ -103,21 +90,7 @@ local defaults = {
     review_next = "]C",
     review_prev = "[C",
   },
-  providers = {
-    github = {
-      timeout_ms = 5000,
-      retry_count = 2,
-      retry_base_delay_ms = 250,
-      retry_max_delay_ms = 2000,
-    },
-    arcanum = {
-      timeout_ms = 10000,
-      retry_count = 2,
-      retry_base_delay_ms = 250,
-      retry_max_delay_ms = 2000,
-      host = "arcanum.yandex.net",
-    },
-  },
+  providers = {},
 }
 
 --- Active (merged) configuration. Nil until setup() is called.
@@ -304,7 +277,8 @@ end
 ---
 --- @param opts parley.Config | nil  Partial config; merged with defaults.
 function M.setup(opts)
-  M.config = vim.tbl_deep_extend("force", defaults, opts or {})
+  local providers = require("parley.providers")
+  M.config = vim.tbl_deep_extend("force", vim.deepcopy(defaults), { providers = providers.defaults() }, opts or {})
 
   require("parley.debug").tracing_enable(M.config.debug)
 
@@ -323,28 +297,7 @@ function M.setup(opts)
   vcs.reset_detectors()
 
   vcs.reset_adapters()
-  require("parley.providers.vcs").register(vcs)
-
-  -- Probe gh availability once so subsequent calls can fast-fail without
-  -- spawning a subprocess.
-  require("parley.providers.github.transport").probe_gh_executable()
-
-  -- Register built-in providers.
-  local gh = require("parley.providers.github.provider")
-  registry.register({
-    name = "GitHub",
-    detect = gh.detect,
-    factory = gh.new,
-    health = require("parley.providers.github.diagnostics").check,
-  })
-
-  local arcanum = require("parley.providers.arcanum.provider")
-  registry.register({
-    name = "Arcanum",
-    detect = arcanum.detect,
-    factory = arcanum.new,
-    health = require("parley.providers.arcanum.diagnostics").check,
-  })
+  providers.register({ registry = registry, vcs = vcs }, M.config.providers)
 
   if M.config.telescope then
     local ok_telescope, telescope = pcall(require, "telescope")

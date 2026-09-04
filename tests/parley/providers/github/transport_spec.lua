@@ -32,7 +32,7 @@ local function stub_notify()
 end
 
 --- Build a minimal provider table for transport functions.
---- @param opts? table  optional overrides for _runner, _spawn, _sleep, _defer, _get_config
+--- @param opts? table  optional overrides for _runner, _spawn, _sleep, _defer, config
 --- @return table
 local function make_provider(opts)
   opts = opts or {}
@@ -49,14 +49,7 @@ local function make_provider(opts)
       cb()
       return nil
     end,
-    _get_config = opts._get_config
-      or function()
-        return {
-          providers = {
-            github = { timeout_ms = 5000, retry_count = 0, retry_base_delay_ms = 250, retry_max_delay_ms = 2000 },
-          },
-        }
-      end,
+    _config = require("parley.providers.github.config").resolve(opts.config or { retry_count = 0 }),
   }
 end
 

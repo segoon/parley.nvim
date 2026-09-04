@@ -85,6 +85,36 @@ describe("parley setup", function()
     assert.equals(2, #vcs.registered_detectors())
   end)
 
+  it("snapshots provider settings across repeated setup", function()
+    local specs = {}
+    cache.setup = function() end
+    signs.setup_highlights = function() end
+    progress_popup.setup = function() end
+    read_service.refresh_async = function() end
+    registry.register = function(spec)
+      specs[#specs + 1] = spec
+    end
+    local opts = { telescope = false, providers = { arcanum = { host = "first.example", retry_count = 0 } } }
+    parley.setup(opts)
+    local factory = specs[2].factory
+    local auth = {
+      read_token = function()
+        return "token"
+      end,
+    }
+    local p = factory({ _auth = auth })
+    opts.providers.arcanum.host = "mutated.example"
+    parley.config.providers.arcanum.host = "mutated.example"
+    assert.equals("first.example", p:cache_identity().host)
+    assert.equals("first.example", factory({ _auth = auth }):cache_identity().host)
+    assert.equals(0, require("parley.providers.arcanum.transport").transport_config(p).retry_count)
+    parley.setup({ telescope = false, providers = { arcanum = { host = "second.example" } } })
+    assert.equals("second.example", specs[4].factory({ _auth = auth }):cache_identity().host)
+    assert.equals("first.example", p:cache_identity().host)
+    parley.setup({ telescope = false })
+    assert.equals("arcanum.yandex.net", specs[6].factory({ _auth = auth }):cache_identity().host)
+  end)
+
   it("wires :Parley refresh to a progress-enabled refresh", function()
     local calls = {}
     cache.setup = function(_opts) end
