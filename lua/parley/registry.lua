@@ -90,7 +90,7 @@ function M.resolve_with_opts(vcs_info)
         error(
           string.format(
             "parley.registry: factory for provider %q returned an invalid provider "
-              .. "(missing or non-function methods)",
+              .. "(required methods must be functions and display_name must be a nonblank string)",
             spec.name
           ),
           2

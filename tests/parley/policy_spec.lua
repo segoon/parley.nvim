@@ -248,6 +248,12 @@ local function cycle_violations(policy)
 end
 
 describe("architecture policy", function()
+  it("keeps statusline independent of concrete providers", function()
+    for _, dep in ipairs(internal_requires("lua/parley/statusline.lua")) do
+      assert.is_nil(dep:match("^lua/parley/providers/"), "statusline imports " .. dep)
+    end
+  end)
+
   it("limits shared setup to the provider catalog", function()
     for _, dep in ipairs(internal_requires("lua/parley/init.lua")) do
       if dep:match("^lua/parley/providers/") then

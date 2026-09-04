@@ -109,6 +109,7 @@ function M.new(opts)
   --- @field discussions parley.Discussion[]
 
   local mock = {
+    display_name = "Mock",
     --- @type parley.MockState
     state = {
       token = opts.token or "",

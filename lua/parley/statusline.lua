@@ -4,11 +4,6 @@ local read_service = require("parley.services.read")
 
 local M = {}
 
---- @type table<string, string>
-local PROVIDER_LABELS = {
-  github = "GitHub",
-}
-
 --- @type table<parley.ReviewStatus, string>
 local REVIEW_STATUS_LABELS = {
   approved = "approved",
@@ -17,23 +12,6 @@ local REVIEW_STATUS_LABELS = {
   dismissed = "dismissed",
   commented = "commented",
 }
-
---- @param state table
---- @return string|nil
-local function provider_label(state)
-  local provider = state.provider
-  local provider_key = provider and provider._cache_provider or nil
-  if provider_key and PROVIDER_LABELS[provider_key] then
-    return PROVIDER_LABELS[provider_key]
-  end
-
-  local pr = state.pr
-  if pr and type(pr.url) == "string" and pr.url:find("github.com", 1, true) then
-    return "GitHub"
-  end
-
-  return nil
-end
 
 --- @param state table
 --- @return integer
@@ -55,7 +33,7 @@ end
 --- @param state table
 --- @return string
 local function pr_label(state)
-  local provider = provider_label(state)
+  local provider = state.provider_display_name
   local prefix = provider and (provider .. " PR") or "PR"
   return string.format("%s #%s", prefix, state.pr.id)
 end

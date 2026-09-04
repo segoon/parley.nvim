@@ -1,5 +1,9 @@
 --- Arcanum registration descriptor; concrete composition stays provider-owned.
-local M = { id = "arcanum", name = "Arcanum", defaults = require("parley.providers.arcanum.config").resolve() }
+local M = {
+  id = "arcanum",
+  name = require("parley.providers.arcanum.metadata").display_name,
+  defaults = require("parley.providers.arcanum.config").resolve(),
+}
 --- @param info parley.VcsInfo
 --- @return table|nil
 function M.detect(info)

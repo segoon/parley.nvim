@@ -214,6 +214,9 @@ If you do not use Telescope, disable the extension loading: >lua
 7. STATUSLINE                                        *parley-statusline*
 
 Parley exposes a statusline component via |parley.statusline()|.
+Provider branding comes from public provider metadata: GitHub displays
+`GitHub PR #…`, Arcanum displays `Arcanum PR #…`, and custom providers supply their
+own name. Review state without a provider snapshot displays `PR #…`.
 
 When the current buffer has an active PR, it returns a string like: >
     GitHub PR #42 . approved . 3 unresolved
@@ -416,7 +419,12 @@ After calling `setup()`, you can register additional providers: >lua
     })
 <
 
-The provider must implement all methods defined in `parley.Provider`.
+The provider must implement all methods defined in `parley.Provider` and expose
+`display_name`, a nonblank string such as `"MyProvider"`. This metadata is required
+on every instance returned by the factory; the registration spec's `name` does
+not substitute for it. Existing custom providers must add this field to satisfy
+provider validation. The statusline uses this name without inferring a provider
+from review URLs or private cache fields.
 See `lua/parley/provider.lua` for the full interface.
 
 Provider-owned cache identity: ~

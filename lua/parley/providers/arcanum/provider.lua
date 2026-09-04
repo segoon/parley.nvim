@@ -51,7 +51,7 @@ local PR_DETAIL_FIELDS = "id,summary,status,url,author,vcs"
 -- ---------------------------------------------------------------------------
 
 --- @type parley.arcanum.Provider
-local ArcanumProvider = {}
+local ArcanumProvider = { display_name = require("parley.providers.arcanum.metadata").display_name }
 ArcanumProvider.__index = ArcanumProvider
 ArcanumProvider.cache_identity = require("parley.providers.arcanum.cache_identity").get
 ArcanumProvider.reaction_choices = require("parley.providers.arcanum.reactions").choices

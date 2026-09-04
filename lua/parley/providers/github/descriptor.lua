@@ -1,5 +1,9 @@
 --- GitHub registration descriptor; concrete composition stays provider-owned.
-local M = { id = "github", name = "GitHub", defaults = require("parley.providers.github.config").resolve() }
+local M = {
+  id = "github",
+  name = require("parley.providers.github.metadata").display_name,
+  defaults = require("parley.providers.github.config").resolve(),
+}
 --- @param info parley.VcsInfo
 --- @return table|nil
 function M.detect(info)

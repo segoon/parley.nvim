@@ -161,6 +161,14 @@ change. Test with a non-default hostname.
 
 ### 6. Statusline recognizes GitHub itself
 
+**Status: addressed.** Providers now expose mandatory nonblank `display_name`
+metadata. Built-in descriptors and instances reuse provider-owned metadata;
+the read service projects the name into buffer state. Statusline rendering uses
+that field without URL inference, private cache fields, or concrete imports.
+Validation, registry, read-state, branding, and boundary tests cover the contract.
+Custom providers must add the required field. The text below records the original
+finding.
+
 **Severity: 4/10. Effort: small.**
 
 [`statusline.lua`](lua/parley/statusline.lua) maps a private cache identifier to

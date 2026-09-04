@@ -68,6 +68,7 @@ function M.get_buffer_state(bufnr)
   local provider_snapshot = provider_repository.get(bufnr)
   local context_snapshot = context_repository.get(bufnr)
   snapshot.provider = provider_snapshot and provider_snapshot.provider or nil
+  snapshot.provider_display_name = snapshot.provider and snapshot.provider.display_name or nil
   snapshot.vcs_info = context_snapshot and context_snapshot.vcs_info or nil
   snapshot.rel_path = context_snapshot and context_snapshot.rel_path or nil
   return snapshot

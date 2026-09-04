@@ -114,6 +114,18 @@ describe("parley.registry resolve", function()
     assert.same(opts_from_detect, received_opts)
   end)
 
+  it("rejects provider instances without display metadata", function()
+    registry.register(make_spec("MissingName", {}, function()
+      local p = mock_provider.new({})
+      p.display_name = nil
+      return p
+    end))
+    local ok, err = pcall(registry.resolve, SAMPLE_VCS)
+    assert.is_false(ok)
+    assert.is_truthy(tostring(err):find("MissingName", 1, true))
+    assert.is_truthy(tostring(err):find("display_name", 1, true))
+  end)
+
   it("detect receives the exact vcs_info passed to resolve", function()
     local received = nil
     local spec = {

@@ -43,6 +43,7 @@ local M = {}
 --- @field account string Non-secret fingerprint of local credential context
 
 --- @class parley.Provider
+--- @field display_name string Nonblank human-readable provider name; local metadata.
 --- @field cache_identity fun(self: parley.Provider): parley.CacheIdentity|nil
 --- Return the authentication token for API calls.
 --- @field auth fun(self: parley.Provider): string
@@ -133,11 +134,15 @@ M.METHOD_NAMES = {
 --- Checks:
 ---   • `p` is a non-nil table.
 ---   • Every name in METHOD_NAMES is present and is a function.
+---   • display_name is a nonblank string.
 ---
 --- @param p any
 --- @return boolean
 function M.validate(p)
   if type(p) ~= "table" then
+    return false
+  end
+  if type(p.display_name) ~= "string" or not p.display_name:find("%S") then
     return false
   end
   for _, name in ipairs(M.METHOD_NAMES) do

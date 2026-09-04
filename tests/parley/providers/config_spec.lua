@@ -56,6 +56,8 @@ describe("provider configuration", function()
     assert.same({ "arc", "git" }, detectors)
     assert.equals("GitHub", registrations[1].name)
     assert.equals("Arcanum", registrations[2].name)
+    assert.equals(registrations[1].name, registrations[1].factory({ repository = "owner/repo" }).display_name)
+    assert.equals(registrations[2].name, registrations[2].factory({ _auth = auth }).display_name)
     local old_factory = registrations[2].factory
     local p = old_factory({ login = "alice", _auth = auth })
     assert.equals("https://configured.example/api/v1/test", arc_transport.api_url(p, "/v1/test"))

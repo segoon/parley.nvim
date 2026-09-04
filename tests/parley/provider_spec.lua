@@ -73,6 +73,18 @@ end
 -- ---------------------------------------------------------------------------
 
 describe("parley.provider.validate", function()
+  it("requires a nonblank display name", function()
+    local p = mock_provider.new({})
+    for _, value in ipairs({ false, 42, {}, "", " \t\n" }) do
+      p.display_name = value
+      assert.is_false(provider.validate(p))
+    end
+    p.display_name = nil
+    assert.is_false(provider.validate(p))
+    p.display_name = "Custom Host"
+    assert.is_true(provider.validate(p))
+  end)
+
   it("accepts a table that implements all required methods", function()
     local p = mock_provider.new({})
     assert.is_true(provider.validate(p))
