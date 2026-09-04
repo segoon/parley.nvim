@@ -394,6 +394,34 @@ After calling `setup()`, you can register additional providers: >lua
 The provider must implement all methods defined in `parley.Provider`.
 See `lua/parley/provider.lua` for the full interface.
 
+Provider-owned cache identity: ~
+
+Every provider must implement `provider:cache_identity()`. It runs in a Plenary
+coroutine and returns { provider, host, repository, account }, with four nonempty
+strings, or nil when stable local credential identity is unavailable. `account`
+must be a non-secret fingerprint; never return credentials or include them in
+errors. Identity derivation belongs under `lua/parley/providers/` and must not
+make network requests.
+
+Parley validates provider construction and identity before publishing provider
+snapshots. Missing methods and malformed values are contract errors. Nil identity
+keeps live review operations available using isolated temporary state and skips
+all persistent review-cache reads, writes, and invalidation.
+
+Review cache keys use the reviews-v2 namespace and hashes of ordered identity
+fields and typed branch/PR identifiers. Provider, host, repository, and credential
+contexts are isolated. Token rotation causes a cold refresh. Checkout-specific
+local mappings remain separate even when remote cache identity is shared.
+
+Legacy review-cache entries are left untouched and never used as a fallback.
+The first refresh after this change fetches fresh data. Identity changes during
+fetching discard those results and schedule a refresh with the current identity.
+
+`registry.resolve_with_opts(vcs_info)` returns the validated provider and its
+opaque detection options. `registry.resolve(vcs_info)` retains its provider-only
+return value. Shared cache code consumes validated snapshot identity, not factory
+options or private provider fields.
+
 The optional provider-spec `health(context)` callback runs in a plenary.async
 coroutine. It receives `vcs_info`, the `opts` returned by detection, and current
 `config`. Return a list of `{ level, message }` entries, where level is `ok`,

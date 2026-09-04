@@ -90,6 +90,7 @@ end
 ---
 --- @param opts {
 ---   token?: string,
+---   cache_identity?: parley.CacheIdentity,
 ---   pr?: parley.PR,
 ---   discussions?: parley.Discussion[],
 ---   head_sha?: string,
@@ -128,6 +129,11 @@ function M.new(opts)
     --- Monotonically increasing id counter.
     _id_counter = 0,
   }
+
+  --- @return parley.CacheIdentity
+  function mock.cache_identity()
+    return deep_copy(opts.cache_identity or { provider = "mock", host = "test", repository = "repo", account = "test" })
+  end
 
   -- Initialise an empty list for every required method name.
   for _, name in ipairs(provider.METHOD_NAMES) do

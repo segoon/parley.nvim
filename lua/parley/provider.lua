@@ -36,7 +36,14 @@ local M = {}
 --- @field head_sha string
 --- @field write_context table|nil
 ---
+--- @class parley.CacheIdentity
+--- @field provider string
+--- @field host string
+--- @field repository string
+--- @field account string Non-secret fingerprint of local credential context
+
 --- @class parley.Provider
+--- @field cache_identity fun(self: parley.Provider): parley.CacheIdentity|nil
 --- Return the authentication token for API calls.
 --- @field auth fun(self: parley.Provider): string
 ---
@@ -102,6 +109,7 @@ local M = {}
 --- Used by validate() and by mock_provider to initialise its calls table.
 --- @type string[]
 M.METHOD_NAMES = {
+  "cache_identity",
   "auth",
   "detect_pr",
   "fetch_discussions",

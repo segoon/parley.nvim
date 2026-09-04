@@ -97,6 +97,14 @@ The popup implementation itself can remain generic.
 
 ### 4. Cache identity defaults to GitHub and reads implementation details
 
+**Status: addressed.** Required provider-owned identities now scope memory and
+persistent review caches by provider, host, repository, and local credential
+context. Shared keys use a versioned hashed namespace without private-field or
+factory-option interpretation. Unavailable identities use temporary uncached
+state, legacy entries are ignored, and changed-credential fetches are discarded.
+Construction now uses the registry's validated provider/options resolution path.
+The text below records the original finding.
+
 **Severity: 7/10. Effort: medium.**
 
 [`repositories/review_keys.lua`](lua/parley/repositories/review_keys.lua) reads
@@ -172,6 +180,11 @@ and draft preservation can remain shared. Do not weaken these protections merely
 to move implementation files.
 
 ### The actual construction path bypasses provider validation
+
+**Status: addressed as part of cache identity.** Provider construction now goes
+through `registry.resolve_with_opts()`, preserving `registry.resolve()` while
+validating required methods before identity resolution. The description below
+records the original issue.
 
 **Severity: 6/10. Effort: small to medium.**
 

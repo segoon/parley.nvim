@@ -1,50 +1,40 @@
---- Identity of shared remote review data, independent of local projections.
+--- Versioned review keys derived solely from validated provider snapshots.
+local digest = require("parley.cache_identity").digest
 local M = {}
 
---- @param provider parley.Provider
---- @return string
-local function provider_name(provider)
-  return provider._cache_provider or "github"
+--- @param snapshot table
+--- @param kind string
+--- @param value string|integer
+--- @return parley.CacheKey|nil
+local function disk(snapshot, kind, value)
+  if not snapshot.persistent then
+    return nil
+  end
+  return { provider = "reviews-v2", repository = snapshot.scope, subkey = digest({ kind, tostring(value) }) }
 end
 
---- @param provider parley.Provider
---- @param opts table
+--- @param snapshot table
 --- @param branch string
---- @return table
-local function pr_cache_key(provider, opts, branch)
-  return {
-    provider = provider_name(provider),
-    repository = opts.repository,
-    subkey = "pr_branch_" .. branch,
-  }
+--- @return parley.CacheKey|nil
+function M.pr(snapshot, branch)
+  return disk(snapshot, "branch", branch)
 end
 
---- @param provider parley.Provider
---- @param opts table
---- @param pr_id string|integer
---- @return table
-local function discussions_cache_key(provider, opts, pr_id)
-  return {
-    provider = provider_name(provider),
-    repository = opts.repository,
-    subkey = "discussions_" .. pr_id,
-  }
+--- @param snapshot table
+--- @param id string|integer
+--- @return parley.CacheKey|nil
+function M.discussions(snapshot, id)
+  return disk(snapshot, "discussions", id)
 end
 
---- @param provider_snapshot table|nil
+--- @param snapshot table|nil
 --- @param ctx table|nil
 --- @return string|nil
-function M.make(provider_snapshot, ctx)
-  if not provider_snapshot or not provider_snapshot.provider or not provider_snapshot.opts then
+function M.make(snapshot, ctx)
+  local branch = ctx and ctx.vcs_info and ctx.vcs_info.branch
+  if not snapshot or not snapshot.scope or not branch or branch == "" then
     return nil
   end
-  if not ctx or not ctx.vcs_info or not ctx.vcs_info.branch or ctx.vcs_info.branch == "" then
-    return nil
-  end
-  local name = provider_name(provider_snapshot.provider)
-  local opts = provider_snapshot.opts
-  return name .. "/" .. opts.repository .. "/" .. ctx.vcs_info.branch
+  return "reviews-v2/" .. snapshot.scope .. "/" .. digest({ "branch", branch })
 end
-M.pr = pr_cache_key
-M.discussions = discussions_cache_key
 return M

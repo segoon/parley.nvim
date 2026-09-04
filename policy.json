@@ -4,6 +4,7 @@
     "lua/parley/anchor.lua",
     "lua/parley/buffer_context.lua",
     "lua/parley/cache.lua",
+    "lua/parley/cache_identity.lua",
     "lua/parley/debug.lua",
     "lua/parley/discussion_window.lua",
     "lua/parley/discussion_window/input.lua",
@@ -20,9 +21,11 @@
     "lua/parley/nav.lua",
     "lua/parley/progress_popup.lua",
     "lua/parley/provider.lua",
+    "lua/parley/providers/arcanum/cache_identity.lua",
     "lua/parley/providers/arcanum/diagnostics.lua",
     "lua/parley/providers/arcanum/reactions.lua",
     "lua/parley/providers/github/auth.lua",
+    "lua/parley/providers/github/cache_identity.lua",
     "lua/parley/providers/github/diagnostics.lua",
     "lua/parley/providers/github/provider.lua",
     "lua/parley/providers/github/reactions.lua",
@@ -36,6 +39,7 @@
     "lua/parley/repositories/local_mappings.lua",
     "lua/parley/repositories/provider.lua",
     "lua/parley/repositories/review.lua",
+    "lua/parley/repositories/review_cache.lua",
     "lua/parley/repositories/review_keys.lua",
     "lua/parley/runtime/await.lua",
     "lua/parley/runtime/fs.lua",
@@ -247,7 +251,10 @@
         "lua/parley/providers/github/diagnostics.lua",
         "lua/parley/providers/arcanum/diagnostics.lua",
         "lua/parley/providers/github/reactions.lua",
-        "lua/parley/providers/arcanum/reactions.lua"
+        "lua/parley/providers/arcanum/reactions.lua",
+        "lua/parley/cache_identity.lua",
+        "lua/parley/providers/github/cache_identity.lua",
+        "lua/parley/providers/arcanum/cache_identity.lua"
       ],
       "capabilities": [
         "buffer_inspect",
@@ -298,7 +305,8 @@
         "lua/parley/services/write_operation.lua",
         "lua/parley/repositories/review_keys.lua",
         "lua/parley/reactions.lua",
-        "lua/parley/discussion_window/new_comment.lua"
+        "lua/parley/discussion_window/new_comment.lua",
+        "lua/parley/repositories/review_cache.lua"
       ],
       "capabilities": [
         "ui_direct",

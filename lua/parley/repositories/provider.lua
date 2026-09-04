@@ -3,11 +3,12 @@
 local async = require("plenary.async")
 local context_repository = require("parley.repositories.context")
 local registry = require("parley.registry")
+local identity = require("parley.cache_identity")
 local ui = require("parley.runtime.ui")
 
 local M = {}
 
---- @type table<integer, { status: 'ready', provider: parley.Provider, opts: table }>
+--- @type table<integer, parley.ProviderSnapshot>
 M._entries = {}
 
 --- @type table<integer, table<integer, fun(snapshot: table|nil): nil>>
@@ -15,8 +16,12 @@ M._subscribers = {}
 M._next_subscriber_id = 0
 
 local function clone(snapshot)
-  return snapshot and { status = snapshot.status, provider = snapshot.provider, opts = vim.deepcopy(snapshot.opts) }
-    or nil
+  if not snapshot then
+    return nil
+  end
+  local result = vim.deepcopy(snapshot)
+  result.provider = snapshot.provider
+  return result
 end
 
 local function publish(bufnr, snapshot)
@@ -38,15 +43,9 @@ local function resolve_provider(ctx)
     return nil
   end
 
-  for _, spec in ipairs(registry.registered()) do
-    local opts = spec.detect(ctx.vcs_info)
-    if opts ~= nil then
-      return {
-        status = "ready",
-        provider = spec.factory(opts),
-        opts = opts,
-      }
-    end
+  local provider, opts = registry.resolve_with_opts(ctx.vcs_info)
+  if provider then
+    return identity.snapshot(provider, opts)
   end
   return nil
 end
@@ -77,11 +76,12 @@ function M.invalidate(bufnr)
   publish(bufnr, nil)
 end
 
+--- Store a provider with a newly resolved identity; requires a Plenary coroutine.
 --- @param bufnr integer
 --- @param provider parley.Provider
 --- @param opts table
 function M.store(bufnr, provider, opts)
-  publish(bufnr, { status = "ready", provider = provider, opts = vim.deepcopy(opts) })
+  publish(bufnr, identity.snapshot(provider, opts))
 end
 
 function M.subscribe(bufnr, cb)

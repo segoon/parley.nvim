@@ -137,17 +137,23 @@ function M.refresh_async(bufnr, opts, callback)
       M.clear_buffer_state(bufnr)
       return
     end
-    if not provider_repository.refresh(bufnr) then
+    local resolved, provider_result = pcall(provider_repository.refresh, bufnr)
+    if not resolved or not provider_result then
+      if not resolved then
+        M._notify("Provider identity or construction failed", vim.log.levels.WARN)
+      end
       M.clear_buffer_state(bufnr)
       return
     end
 
     local provider_snapshot = provider_repository.get(bufnr)
     local review_key = review_repository.make_key(provider_snapshot, ctx)
+    if not review_repository.get(bufnr) then
+      signs.clear(bufnr)
+    end
     local has_data = review_key and review_repository.has_review(review_key) or false
     if not has_data and review_key then
-      has_data =
-        review_repository.has_cached_review(provider_snapshot.provider, provider_snapshot.opts, ctx.vcs_info.branch)
+      has_data = review_repository.has_cached_review(provider_snapshot, ctx.vcs_info.branch)
     end
     local silent = not opts.progress and has_data
 

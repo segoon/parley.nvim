@@ -1,55 +1,50 @@
 --- Shared remote reviews with checkout-specific local projections.
-
 local async = require("plenary.async")
 local local_mappings = require("parley.repositories.local_mappings")
-local cache = require("parley.cache")
+local cache = require("parley.repositories.review_cache")
+local identity = require("parley.cache_identity")
 local context_repository = require("parley.repositories.context")
 local provider_repository = require("parley.repositories.provider")
 local ui = require("parley.runtime.ui")
-
 local M = {}
-
 --- Shared remote review data; projections live in local_mappings.
 --- @type table<string, table>
 M._reviews = {}
-
 --- Per-file view keyed by bufnr.
 --- @type table<integer, { discussions: parley.Discussion[], mappings: table<string, parley.anchor.Mapping> }>
 M._views = {}
-
 --- bufnr → review_key mapping.
 --- @type table<integer, string>
 M._bufnr_key = {}
-
 --- review_key → set of bufnrs. Reverse index of _bufnr_key.
 --- @type table<string, table<integer, boolean>>
 M._key_bufnrs = {}
-
 --- Reentrancy guard, keyed by review_key.
 --- @type table<string, boolean>
 M._in_flight = {}
-
 --- Pending force-refresh, keyed by review_key.
 --- @type table<string, boolean>
 M._pending_force = {}
-
 --- Per-buffer UI subscribers.
 --- @type table<integer, table<integer, fun(snapshot: table|nil): nil>>
 M._subscribers = {}
 M._next_subscriber_id = 0
-
 M._get_config = function()
   return require("parley").config
 end
-
 local function clone(snapshot)
   return snapshot and vim.deepcopy(snapshot) or nil
 end
-
 local keys = require("parley.repositories.review_keys")
 local pr_cache_key = keys.pr
 local discussions_cache_key = keys.discussions
-
+--- @param bufnr integer
+--- @param shared table
+--- @return boolean
+local function scope_matches(bufnr, shared)
+  local snapshot = provider_repository.get(bufnr)
+  return not shared.scope or snapshot and snapshot.scope == shared.scope
+end
 local function filter_for_file(discussions, rel_path)
   local out = {}
   for _, discussion in ipairs(discussions) do
@@ -59,7 +54,6 @@ local function filter_for_file(discussions, rel_path)
   end
   return out
 end
-
 --- @param discussions parley.Discussion[]
 --- @return { unresolved_count: integer }
 local function build_summary(discussions)
@@ -71,7 +65,6 @@ local function build_summary(discussions)
   end
   return { unresolved_count = unresolved_count }
 end
-
 --- Register a bufnr → review_key mapping. Handles branch switches by removing
 --- the bufnr from its previous key's set.
 --- @param bufnr integer
@@ -93,7 +86,6 @@ local function register_bufnr(bufnr, review_key)
   end
   M._key_bufnrs[review_key][bufnr] = true
 end
-
 --- Build a composite snapshot (same shape as the old _entries[bufnr]) from
 --- @param shared table|nil
 --- @param view table|nil
@@ -117,7 +109,6 @@ local function composite(shared, view)
     head_sha = shared.head_sha,
   }
 end
-
 --- Compute the per-file view for a buffer from shared review data.
 --- @param bufnr integer
 --- @param shared table
@@ -134,7 +125,7 @@ local function compute_view(bufnr, shared)
   if not current or not vim.deep_equal(current.vcs_info, ctx.vcs_info) or current.rel_path ~= rel_path then
     return nil
   end
-  if not all_mappings then
+  if not all_mappings or not scope_matches(bufnr, shared) then
     return nil
   end
   local mappings = {}
@@ -150,7 +141,6 @@ local function compute_view(bufnr, shared)
     all_mappings = all_mappings,
   }
 end
-
 --- Notify subscribers for a single buffer.
 --- @param bufnr integer
 --- @param snapshot table|nil
@@ -166,11 +156,11 @@ local function notify_subscribers(bufnr, snapshot)
     end)
   end
 end
-
 --- Store shared data and re-publish per-file views to ALL buffers for this key.
 --- @param review_key string
 --- @param shared table|nil
-local function publish_shared(review_key, shared)
+--- @param is_valid? fun(): boolean
+local function publish_shared(review_key, shared, is_valid)
   M._reviews[review_key] = shared
   local bufnrs = M._key_bufnrs[review_key]
   if not bufnrs then
@@ -179,6 +169,9 @@ local function publish_shared(review_key, shared)
   for bufnr in pairs(bufnrs) do
     if shared then
       local view = compute_view(bufnr, shared)
+      if is_valid and not is_valid() then
+        return
+      end
       if M._reviews[review_key] ~= shared then
         return
       end
@@ -196,7 +189,6 @@ local function publish_shared(review_key, shared)
     end
   end
 end
-
 --- Publish to a single buffer only (used during initial registration when the
 --- @param bufnr integer
 --- @param shared table|nil
@@ -218,7 +210,6 @@ local function publish_to_bufnr(bufnr, shared)
     notify_subscribers(bufnr, nil)
   end
 end
-
 local function consume_pending_force(review_key)
   if not M._pending_force[review_key] then
     return false
@@ -226,21 +217,16 @@ local function consume_pending_force(review_key)
   M._pending_force[review_key] = nil
   return true
 end
-
 --- Restore shared review data from the on-disk cache. Returns a shared-shaped
---- @param bufnr integer
 --- @param ctx table
 --- @param provider_snapshot table
 --- @return table|nil
-local function restore_cached_snapshot(bufnr, ctx, provider_snapshot)
-  local provider = provider_snapshot.provider
-  local p_opts = provider_snapshot.opts
+local function restore_cached_snapshot(ctx, provider_snapshot)
   local branch = ctx.vcs_info and ctx.vcs_info.branch or nil
   if not branch or branch == "" then
     return nil
   end
-
-  local pr_entry = cache.get_async(pr_cache_key(provider, p_opts, branch))
+  local pr_entry = cache.get_async(pr_cache_key(provider_snapshot, branch))
   if not pr_entry or not pr_entry.data then
     return nil
   end
@@ -252,13 +238,16 @@ local function restore_cached_snapshot(bufnr, ctx, provider_snapshot)
     return nil
   end
 
-  local discussions_entry = cache.get_async(discussions_cache_key(provider, p_opts, pr_id))
+  local discussions_entry = cache.get_async(discussions_cache_key(provider_snapshot, pr_id))
   if not discussions_entry or not discussions_entry.data then
     return nil
   end
 
-  provider_repository.store(bufnr, provider, p_opts)
+  if not identity.matches(provider_snapshot) then
+    return nil
+  end
   return {
+    scope = provider_snapshot.scope,
     status = "ready",
     stale = true,
     review = review,
@@ -286,12 +275,11 @@ end
 
 --- Check whether the on-disk cache has PR data for this branch.
 --- Must be called from within a plenary.async coroutine.
---- @param provider parley.Provider
---- @param opts table
+--- @param provider_snapshot table
 --- @param branch string
 --- @return boolean
-function M.has_cached_review(provider, opts, branch)
-  local entry = cache.get_async(pr_cache_key(provider, opts, branch))
+function M.has_cached_review(provider_snapshot, branch)
+  local entry = cache.get_async(pr_cache_key(provider_snapshot, branch))
   return entry ~= nil and entry.data ~= nil
 end
 
@@ -309,6 +297,9 @@ function M.get(bufnr, opts)
     return nil
   end
   local shared = M._reviews[key]
+  if shared and not scope_matches(bufnr, shared) then
+    return nil
+  end
   if not shared then
     if opts.ensure then
       M.refresh_async(bufnr)
@@ -341,7 +332,6 @@ function M.refresh(bufnr, opts)
   end
 
   local provider = provider_snapshot.provider
-  local provider_opts = provider_snapshot.opts
   local branch = ctx.vcs_info.branch
   if not branch or branch == "" then
     publish_to_bufnr(bufnr, nil)
@@ -370,30 +360,42 @@ function M.refresh(bufnr, opts)
   end
 
   if not opts.force then
-    local restored = restore_cached_snapshot(bufnr, ctx, provider_snapshot)
+    local restored = restore_cached_snapshot(ctx, provider_snapshot)
     if restored then
       publish_shared(review_key, restored)
     end
   end
 
+  local changed = false
+  local function identity_current()
+    local latest = provider_repository.get(bufnr)
+    changed = not identity.matches(provider_snapshot) or not latest or latest.scope ~= provider_snapshot.scope
+    return not changed
+  end
   M._in_flight[review_key] = true
   local ok, result = pcall(function()
     local review = provider:detect_pr(ctx.vcs_info.root, branch)
+    if not identity_current() then
+      return nil
+    end
     if review == nil then
-      cache.invalidate_async(pr_cache_key(provider, provider_opts, branch))
+      cache.invalidate_async(pr_cache_key(provider_snapshot, branch))
       publish_shared(review_key, nil)
       return nil
     end
 
-    cache.set_async(pr_cache_key(provider, provider_opts, branch), {
-      review = review,
-    })
-
     local discussions = provider:fetch_discussions(review)
-    cache.set_async(discussions_cache_key(provider, provider_opts, review.pr.id), discussions)
-    provider_repository.store(bufnr, provider, provider_opts)
+    if not identity_current() then
+      return nil
+    end
+    cache.set_async(pr_cache_key(provider_snapshot, branch), { review = review })
+    cache.set_async(discussions_cache_key(provider_snapshot, review.pr.id), discussions)
+    if not identity_current() then
+      return nil
+    end
 
     local shared = {
+      scope = provider_snapshot.scope,
       status = "ready",
       stale = false,
       review = review,
@@ -404,10 +406,18 @@ function M.refresh(bufnr, opts)
       error = nil,
       head_sha = review.head_sha or "",
     }
-    publish_shared(review_key, shared)
+    publish_shared(review_key, shared, identity_current)
     return clone(composite(shared, M._views[bufnr]))
   end)
   M._in_flight[review_key] = nil
+  if changed then
+    publish_to_bufnr(bufnr, nil)
+    M.detach(bufnr, true)
+    vim.schedule(function()
+      M.refresh_async(bufnr, { force = true })
+    end)
+    return nil
+  end
 
   if not ok then
     local current = M._reviews[review_key]
@@ -515,10 +525,8 @@ function M.invalidate(bufnr, opts)
   local shared = review_key and M._reviews[review_key] or nil
 
   if ctx and provider_snapshot and shared and shared.pr and ctx.vcs_info and ctx.vcs_info.branch then
-    local provider = provider_snapshot.provider
-    local provider_opts = provider_snapshot.opts
-    cache.invalidate(pr_cache_key(provider, provider_opts, ctx.vcs_info.branch))
-    cache.invalidate(discussions_cache_key(provider, provider_opts, shared.pr.id))
+    cache.invalidate(pr_cache_key(provider_snapshot, ctx.vcs_info.branch))
+    cache.invalidate(discussions_cache_key(provider_snapshot, shared.pr.id))
   end
   if opts.preserve_snapshot ~= true and review_key then
     publish_shared(review_key, nil)

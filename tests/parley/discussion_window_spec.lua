@@ -277,6 +277,9 @@ describe("parley.discussion_window", function()
     vim.api.nvim_win_set_cursor(0, { 3, 0 })
 
     require("parley.repositories.provider").store(bufnr, {
+      cache_identity = function()
+        return nil
+      end,
       reaction_choices = require("parley.providers.github.reactions").choices,
       reaction_presentation = require("parley.providers.github.reactions").presentation,
     }, {})
@@ -597,6 +600,9 @@ describe("parley.discussion_window", function()
     local calls = {}
 
     require("parley.repositories.provider").store(bufnr, {
+      cache_identity = function()
+        return nil
+      end,
       reaction_choices = require("parley.providers.github.reactions").choices,
       reaction_presentation = require("parley.providers.github.reactions").presentation,
     }, {})

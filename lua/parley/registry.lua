@@ -75,8 +75,8 @@ end
 --- invalid provider.
 ---
 --- @param vcs_info parley.VcsInfo  Forwarded verbatim to each detect function
---- @return parley.Provider|nil
-function M.resolve(vcs_info)
+--- @return parley.Provider|nil, table|nil
+function M.resolve_with_opts(vcs_info)
   assert(type(vcs_info) == "table", "vcs_info must be a table")
   for _, spec in ipairs(_specs) do
     local opts = spec.detect(vcs_info)
@@ -96,10 +96,18 @@ function M.resolve(vcs_info)
           2
         )
       end
-      return p
+      return p, opts
     end
   end
   return nil
+end
+
+--- Resolve a validated provider without exposing detection options.
+--- @param vcs_info parley.VcsInfo
+--- @return parley.Provider|nil
+function M.resolve(vcs_info)
+  local provider = M.resolve_with_opts(vcs_info)
+  return provider
 end
 
 --- Return a shallow copy of all registered specs in registration order.
