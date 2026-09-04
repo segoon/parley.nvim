@@ -78,6 +78,8 @@ end
 --- @type parley.github.Provider
 local GitHubProvider = {}
 GitHubProvider.__index = GitHubProvider
+GitHubProvider.reaction_choices = require("parley.providers.github.reactions").choices
+GitHubProvider.reaction_presentation = require("parley.providers.github.reactions").presentation
 
 -- ---------------------------------------------------------------------------
 -- Constructor
@@ -413,6 +415,7 @@ end
 --- @param comment_id string
 --- @param reaction   string  e.g. "+1", "heart"
 function GitHubProvider:react(_review, comment_id, reaction)
+  assert(require("parley.providers.github.reactions").supports(reaction), "unsupported GitHub reaction")
   transport.fetch_viewer_login(self)
   local viewer = self._viewer_login or ""
   local base_url = repo_path(self) .. "/pulls/comments/" .. comment_id .. "/reactions"

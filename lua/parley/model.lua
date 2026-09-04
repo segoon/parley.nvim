@@ -40,7 +40,7 @@ local KNOWN_REVIEW_STATUSES = {
 
 --- A single emoji/reaction entry on a comment.
 --- @class parley.Reaction
---- @field type           string   Reaction name (e.g. "+1", "heart", "laugh")
+--- @field type           string   Opaque provider reaction identifier
 --- @field count          integer  Number of users who reacted
 --- @field viewer_reacted boolean  Whether the current auth user has reacted
 

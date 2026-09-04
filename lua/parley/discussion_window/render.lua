@@ -1,27 +1,5 @@
 local M = {}
 
-local REACTION_EMOJI = {
-  ["+1"] = "👍",
-  ["-1"] = "👎",
-  laugh = "😄",
-  confused = "😕",
-  heart = "❤️",
-  hooray = "🎉",
-  rocket = "🚀",
-  eyes = "👀",
-}
-
-local REACTION_CHOICES = {
-  { reaction = "+1", emoji = "👍", label = "+1" },
-  { reaction = "-1", emoji = "👎", label = "-1" },
-  { reaction = "laugh", emoji = "😄", label = "laugh" },
-  { reaction = "confused", emoji = "😕", label = "confused" },
-  { reaction = "heart", emoji = "❤️", label = "heart" },
-  { reaction = "hooray", emoji = "🎉", label = "hooray" },
-  { reaction = "rocket", emoji = "🚀", label = "rocket" },
-  { reaction = "eyes", emoji = "👀", label = "eyes" },
-}
-
 ---@param text string
 ---@return string[]
 local function split_lines(text)
@@ -31,9 +9,10 @@ local function split_lines(text)
   return vim.split(text, "\n", { plain = true })
 end
 
+---@param presentation? fun(code: string): parley.ReactionPresentation
 ---@param reactions parley.Reaction[]
 ---@return string|nil
-local function reaction_summary(reactions)
+local function reaction_summary(reactions, presentation)
   if #reactions == 0 then
     return nil
   end
@@ -41,30 +20,12 @@ local function reaction_summary(reactions)
   local parts = {}
   for _, reaction in ipairs(reactions) do
     local suffix = reaction.viewer_reacted and " (you)" or ""
-    local emoji = REACTION_EMOJI[reaction.type] or reaction.type
+    local display = presentation and presentation(reaction.type) or { label = reaction.type }
+    local emoji = display.emoji or display.label or reaction.type
     local count = reaction.count > 1 and string.format(" x%d", reaction.count) or ""
     parts[#parts + 1] = string.format("%s%s%s", emoji, count, suffix)
   end
   return "Reactions: " .. table.concat(parts, ", ")
-end
-
----@param comment parley.Comment
----@return table[]
-function M.reaction_picker_items(comment)
-  local by_type = {}
-  for _, reaction in ipairs(comment.reactions or {}) do
-    by_type[reaction.type] = reaction
-  end
-
-  local items = {}
-  for _, choice in ipairs(REACTION_CHOICES) do
-    local reaction = by_type[choice.reaction]
-    items[#items + 1] = vim.tbl_extend("force", choice, {
-      count = reaction and reaction.count or 0,
-      viewer_reacted = reaction and reaction.viewer_reacted or false,
-    })
-  end
-  return items
 end
 
 ---@param comment parley.Comment
@@ -91,7 +52,8 @@ end
 ---@param mapping parley.anchor.Mapping|nil
 ---@param out string[]
 ---@param ranges table<string, { start_line: integer, end_line: integer }>
----@param deps { format_timestamp: fun(timestamp: string): string }
+---@param deps { format_timestamp: fun(timestamp: string): string,
+--- reaction_presentation?: fun(code: string): parley.ReactionPresentation }
 ---@return string
 local function render_discussion(discussion, mapping, out, ranges, deps)
   local title = discussion.resolved and "resolved" or "unresolved"
@@ -121,7 +83,7 @@ local function render_discussion(discussion, mapping, out, ranges, deps)
       out[#out + 1] = string.format("%s  %s", indent, line)
     end
 
-    local reactions = reaction_summary(comment.reactions)
+    local reactions = reaction_summary(comment.reactions, deps.reaction_presentation)
     if reactions then
       out[#out + 1] = string.format("%s  ---", indent)
       out[#out + 1] = string.format("%s  %s", indent, reactions)
@@ -135,7 +97,8 @@ end
 
 ---@param discussions parley.Discussion[]
 ---@param mappings table<string, parley.anchor.Mapping>
----@param deps { format_timestamp: fun(timestamp: string): string }
+---@param deps { format_timestamp: fun(timestamp: string): string,
+--- reaction_presentation?: fun(code: string): parley.ReactionPresentation }
 ---@return string[], table<string, { start_line: integer, end_line: integer }>, string|nil
 function M.render_lines(discussions, mappings, deps)
   local out = {}

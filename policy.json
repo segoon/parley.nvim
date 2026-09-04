@@ -7,6 +7,7 @@
     "lua/parley/debug.lua",
     "lua/parley/discussion_window.lua",
     "lua/parley/discussion_window/input.lua",
+    "lua/parley/discussion_window/new_comment.lua",
     "lua/parley/discussion_window/render.lua",
     "lua/parley/discussion_window/selection.lua",
     "lua/parley/discussion_window/window.lua",
@@ -20,13 +21,16 @@
     "lua/parley/progress_popup.lua",
     "lua/parley/provider.lua",
     "lua/parley/providers/arcanum/diagnostics.lua",
+    "lua/parley/providers/arcanum/reactions.lua",
     "lua/parley/providers/github/auth.lua",
     "lua/parley/providers/github/diagnostics.lua",
     "lua/parley/providers/github/provider.lua",
+    "lua/parley/providers/github/reactions.lua",
     "lua/parley/providers/vcs.lua",
     "lua/parley/providers/vcs/arc.lua",
     "lua/parley/providers/vcs/git.lua",
     "lua/parley/reaction_picker_window.lua",
+    "lua/parley/reactions.lua",
     "lua/parley/registry.lua",
     "lua/parley/repositories/context.lua",
     "lua/parley/repositories/local_mappings.lua",
@@ -241,7 +245,9 @@
         "lua/parley/providers/vcs/git.lua",
         "lua/parley/providers/vcs/arc.lua",
         "lua/parley/providers/github/diagnostics.lua",
-        "lua/parley/providers/arcanum/diagnostics.lua"
+        "lua/parley/providers/arcanum/diagnostics.lua",
+        "lua/parley/providers/github/reactions.lua",
+        "lua/parley/providers/arcanum/reactions.lua"
       ],
       "capabilities": [
         "buffer_inspect",
@@ -290,7 +296,9 @@
         "lua/telescope/_extensions/parley_discussions_file.lua",
         "lua/parley/repositories/local_mappings.lua",
         "lua/parley/services/write_operation.lua",
-        "lua/parley/repositories/review_keys.lua"
+        "lua/parley/repositories/review_keys.lua",
+        "lua/parley/reactions.lua",
+        "lua/parley/discussion_window/new_comment.lua"
       ],
       "capabilities": [
         "ui_direct",

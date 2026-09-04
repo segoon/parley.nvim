@@ -262,6 +262,18 @@ describe("architecture policy", function()
     end
   end)
 
+  it("keeps shared reaction code independent of provider implementations", function()
+    for _, path in ipairs({
+      "lua/parley/reactions.lua",
+      "lua/parley/discussion_window/render.lua",
+      "lua/parley/services/write.lua",
+    }) do
+      for _, dep in ipairs(internal_requires(path)) do
+        assert.is_nil(dep:match("^lua/parley/providers/"), path .. " imports " .. dep)
+      end
+    end
+  end)
+
   it("assigns every Lua module to exactly one layer", function()
     local policy = read_policy_json(policy_path)
     local mapping = module_to_layer(policy)

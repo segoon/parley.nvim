@@ -388,6 +388,25 @@ describe("parley.services.write", function()
     assert.is_true(ok, err)
   end)
 
+  it("rejects direct reactions without an offered choice", function()
+    local provider = mock_provider.new({ pr = SAMPLE_PR })
+    seed_context(provider)
+    local comment = model.new_comment({
+      id = "c",
+      author = "a",
+      body = model.new_body({ text = "x", format = "markdown" }),
+      created_at = "",
+      updated_at = "",
+    })
+    assert.is_false(write_service.react_comment(1, 10, comment, "unknown"))
+    assert.equals(0, #provider.calls.react)
+    provider.reaction_choices = function()
+      return { { reaction = "valid", label = "Valid" } }
+    end
+    assert.is_false(write_service.react_comment(1, 10, comment, "unknown"))
+    assert.equals(0, #provider.calls.react)
+  end)
+
   it("reacts to a comment and refreshes the discussion", function()
     local comment = model.new_comment({
       id = "c1",
@@ -408,6 +427,9 @@ describe("parley.services.write", function()
     package.loaded["parley.discussion_window"] = {
       open_current_line = function() end,
     }
+    provider.reaction_choices = function()
+      return { { reaction = "+1", label = "Like" } }
+    end
     seed_context(provider)
     review_repository.invalidate = function(bufnr, opts)
       invalidate_calls[#invalidate_calls + 1] = { bufnr = bufnr, opts = opts }

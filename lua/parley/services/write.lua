@@ -454,8 +454,9 @@ end
 --- @param cursor_line integer|nil
 --- @param comment parley.Comment|nil
 --- @param reaction string
+--- @param expected? table Captured picker context
 --- @return boolean
-function M.react_comment(bufnr, cursor_line, comment, reaction)
+function M.react_comment(bufnr, cursor_line, comment, reaction, expected)
   if not comment then
     M._notify("Open a Parley discussion before reacting", vim.log.levels.INFO)
     return false
@@ -463,6 +464,11 @@ function M.react_comment(bufnr, cursor_line, comment, reaction)
   local write_context, err = resolve_write_context(bufnr)
   if not write_context then
     notify_context_error(err)
+    return false
+  end
+  local reaction_error = require("parley.reactions").validate(bufnr, comment, reaction, expected)
+  if reaction_error then
+    M._notify(reaction_error, vim.log.levels.INFO)
     return false
   end
   return operations.run_action(bufnr, cursor_line, function(callback)

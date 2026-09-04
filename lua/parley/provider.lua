@@ -15,13 +15,18 @@ local M = {}
 -- Type annotations
 -- ---------------------------------------------------------------------------
 
+--- @class parley.ReactionPresentation
+--- @field label string
+--- @field emoji? string
+--- @class parley.ReactionChoice : parley.ReactionPresentation
+--- @field reaction string Opaque provider identifier
+
 --- The abstract provider interface.
 ---
 --- All methods are called as `provider:method(...)` (colon syntax).
 --- Async providers must wrap blocking calls in `plenary.async.run`; callers
 --- always invoke methods from within a plenary async context.
 ---
---- @class parley.Provider
 --- @class parley.Anchor
 --- @field start_line integer
 --- @field end_line integer|nil
@@ -31,6 +36,7 @@ local M = {}
 --- @field head_sha string
 --- @field write_context table|nil
 ---
+--- @class parley.Provider
 --- Return the authentication token for API calls.
 --- @field auth fun(self: parley.Provider): string
 ---
@@ -82,6 +88,11 @@ local M = {}
 --- Return a short human-readable label for use in progress messages,
 --- e.g. "github.com" or "github.mycompany.com".
 --- @field progress_label fun(self: parley.Provider): string
+
+--- Optional local-only metadata; missing choices means mutation is unavailable.
+--- @field reaction_choices? fun(self: parley.Provider, review: parley.DetectedReview,
+--- comment: parley.Comment): parley.ReactionChoice[], string|nil
+--- @field reaction_presentation? fun(self: parley.Provider, code: string): parley.ReactionPresentation
 
 -- ---------------------------------------------------------------------------
 -- Required method names (single source of truth)

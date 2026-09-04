@@ -67,6 +67,12 @@ would preserve the current maintenance problem.
 
 ### 3. Reaction UI embeds GitHub's API vocabulary
 
+**Status: addressed.** Providers now own reaction catalogs and presentation via
+optional local-only methods. Shared UI merges counts and viewer state, preserves
+unknown codes, and validates available choices before mutation. Arcanum remains
+read-only with an explicit Parley limitation message. The original finding below
+is retained for context; no Arcanum reaction mutation API was added.
+
 **Severity: 8/10. Effort: medium.**
 
 [`discussion_window/render.lua`](lua/parley/discussion_window/render.lua) defines

@@ -402,6 +402,31 @@ construction, or credentials in messages. A missing callback is informational.
 Concrete diagnostic implementations belong under `lua/parley/providers/`.
 
 
+Provider-owned reactions: ~
+
+Providers may implement these optional, synchronous, local-only methods:
+
+  reaction_choices(review, comment)
+      Returns an ordered list of { reaction, label, emoji? } and an optional
+      unavailable-reason string. `reaction` is an opaque provider identifier.
+      An empty list disables mutation and displays the reason when requested.
+
+  reaction_presentation(reaction_type)
+      Returns { label, emoji? } for an existing reaction identifier. Shared UI
+      adds counts and viewer state. Unknown identifiers should retain their
+      original value as the label.
+
+These methods use the usual provider:method(...) calling convention. Define
+concrete catalogs and presentation logic under `lua/parley/providers/`.
+Missing methods preserve raw labels and make interactive mutations unavailable;
+there is no implicit GitHub catalog. Cached reaction data remains unchanged.
+
+GitHub retains its existing reaction choices and emoji. Arcanum reactions remain
+readable using their original codes; changing them is not implemented in Parley.
+The picker and direct reaction service reject choices that are not currently
+offered. Changing review/provider context while the picker is open requires
+reopening it before submitting.
+
 Custom VCS implementations: ~
 
 After `setup()`, register both a detector and an adapter via `parley.vcs`.
