@@ -231,8 +231,12 @@ function ArcanumProvider:detect_pr(_repo_root, branch)
   -- Fetch the active diff to get diff_id and diff_set_xid for anchoring
   local diff_id = nil
   local diff_set_xid = nil
-  local ok_diff, diff_data =
-    pcall(transport.http_run, self, "GET", "/v1/pull-requests/" .. tostring(pr_id) .. "/active-diff")
+  local ok_diff, diff_data = pcall(
+    transport.http_run,
+    self,
+    "GET",
+    "/v1/pull-requests/" .. tostring(pr_id) .. "/active-diff?fields=id,commit_ids(head)"
+  )
   if ok_diff and diff_data then
     diff_id = diff_data.id
     -- The active diff's xid is its GSID field in v1 — but the changelist

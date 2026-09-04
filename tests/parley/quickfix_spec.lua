@@ -147,7 +147,7 @@ describe("parley.quickfix", function()
     assert.is_truthy(qf.items[2].text:find("second comment", 1, true))
   end)
 
-  it("skips discussions whose mapped local line was deleted", function()
+  it("marks deleted locations unavailable instead of jumping to the old line", function()
     package.loaded["parley.services.read"] = {
       get_buffer_state = function(_bufnr)
         return {
@@ -173,7 +173,9 @@ describe("parley.quickfix", function()
     local qf = vim.fn.getqflist({ title = 1, items = 1 })
     assert.equals("Parley Discussions", qf.title)
     assert.equals(2, #qf.items)
-    assert.equals(10, qf.items[1].lnum)
+    assert.equals(0, qf.items[1].lnum)
+    assert.equals(0, qf.items[1].valid)
+    assert.is_truthy(qf.items[1].text:find("unavailable", 1, true))
     assert.equals(25, qf.items[2].lnum)
   end)
 

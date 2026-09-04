@@ -85,6 +85,16 @@ require("parley").setup({
 
 If no matching PR is found, Parley stays silent and inactive.
 
+Discussion positions are mapped from the review revision to your working files,
+including unsaved buffer edits, using Git or Arc as appropriate. Local edits
+refresh positions without fetching the review again, and separate checkouts keep
+independent positions. If revision content is unavailable, Parley shows stale
+approximations and reports the reason.
+
+New comments require a clean file with no unsaved edits and a local HEAD matching
+the review revision. These checks run again when you submit; a failed check keeps
+your draft. Other Arcanum API limitations still apply.
+
 ## Telescope
 
 When `telescope = true` (the default) and Telescope is installed, Parley loads two extensions:

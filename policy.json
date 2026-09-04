@@ -13,6 +13,7 @@
     "lua/parley/health.lua",
     "lua/parley/http.lua",
     "lua/parley/init.lua",
+    "lua/parley/local_content.lua",
     "lua/parley/mock_provider.lua",
     "lua/parley/model.lua",
     "lua/parley/nav.lua",
@@ -23,13 +24,16 @@
     "lua/parley/reaction_picker_window.lua",
     "lua/parley/registry.lua",
     "lua/parley/repositories/context.lua",
+    "lua/parley/repositories/local_mappings.lua",
     "lua/parley/repositories/provider.lua",
     "lua/parley/repositories/review.lua",
+    "lua/parley/repositories/review_keys.lua",
     "lua/parley/runtime/await.lua",
     "lua/parley/runtime/fs.lua",
     "lua/parley/runtime/ui.lua",
     "lua/parley/services/read.lua",
     "lua/parley/services/write.lua",
+    "lua/parley/services/write_operation.lua",
     "lua/parley/signs.lua",
     "lua/parley/statusline.lua",
     "lua/parley/telescope.lua",
@@ -38,6 +42,7 @@
     "lua/parley/ui_states/discussion.lua",
     "lua/parley/ui_states/progress.lua",
     "lua/parley/vcs.lua",
+    "lua/parley/vcs/adapters.lua",
     "lua/telescope/_extensions/parley_discussions.lua",
     "lua/telescope/_extensions/parley_discussions_file.lua",
     "plugin/parley.lua"
@@ -82,7 +87,11 @@
         "vim.api.nvim_tabpage_list_wins",
         "vim.api.nvim_buf_is_valid",
         "vim.api.nvim_win_is_valid",
-        "vim.bo"
+        "vim.bo",
+        "vim.api.nvim_list_bufs",
+        "vim.api.nvim_buf_is_loaded",
+        "vim.api.nvim_buf_get_lines",
+        "vim.api.nvim_buf_get_changedtick"
       ]
     },
     "fs_async": {
@@ -215,7 +224,9 @@
         "lua/parley/anchor.lua",
         "lua/parley/buffer_context.lua",
         "lua/parley/providers/github/auth.lua",
-        "lua/parley/providers/github/provider.lua"
+        "lua/parley/providers/github/provider.lua",
+        "lua/parley/vcs/adapters.lua",
+        "lua/parley/local_content.lua"
       ],
       "capabilities": [
         "buffer_inspect",
@@ -226,7 +237,8 @@
         "json",
         "env_read",
         "path_helpers",
-        "network_curl"
+        "network_curl",
+        "fs_async"
       ],
       "depends": [
         "core",
@@ -259,7 +271,10 @@
         "lua/parley/ui_states/progress.lua",
         "lua/parley/ui_states/composer.lua",
         "lua/telescope/_extensions/parley_discussions.lua",
-        "lua/telescope/_extensions/parley_discussions_file.lua"
+        "lua/telescope/_extensions/parley_discussions_file.lua",
+        "lua/parley/repositories/local_mappings.lua",
+        "lua/parley/services/write_operation.lua",
+        "lua/parley/repositories/review_keys.lua"
       ],
       "capabilities": [
         "ui_direct",

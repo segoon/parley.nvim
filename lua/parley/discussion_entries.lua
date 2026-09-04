@@ -37,18 +37,25 @@ end
 --- @param discussion parley.Discussion
 --- @param root string
 --- @param mappings? table<string, parley.anchor.Mapping>
---- @return { path: string, line: integer, status: string, preview: string, text: string }
+--- @return { path: string, line: integer|nil, status: string, preview: string, text: string }
 function M.location(discussion, root, mappings)
   local mapping = mappings and mappings[discussion.id] or nil
   local line = mapping and mapping.local_line or discussion.line
+  if mapping and mapping.local_line == nil then
+    line = nil
+  end
+  if not discussion.file or discussion.file == "" or not line or line < 1 then
+    line = nil
+  end
   local first_comment = discussion.comments and discussion.comments[1] or nil
   local preview = M.snippet(first_comment and first_comment.body and first_comment.body.text or "")
   return {
-    path = root .. "/" .. discussion.file,
+    path = root .. "/" .. (discussion.file or ""),
     line = line,
     status = M.status(discussion),
     preview = preview,
-    text = M.summary_text(discussion),
+    text = (not line and "[unavailable] " or (mapping and mapping.stale and "[approximate] " or ""))
+      .. M.summary_text(discussion),
   }
 end
 

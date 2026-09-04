@@ -1,13 +1,7 @@
---- parley.repositories.review — review data repository.
----
---- Shared review data (PR, discussions) is keyed by a data-identity key
---- ("provider/repository/branch"), not by bufnr. Per-file views (filtered
---- discussions, anchor mappings) are derived per buffer. Multiple buffers in
---- the same repo/branch share the underlying data and are all re-published
---- when a refresh completes.
+--- Shared remote reviews with checkout-specific local projections.
 
 local async = require("plenary.async")
-local anchor = require("parley.anchor")
+local local_mappings = require("parley.repositories.local_mappings")
 local cache = require("parley.cache")
 local context_repository = require("parley.repositories.context")
 local provider_repository = require("parley.repositories.provider")
@@ -15,22 +9,8 @@ local ui = require("parley.runtime.ui")
 
 local M = {}
 
--- ---------------------------------------------------------------------------
--- Internal state
--- ---------------------------------------------------------------------------
-
---- Shared review data keyed by review_key ("provider/repository/branch").
---- @type table<string, {
----   status: 'ready'|'error',
----   stale: boolean,
----   review: parley.DetectedReview|nil,
----   pr: parley.PR|nil,
----   all_discussions: parley.Discussion[],
----   all_mappings: table<string, parley.anchor.Mapping>,
----   summary: { unresolved_count: integer },
----   error: string|nil,
----   head_sha: string,
---- }>
+--- Shared remote review data; projections live in local_mappings.
+--- @type table<string, table>
 M._reviews = {}
 
 --- Per-file view keyed by bufnr.
@@ -62,33 +42,13 @@ M._get_config = function()
   return require("parley").config
 end
 
--- ---------------------------------------------------------------------------
--- Helpers
--- ---------------------------------------------------------------------------
-
 local function clone(snapshot)
   return snapshot and vim.deepcopy(snapshot) or nil
 end
 
-local function provider_name(provider)
-  return provider._cache_provider or "github"
-end
-
-local function pr_cache_key(provider, opts, branch)
-  return {
-    provider = provider_name(provider),
-    repository = opts.repository,
-    subkey = "pr_branch_" .. branch,
-  }
-end
-
-local function discussions_cache_key(provider, opts, pr_id)
-  return {
-    provider = provider_name(provider),
-    repository = opts.repository,
-    subkey = "discussions_" .. pr_id,
-  }
-end
+local keys = require("parley.repositories.review_keys")
+local pr_cache_key = keys.pr
+local discussions_cache_key = keys.discussions
 
 local function filter_for_file(discussions, rel_path)
   local out = {}
@@ -121,7 +81,6 @@ local function register_bufnr(bufnr, review_key)
   if old_key == review_key then
     return
   end
-  -- Remove from old key's set.
   if old_key and M._key_bufnrs[old_key] then
     M._key_bufnrs[old_key][bufnr] = nil
     if next(M._key_bufnrs[old_key]) == nil then
@@ -136,7 +95,6 @@ local function register_bufnr(bufnr, review_key)
 end
 
 --- Build a composite snapshot (same shape as the old _entries[bufnr]) from
---- shared review data and a per-file view.
 --- @param shared table|nil
 --- @param view table|nil
 --- @return table|nil
@@ -152,7 +110,7 @@ local function composite(shared, view)
     pr = shared.pr,
     discussions = view.discussions,
     all_discussions = shared.all_discussions,
-    all_mappings = shared.all_mappings,
+    all_mappings = view.all_mappings or {},
     mappings = view.mappings,
     summary = shared.summary,
     error = shared.error,
@@ -171,9 +129,17 @@ local function compute_view(bufnr, shared)
     return { discussions = {}, mappings = {} }
   end
   local file_discussions = filter_for_file(shared.all_discussions or {}, rel_path)
+  local all_mappings = local_mappings.get(ctx, shared)
+  local current = context_repository.get(bufnr)
+  if not current or not vim.deep_equal(current.vcs_info, ctx.vcs_info) or current.rel_path ~= rel_path then
+    return nil
+  end
+  if not all_mappings then
+    return nil
+  end
   local mappings = {}
   for _, discussion in ipairs(file_discussions) do
-    local mapping = shared.all_mappings and shared.all_mappings[discussion.id] or nil
+    local mapping = all_mappings and all_mappings[discussion.id] or nil
     if mapping then
       mappings[discussion.id] = mapping
     end
@@ -181,6 +147,7 @@ local function compute_view(bufnr, shared)
   return {
     discussions = file_discussions,
     mappings = mappings,
+    all_mappings = all_mappings,
   }
 end
 
@@ -212,8 +179,17 @@ local function publish_shared(review_key, shared)
   for bufnr in pairs(bufnrs) do
     if shared then
       local view = compute_view(bufnr, shared)
-      M._views[bufnr] = view
-      notify_subscribers(bufnr, composite(shared, view))
+      if M._reviews[review_key] ~= shared then
+        return
+      end
+      if M._bufnr_key[bufnr] == review_key then
+        if view then
+          M._views[bufnr] = view
+          notify_subscribers(bufnr, composite(shared, view))
+        else
+          M.remap_async(bufnr)
+        end
+      end
     else
       M._views[bufnr] = nil
       notify_subscribers(bufnr, nil)
@@ -222,12 +198,19 @@ local function publish_shared(review_key, shared)
 end
 
 --- Publish to a single buffer only (used during initial registration when the
---- buffer is not yet known to publish_shared's iteration).
 --- @param bufnr integer
 --- @param shared table|nil
 local function publish_to_bufnr(bufnr, shared)
   if shared then
+    local key = M._bufnr_key[bufnr]
     local view = compute_view(bufnr, shared)
+    if M._bufnr_key[bufnr] ~= key or M._reviews[key] ~= shared then
+      return
+    end
+    if not view then
+      M.remap_async(bufnr)
+      return
+    end
     M._views[bufnr] = view
     notify_subscribers(bufnr, composite(shared, view))
   else
@@ -244,12 +227,7 @@ local function consume_pending_force(review_key)
   return true
 end
 
--- ---------------------------------------------------------------------------
--- Public API
--- ---------------------------------------------------------------------------
-
 --- Restore shared review data from the on-disk cache. Returns a shared-shaped
---- table (no per-file data) or nil when the cache is cold or incomplete.
 --- @param bufnr integer
 --- @param ctx table
 --- @param provider_snapshot table
@@ -284,34 +262,20 @@ local function restore_cached_snapshot(bufnr, ctx, provider_snapshot)
     status = "ready",
     stale = true,
     review = review,
+    branch = branch,
     pr = pr,
     all_discussions = discussions_entry.data,
-    all_mappings = anchor.map_discussions(ctx.vcs_info.root, review.head_sha or "", discussions_entry.data),
     summary = build_summary(discussions_entry.data),
     error = nil,
     head_sha = review.head_sha or "",
   }
 end
 
--- ---------------------------------------------------------------------------
--- Public API
--- ---------------------------------------------------------------------------
-
 --- Build the review key from a provider snapshot and buffer context.
 --- @param provider_snapshot { provider: parley.Provider, opts: table }
 --- @param ctx { vcs_info: parley.VcsInfo }
 --- @return string|nil
-function M.make_key(provider_snapshot, ctx)
-  if not provider_snapshot or not provider_snapshot.provider or not provider_snapshot.opts then
-    return nil
-  end
-  if not ctx or not ctx.vcs_info or not ctx.vcs_info.branch or ctx.vcs_info.branch == "" then
-    return nil
-  end
-  local name = provider_name(provider_snapshot.provider)
-  local opts = provider_snapshot.opts
-  return name .. "/" .. opts.repository .. "/" .. ctx.vcs_info.branch
-end
+M.make_key = keys.make
 
 --- Check whether shared review data exists for the given key (in-memory).
 --- @param review_key string
@@ -332,7 +296,6 @@ function M.has_cached_review(provider, opts, branch)
 end
 
 --- Get the composite snapshot for a buffer. Returns nil if the buffer has no
---- associated review data.
 --- @param bufnr integer
 --- @param opts? { ensure?: boolean }
 --- @return table|nil
@@ -366,12 +329,14 @@ function M.refresh(bufnr, opts)
   local ctx = context_repository.refresh(bufnr)
   if not ctx or ctx.kind ~= "regular" or not ctx.vcs_info or not ctx.rel_path then
     publish_to_bufnr(bufnr, nil)
+    M.detach(bufnr, true)
     return nil
   end
 
   local provider_snapshot = provider_repository.refresh(bufnr)
   if not provider_snapshot then
     publish_to_bufnr(bufnr, nil)
+    M.detach(bufnr, true)
     return nil
   end
 
@@ -380,12 +345,14 @@ function M.refresh(bufnr, opts)
   local branch = ctx.vcs_info.branch
   if not branch or branch == "" then
     publish_to_bufnr(bufnr, nil)
+    M.detach(bufnr, true)
     return nil
   end
 
   local review_key = M.make_key(provider_snapshot, ctx)
   if not review_key then
     publish_to_bufnr(bufnr, nil)
+    M.detach(bufnr, true)
     return nil
   end
 
@@ -395,7 +362,6 @@ function M.refresh(bufnr, opts)
     if opts.force then
       M._pending_force[review_key] = true
     end
-    -- If shared data already exists, publish a view for this new buffer.
     local existing = M._reviews[review_key]
     if existing then
       publish_to_bufnr(bufnr, existing)
@@ -403,7 +369,6 @@ function M.refresh(bufnr, opts)
     return clone(composite(M._reviews[review_key], M._views[bufnr]))
   end
 
-  -- Restore from disk cache (stale-while-revalidate).
   if not opts.force then
     local restored = restore_cached_snapshot(bufnr, ctx, provider_snapshot)
     if restored then
@@ -425,7 +390,6 @@ function M.refresh(bufnr, opts)
     })
 
     local discussions = provider:fetch_discussions(review)
-    local all_mappings = anchor.map_discussions(ctx.vcs_info.root, review.head_sha or "", discussions)
     cache.set_async(discussions_cache_key(provider, provider_opts, review.pr.id), discussions)
     provider_repository.store(bufnr, provider, provider_opts)
 
@@ -433,9 +397,9 @@ function M.refresh(bufnr, opts)
       status = "ready",
       stale = false,
       review = review,
+      branch = branch,
       pr = review.pr,
       all_discussions = discussions,
-      all_mappings = all_mappings,
       summary = build_summary(discussions),
       error = nil,
       head_sha = review.head_sha or "",
@@ -448,8 +412,6 @@ function M.refresh(bufnr, opts)
   if not ok then
     local current = M._reviews[review_key]
     if current then
-      -- Stale data is already rendered; only mark the error without
-      -- re-publishing (avoids a redundant render cycle).
       current.status = "error"
       current.error = tostring(result)
     else
@@ -482,6 +444,66 @@ function M.refresh_async(bufnr, opts)
   end)
 end
 
+--- Local refresh generations; remote data is not invalidated by buffer edits.
+--- @type table<integer, integer>
+M._remap_generation = {}
+
+--- @param bufnr integer
+function M.remap_async(bufnr)
+  local generation = (M._remap_generation[bufnr] or 0) + 1
+  M._remap_generation[bufnr] = generation
+  vim.defer_fn(function()
+    if M._remap_generation[bufnr] ~= generation or not vim.api.nvim_buf_is_valid(bufnr) then
+      return
+    end
+    async.run(function()
+      local ctx = context_repository.get(bufnr)
+      local key = M._bufnr_key[bufnr]
+      local shared = key and M._reviews[key]
+      if not ctx or not ctx.vcs_info or not shared then
+        return
+      end
+      if shared.branch and shared.branch ~= ctx.vcs_info.branch then
+        publish_to_bufnr(bufnr, nil)
+        M.detach(bufnr, true)
+        return
+      end
+      local_mappings.invalidate(ctx.vcs_info)
+      for sibling in pairs(M._key_bufnrs[key] or {}) do
+        local other = context_repository.get(sibling)
+        if other and other.vcs_info and local_mappings.key(other.vcs_info) == local_mappings.key(ctx.vcs_info) then
+          publish_to_bufnr(sibling, shared)
+        end
+      end
+    end)
+  end, 150)
+end
+
+--- Detach one buffer without invalidating another checkout's remote review.
+--- @param bufnr integer
+--- @param preserve_subscribers? boolean
+function M.detach(bufnr, preserve_subscribers)
+  M._remap_generation[bufnr] = (M._remap_generation[bufnr] or 0) + 1
+  local key = M._bufnr_key[bufnr]
+  if key and M._key_bufnrs[key] then
+    M._key_bufnrs[key][bufnr] = nil
+  end
+  M._bufnr_key[bufnr], M._views[bufnr] = nil, nil
+  if not preserve_subscribers then
+    M._subscribers[bufnr] = nil
+  end
+  local ctx = context_repository.get(bufnr)
+  if ctx and ctx.vcs_info then
+    local_mappings.invalidate(ctx.vcs_info)
+    for sibling in pairs(M._key_bufnrs[key] or {}) do
+      local other = context_repository.get(sibling)
+      if other and other.vcs_info and local_mappings.key(other.vcs_info) == local_mappings.key(ctx.vcs_info) then
+        M.remap_async(sibling)
+      end
+    end
+  end
+end
+
 --- Invalidate cached review data for a buffer's repo/branch.
 --- @param bufnr integer
 --- @param opts? { preserve_snapshot?: boolean }
@@ -503,8 +525,7 @@ function M.invalidate(bufnr, opts)
   end
 end
 
---- Subscribe to snapshot changes for a buffer. The callback receives the
---- composite snapshot (same shape as get() returns) whenever data changes.
+--- Subscribe to composite snapshot changes for a buffer.
 --- @param bufnr integer
 --- @param cb fun(snapshot: table|nil): nil
 --- @return fun(): nil unsubscribe
@@ -527,12 +548,7 @@ function M.subscribe(bufnr, cb)
   end
 end
 
--- ---------------------------------------------------------------------------
--- Test helpers
--- ---------------------------------------------------------------------------
-
 --- Seed both shared and per-file data from a single composite snapshot.
---- For test use only.
 --- @param bufnr integer
 --- @param snapshot table|nil  same shape as the old _entries[bufnr]
 --- @param review_key? string  defaults to "test/repository/branch"
@@ -550,7 +566,6 @@ function M._seed(bufnr, snapshot, review_key)
     review = snapshot.review,
     pr = snapshot.pr or (snapshot.review and snapshot.review.pr or nil),
     all_discussions = snapshot.all_discussions or {},
-    all_mappings = snapshot.all_mappings or snapshot.mappings or {},
     summary = snapshot.summary or build_summary(snapshot.all_discussions or {}),
     error = snapshot.error,
     head_sha = snapshot.head_sha or "",
@@ -558,11 +573,8 @@ function M._seed(bufnr, snapshot, review_key)
   M._views[bufnr] = {
     discussions = snapshot.discussions or {},
     mappings = snapshot.mappings or {},
+    all_mappings = snapshot.all_mappings or snapshot.mappings or {},
   }
 end
-
--- ---------------------------------------------------------------------------
--- Private: restore from disk cache
--- ---------------------------------------------------------------------------
 
 return M

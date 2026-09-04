@@ -14,11 +14,10 @@
 ---   • Detectors are tried in registration order; first non-nil result wins.
 ---   • reset_detectors() is provided for test isolation.
 ---
---- Non-VCS helpers (check_sync_state, check_anchor_in_diff) remain here
---- because they are git-specific utilities shared across write-service flows.
+--- Revision reads and write validation dispatch through explicit VCS adapters.
 
 local await = require("parley.runtime.await")
-local anchor = require("parley.anchor")
+local adapters = require("parley.vcs.adapters")
 
 local M = {}
 
@@ -77,7 +76,7 @@ end
 ---
 --- @type fun(cmd: string[], cwd: string): { code: integer, stdout: string, stderr: string }
 M._runner = function(cmd, cwd)
-  local result = await.system(cmd, { cwd = cwd, text = true })
+  local result = await.system(cmd, { cwd = cwd, text = true, timeout = 10000 })
   return {
     code = result.code,
     stdout = result.stdout or "",
@@ -119,102 +118,102 @@ function M.detect(path)
   return nil
 end
 
---- Check that the local repo is in a state suitable for posting a new comment.
----
---- Two checks are performed in order; the first failure short-circuits:
----   1. Local HEAD matches the PR `head_sha` — no unpushed commits.
----   2. The file at `rel_path` has no uncommitted changes.
----
---- Must be called inside a plenary.async coroutine.
----
---- @param root     string  Absolute repo root (cwd for git commands)
---- @param rel_path string  Repo-relative path of the file being commented on
---- @param head_sha string  PR head SHA received from the provider
---- @return { ok: boolean, err?: string }
-function M.check_sync_state(root, rel_path, head_sha)
-  local run = M._runner
-
-  -- ── 1. Unpushed commits ───────────────────────────────────────────────────
-  local head_result = run({ "git", "rev-parse", "HEAD" }, root)
-  if head_result.code ~= 0 then
-    return { ok = false, err = "Cannot comment: failed to read local HEAD (" .. (head_result.stderr or "") .. ")" }
+--- Read a file at an immutable review revision.
+--- @param info parley.VcsInfo
+--- @param revision string
+--- @param path string
+--- @return string|nil, string|nil
+function M.read_file(info, revision, path)
+  local adapter, err = adapters.get(info)
+  if not adapter then
+    return nil, err
   end
-  local local_sha = trim(head_result.stdout)
-  if local_sha ~= head_sha then
+  if type(revision) ~= "string" or revision == "" or revision:sub(1, 1) == "-" then
+    return nil, "review revision is unavailable"
+  end
+  local result = M._runner(adapter.show(revision, path), info.root)
+  if result.code ~= 0 then
+    return nil, result.stderr or "cannot read revision content"
+  end
+  return result.stdout or ""
+end
+
+--- Require a clean file and local HEAD equal to the shared review revision.
+--- @param info parley.VcsInfo
+--- @param rel_path string
+--- @param head_sha string
+--- @return {ok: boolean, err?: string}
+function M.check_sync_state(info, rel_path, head_sha)
+  local adapter, err = adapters.get(info)
+  if not adapter then
+    return { ok = false, err = "Cannot comment: " .. err }
+  end
+  if type(head_sha) ~= "string" or head_sha == "" then
+    return { ok = false, err = "Cannot comment: review revision is unavailable. Refresh the review and retry." }
+  end
+  local result = M._runner(adapter.head(), info.root)
+  if result.code ~= 0 then
+    return { ok = false, err = "Cannot comment: failed to read local HEAD (" .. (result.stderr or "") .. ")" }
+  end
+  if trim(result.stdout or "") ~= head_sha then
     return {
       ok = false,
-      err = "Cannot comment: local branch has commits not yet pushed to the remote. Push first and retry.",
+      err = "Cannot comment: local checkout differs from the review revision. "
+        .. "Synchronize the checkout and review, then retry.",
     }
   end
-
-  -- ── 2. Uncommitted changes in the file ───────────────────────────────────
-  local status_result = run({ "git", "status", "--porcelain", "--", rel_path }, root)
-  if status_result.code ~= 0 then
-    return {
-      ok = false,
-      err = "Cannot comment: failed to check file status (" .. (status_result.stderr or "") .. ")",
-    }
+  result = M._runner(adapter.status(rel_path), info.root)
+  if result.code ~= 0 then
+    return { ok = false, err = "Cannot comment: failed to check file status (" .. (result.stderr or "") .. ")" }
   end
-  if (status_result.stdout or "") ~= "" then
+  local dirty, status_err = adapter.dirty(result.stdout or "")
+  if dirty == nil then
+    return { ok = false, err = "Cannot comment: " .. status_err }
+  end
+  if dirty then
     return {
       ok = false,
       err = "Cannot comment: '" .. rel_path .. "' has uncommitted changes. Commit or stash them and retry.",
     }
   end
-
   return { ok = true }
 end
 
---- Check that the anchor lines fall within the PR diff for a given file.
----
---- Runs `git diff --unified=0 origin/{base_branch}...HEAD -- {rel_path}` to
---- obtain the diff between the PR base and the current HEAD, then validates
---- that every line in the anchor appears within a changed hunk on the new
---- (RIGHT) side.
----
---- Must be called inside a plenary.async coroutine.
----
---- @param root        string        Absolute repo root (cwd for git commands)
---- @param base_branch string        PR base branch name (e.g. "main")
---- @param rel_path    string        Repo-relative path of the file being commented on
---- @param anch        parley.Anchor
---- @return { ok: boolean, err?: string }
-function M.check_anchor_in_diff(root, base_branch, rel_path, anch)
-  local run = M._runner
-  local base_ref = "origin/" .. base_branch
-
-  local result = run({ "git", "diff", "--unified=0", base_ref .. "...HEAD", "--", rel_path }, root)
-
-  if result.code ~= 0 then
-    -- Git error (e.g. unknown base branch): allow the comment through rather
-    -- than silently blocking the user.
-    return { ok = true }
+--- Validate every selected new-side line against the review diff.
+--- @param info parley.VcsInfo
+--- @param base_branch string
+--- @param rel_path string
+--- @param anch parley.Anchor
+--- @param head_sha? string
+--- @return {ok: boolean, err?: string}
+function M.check_anchor_in_diff(info, base_branch, rel_path, anch, head_sha)
+  local adapter, err = adapters.get(info)
+  if not adapter then
+    return { ok = false, err = "Cannot comment: " .. err }
   end
-
+  if type(base_branch) ~= "string" or base_branch == "" or base_branch:sub(1, 1) == "-" then
+    return { ok = false, err = "Cannot comment: review base is unavailable." }
+  end
+  local result = M._runner(adapter.diff(base_branch, head_sha or "HEAD", rel_path), info.root)
+  if result.code ~= 0 then
+    return { ok = false, err = "Cannot comment: failed to read review diff (" .. (result.stderr or "") .. ")" }
+  end
   if result.stdout == "" then
-    -- No diff output → file is unchanged in this PR.
     return {
       ok = false,
       err = "Cannot comment: '" .. rel_path .. "' has no changes in this PR. Only changed lines can be commented on.",
     }
   end
-
+  local anchor = require("parley.anchor")
   local hunks = anchor.parse_hunks(result.stdout)
-
-  local function line_err(line)
-    return "Cannot comment: line "
-      .. tostring(line)
-      .. " is not part of the PR diff. Move the cursor to a changed line."
+  for line = anch.start_line, anch.end_line or anch.start_line do
+    if not anchor.is_line_in_hunk(line, hunks) then
+      return {
+        ok = false,
+        err = "Cannot comment: line " .. line .. " is not part of the PR diff. Move the cursor to a changed line.",
+      }
+    end
   end
-
-  if not anchor.is_line_in_hunk(anch.start_line, hunks) then
-    return { ok = false, err = line_err(anch.start_line) }
-  end
-
-  if anch.end_line and not anchor.is_line_in_hunk(anch.end_line, hunks) then
-    return { ok = false, err = line_err(anch.end_line) }
-  end
-
   return { ok = true }
 end
 

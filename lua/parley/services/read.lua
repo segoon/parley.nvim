@@ -94,7 +94,7 @@ function M.clear_buffer_state(bufnr)
     M._subscriptions[bufnr]()
     M._subscriptions[bufnr] = nil
   end
-  review_repository.invalidate(bufnr)
+  review_repository.detach(bufnr)
   provider_repository.invalidate(bufnr)
   context_repository.invalidate(bufnr)
   signs.clear(bufnr)
@@ -130,12 +130,15 @@ function M.refresh_async(bufnr, opts, callback)
   async.run(function()
     local ctx = context_repository.refresh(bufnr)
     if not ctx or ctx.kind ~= "regular" or not ctx.rel_path then
+      M.clear_buffer_state(bufnr)
       return
     end
     if not ctx.vcs_info or not ctx.vcs_info.branch or ctx.vcs_info.branch == "" then
+      M.clear_buffer_state(bufnr)
       return
     end
     if not provider_repository.refresh(bufnr) then
+      M.clear_buffer_state(bufnr)
       return
     end
 

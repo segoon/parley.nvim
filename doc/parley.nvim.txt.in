@@ -282,6 +282,24 @@ Example override: >lua
 
 Parley uses a provider abstraction to support multiple hosting platforms.
 
+Local revision reads and new-comment validation use the detected VCS (Git or
+Arc). Mapping compares review-head content with a loaded buffer's text, including
+unsaved edits, or with the working-tree file when no buffer is loaded. Edits
+refresh positions after a short debounce without an API request. Separate
+checkouts have independent mappings even when they share the same review.
+
+If content cannot be read, existing locations remain visible as stale
+approximations with a warning. Deleted lines have no precise local position;
+quickfix entries are marked unavailable rather than targeting the original line.
+
+New comments require local HEAD to match the review revision, a clean file, and
+no unsaved changes. Every selected line must belong to the review's changed
+new-side lines. Validation runs before composition and again before sending.
+Failures preserve the draft; Parley never bypasses a failed VCS check.
+
+Internal VCS helpers take a VcsInfo table rather than a root string. Shared
+workflows use DetectedReview.head_sha; write_context remains provider-private.
+
 GitHub                                               *parley-provider-github*
 
 The built-in GitHub provider uses the `gh` CLI for API calls and supports

@@ -5,7 +5,7 @@
 --- double:
 ---   • buffer_context._get_buf_props / _vcs_detect — fixed buffer kind
 ---   • registry — a single mock-provider spec
----   • parley.anchor._runner — empty diff (identity mapping)
+---   • parley.anchor._diff — empty diff (identity mapping)
 ---   • parley.signs.render / .clear — recorders
 ---   • parley.cache._fs — in-memory dictionary
 ---   • read_service._notify / _get_config — recorders / fixed config
@@ -115,7 +115,7 @@ local saved = {}
 local function save_seams()
   saved.buf_props = buffer_context._get_buf_props
   saved.vcs_detect = buffer_context._vcs_detect
-  saved.anchor_runner = anchor._runner
+  saved.anchor_runner = anchor._diff
   saved.signs_render = signs.render
   saved.signs_clear = signs.clear
   saved.cache_fs = cache._fs
@@ -128,7 +128,7 @@ end
 local function restore_seams()
   buffer_context._get_buf_props = saved.buf_props
   buffer_context._vcs_detect = saved.vcs_detect
-  anchor._runner = saved.anchor_runner
+  anchor._diff = saved.anchor_runner
   signs.render = saved.signs_render
   signs.clear = saved.signs_clear
   cache._fs = saved.cache_fs
@@ -175,8 +175,8 @@ local function setup(o)
   end
 
   -- Anchor: empty diff → identity mapping (local_line == pr_line, not stale).
-  anchor._runner = function(_cmd, _cwd)
-    return { code = 0, stdout = "", stderr = "" }
+  anchor._diff = function()
+    return ""
   end
 
   -- Signs recorders.
@@ -629,10 +629,10 @@ describe("parley.services.read refresh", function()
   end)
 
   -- -------------------------------------------------------------------------
-  -- 7. Non-regular buffers are silently skipped
+  -- 7. Non-regular buffers are clear stale UI without fetching
   -- -------------------------------------------------------------------------
 
-  it("does nothing for a diffview buffer", function()
+  it("clears stale UI for a diffview buffer", function()
     local s = setup({
       filetype = "DiffviewFiles",
       pr = SAMPLE_PR,
@@ -644,11 +644,11 @@ describe("parley.services.read refresh", function()
     end)
 
     assert.equals(0, #s.render_calls)
-    assert.equals(0, #s.clear_calls)
+    assert.equals(1, #s.clear_calls)
     assert.equals(0, #s.provider.calls.detect_pr)
   end)
 
-  it("does nothing for a non-VCS buffer", function()
+  it("clears stale UI for a non-VCS buffer", function()
     local s = setup({
       vcs_info = false,
       pr = SAMPLE_PR,
@@ -660,11 +660,11 @@ describe("parley.services.read refresh", function()
     end)
 
     assert.equals(0, #s.render_calls)
-    assert.equals(0, #s.clear_calls)
+    assert.equals(1, #s.clear_calls)
     assert.equals(0, #s.provider.calls.detect_pr)
   end)
 
-  it("does nothing when no provider matches the vcs_info", function()
+  it("clears stale UI when no provider matches the vcs_info", function()
     local s = setup({
       no_provider = true,
       pr = SAMPLE_PR,
@@ -676,7 +676,7 @@ describe("parley.services.read refresh", function()
     end)
 
     assert.equals(0, #s.render_calls)
-    assert.equals(0, #s.clear_calls)
+    assert.equals(1, #s.clear_calls)
     assert.is_nil(s.provider)
   end)
 
@@ -811,8 +811,8 @@ describe("parley.services.read multi-repo", function()
       return nil
     end
 
-    anchor._runner = function(_cmd, _cwd)
-      return { code = 0, stdout = "", stderr = "" }
+    anchor._diff = function()
+      return ""
     end
 
     local render_calls = {}

@@ -397,6 +397,14 @@ function M.setup(opts)
     desc = "Parley: refresh PR discussions on buffer enter",
   })
 
+  vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI", "BufWritePost", "BufReadPost", "BufUnload" }, {
+    group = augroup,
+    callback = function(args)
+      require("parley.repositories.review").remap_async(args.buf)
+    end,
+    desc = "Parley: update local discussion positions",
+  })
+
   vim.api.nvim_create_user_command("Parley", function(cmd_opts)
     M._dispatch_parley(cmd_opts.fargs, vim.api.nvim_get_current_buf(), cmd_opts)
   end, {

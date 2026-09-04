@@ -59,7 +59,11 @@ function M._sorted_review_discussions(bufnr)
     return all -- empty table or nil
   end
   -- Stable sort by (file, line).
-  local sorted = vim.deepcopy(all)
+  local state = require("parley.repositories.review").get(bufnr)
+  local mapped = state and state.all_mappings or {}
+  local sorted = vim.tbl_filter(function(d)
+    return d.file and d.file ~= "" and d.line and d.line > 0 and not (mapped[d.id] and mapped[d.id].local_line == nil)
+  end, vim.deepcopy(all))
   table.sort(sorted, function(a, b)
     if a.file ~= b.file then
       return a.file < b.file
@@ -239,13 +243,13 @@ function M.review_next(bufnr)
 
   local sorted = M._sorted_review_discussions(bufnr)
   if not sorted or #sorted == 0 then
-    vim.notify("No Parley comments in this review", vim.log.levels.INFO)
+    vim.notify("No Parley discussions with available file locations", vim.log.levels.WARN)
     return
   end
 
   local cursor = vim.api.nvim_win_get_cursor(winid)[1] - 1
-  local views = review_repository._views[bufnr]
-  local mappings = views and views.mappings or {}
+  local snapshot = review_repository.get(bufnr)
+  local mappings = snapshot and snapshot.all_mappings or {}
   local cur_idx = M._current_index(sorted, ctx.rel_path, cursor, mappings)
 
   -- Next index with wrap-around.
@@ -268,6 +272,8 @@ function M.review_next(bufnr)
   if disc.file ~= ctx.rel_path then
     vim.cmd("edit " .. vim.fn.fnameescape(vcs_root .. "/" .. disc.file))
   end
+  local target_buf = vim.api.nvim_win_get_buf(winid)
+  target_line = math.max(1, math.min(target_line, vim.api.nvim_buf_line_count(target_buf)))
   vim.api.nvim_win_set_cursor(winid, { target_line, 0 })
   if from_float then
     vim.schedule(function()
@@ -302,13 +308,13 @@ function M.review_prev(bufnr)
 
   local sorted = M._sorted_review_discussions(bufnr)
   if not sorted or #sorted == 0 then
-    vim.notify("No Parley comments in this review", vim.log.levels.INFO)
+    vim.notify("No Parley discussions with available file locations", vim.log.levels.WARN)
     return
   end
 
   local cursor = vim.api.nvim_win_get_cursor(winid)[1] - 1
-  local views = review_repository._views[bufnr]
-  local mappings = views and views.mappings or {}
+  local snapshot = review_repository.get(bufnr)
+  local mappings = snapshot and snapshot.all_mappings or {}
   local cur_idx = M._current_index(sorted, ctx.rel_path, cursor, mappings)
 
   -- Previous index with wrap-around.
@@ -337,6 +343,8 @@ function M.review_prev(bufnr)
   if disc.file ~= ctx.rel_path then
     vim.cmd("edit " .. vim.fn.fnameescape(vcs_root .. "/" .. disc.file))
   end
+  local target_buf = vim.api.nvim_win_get_buf(winid)
+  target_line = math.max(1, math.min(target_line, vim.api.nvim_buf_line_count(target_buf)))
   vim.api.nvim_win_set_cursor(winid, { target_line, 0 })
   if from_float then
     vim.schedule(function()

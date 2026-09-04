@@ -175,7 +175,7 @@ a.describe("parley.vcs check_sync_state", function()
     })
     vcs._runner = mock.runner
 
-    local result = vcs.check_sync_state("/repo", "src/foo.lua", SHA)
+    local result = vcs.check_sync_state({ vcs = "git", root = "/repo" }, "src/foo.lua", SHA)
 
     assert.is_true(result.ok)
     assert.is_nil(result.err)
@@ -189,11 +189,11 @@ a.describe("parley.vcs check_sync_state", function()
     })
     vcs._runner = mock.runner
 
-    local result = vcs.check_sync_state("/repo", "src/foo.lua", SHA)
+    local result = vcs.check_sync_state({ vcs = "git", root = "/repo" }, "src/foo.lua", SHA)
 
     assert.is_false(result.ok)
     assert.is_not_nil(result.err)
-    assert.is_truthy(result.err:find("push", 1, true))
+    assert.is_truthy(result.err:find("differs", 1, true))
   end)
 
   a.it("does not run status check when HEAD mismatches (short-circuits)", function()
@@ -202,7 +202,7 @@ a.describe("parley.vcs check_sync_state", function()
     })
     vcs._runner = mock.runner
 
-    vcs.check_sync_state("/repo", "src/foo.lua", SHA)
+    vcs.check_sync_state({ vcs = "git", root = "/repo" }, "src/foo.lua", SHA)
 
     assert.equals(1, #mock.calls)
   end)
@@ -216,7 +216,7 @@ a.describe("parley.vcs check_sync_state", function()
     })
     vcs._runner = mock.runner
 
-    local result = vcs.check_sync_state("/repo", "src/foo.lua", SHA)
+    local result = vcs.check_sync_state({ vcs = "git", root = "/repo" }, "src/foo.lua", SHA)
 
     assert.is_false(result.ok)
     assert.is_not_nil(result.err)
@@ -230,7 +230,7 @@ a.describe("parley.vcs check_sync_state", function()
     })
     vcs._runner = mock.runner
 
-    local result = vcs.check_sync_state("/repo", "TODO.md", SHA)
+    local result = vcs.check_sync_state({ vcs = "git", root = "/repo" }, "TODO.md", SHA)
 
     assert.is_truthy(result.err:find("TODO.md", 1, true))
   end)
@@ -244,7 +244,7 @@ a.describe("parley.vcs check_sync_state", function()
     })
     vcs._runner = mock.runner
 
-    vcs.check_sync_state("/my/repo", "foo.lua", SHA)
+    vcs.check_sync_state({ vcs = "git", root = "/my/repo" }, "foo.lua", SHA)
 
     assert.same({ "git", "rev-parse", "HEAD" }, mock.calls[1].cmd)
     assert.equals("/my/repo", mock.calls[1].cwd)
@@ -257,7 +257,7 @@ a.describe("parley.vcs check_sync_state", function()
     })
     vcs._runner = mock.runner
 
-    vcs.check_sync_state("/my/repo", "src/bar.lua", SHA)
+    vcs.check_sync_state({ vcs = "git", root = "/my/repo" }, "src/bar.lua", SHA)
 
     assert.same({ "git", "status", "--porcelain", "--", "src/bar.lua" }, mock.calls[2].cmd)
     assert.equals("/my/repo", mock.calls[2].cwd)
@@ -271,7 +271,7 @@ a.describe("parley.vcs check_sync_state", function()
     })
     vcs._runner = mock.runner
 
-    local result = vcs.check_sync_state("/repo", "foo.lua", SHA)
+    local result = vcs.check_sync_state({ vcs = "git", root = "/repo" }, "foo.lua", SHA)
 
     assert.is_false(result.ok)
     assert.is_not_nil(result.err)
@@ -284,7 +284,7 @@ a.describe("parley.vcs check_sync_state", function()
     })
     vcs._runner = mock.runner
 
-    local result = vcs.check_sync_state("/repo", "foo.lua", SHA)
+    local result = vcs.check_sync_state({ vcs = "git", root = "/repo" }, "foo.lua", SHA)
 
     assert.is_false(result.ok)
     assert.is_not_nil(result.err)
@@ -323,7 +323,12 @@ a.describe("parley.vcs check_anchor_in_diff", function()
     local mock = make_runner({ { code = 0, stdout = diff_hunk(5, 3), stderr = "" } })
     vcs._runner = mock.runner
 
-    local result = vcs.check_anchor_in_diff("/repo", "main", "f.lua", { start_line = 5, end_line = nil })
+    local result = vcs.check_anchor_in_diff(
+      { vcs = "git", root = "/repo" },
+      "main",
+      "f.lua",
+      { start_line = 5, end_line = nil }
+    )
 
     assert.is_true(result.ok)
     assert.is_nil(result.err)
@@ -333,7 +338,12 @@ a.describe("parley.vcs check_anchor_in_diff", function()
     local mock = make_runner({ { code = 0, stdout = diff_hunk(5, 3), stderr = "" } })
     vcs._runner = mock.runner
 
-    local result = vcs.check_anchor_in_diff("/repo", "main", "f.lua", { start_line = 7, end_line = nil })
+    local result = vcs.check_anchor_in_diff(
+      { vcs = "git", root = "/repo" },
+      "main",
+      "f.lua",
+      { start_line = 7, end_line = nil }
+    )
 
     assert.is_true(result.ok)
   end)
@@ -342,7 +352,12 @@ a.describe("parley.vcs check_anchor_in_diff", function()
     local mock = make_runner({ { code = 0, stdout = diff_hunk(10, 5), stderr = "" } })
     vcs._runner = mock.runner
 
-    local result = vcs.check_anchor_in_diff("/repo", "main", "f.lua", { start_line = 11, end_line = 13 })
+    local result = vcs.check_anchor_in_diff(
+      { vcs = "git", root = "/repo" },
+      "main",
+      "f.lua",
+      { start_line = 11, end_line = 13 }
+    )
 
     assert.is_true(result.ok)
   end)
@@ -353,7 +368,12 @@ a.describe("parley.vcs check_anchor_in_diff", function()
     local mock = make_runner({ { code = 0, stdout = diff_hunk(10, 3), stderr = "" } })
     vcs._runner = mock.runner
 
-    local result = vcs.check_anchor_in_diff("/repo", "main", "f.lua", { start_line = 5, end_line = nil })
+    local result = vcs.check_anchor_in_diff(
+      { vcs = "git", root = "/repo" },
+      "main",
+      "f.lua",
+      { start_line = 5, end_line = nil }
+    )
 
     assert.is_false(result.ok)
     assert.is_not_nil(result.err)
@@ -364,7 +384,12 @@ a.describe("parley.vcs check_anchor_in_diff", function()
     local mock = make_runner({ { code = 0, stdout = diff_hunk(5, 3), stderr = "" } })
     vcs._runner = mock.runner
 
-    local result = vcs.check_anchor_in_diff("/repo", "main", "f.lua", { start_line = 20, end_line = nil })
+    local result = vcs.check_anchor_in_diff(
+      { vcs = "git", root = "/repo" },
+      "main",
+      "f.lua",
+      { start_line = 20, end_line = nil }
+    )
 
     assert.is_false(result.ok)
     assert.is_truthy(result.err:find("20", 1, true))
@@ -374,7 +399,12 @@ a.describe("parley.vcs check_anchor_in_diff", function()
     local mock = make_runner({ { code = 0, stdout = diff_hunk(10, 3), stderr = "" } })
     vcs._runner = mock.runner
 
-    local result = vcs.check_anchor_in_diff("/repo", "main", "f.lua", { start_line = 1, end_line = nil })
+    local result = vcs.check_anchor_in_diff(
+      { vcs = "git", root = "/repo" },
+      "main",
+      "f.lua",
+      { start_line = 1, end_line = nil }
+    )
 
     assert.is_truthy(result.err:find("changed", 1, true))
   end)
@@ -385,10 +415,15 @@ a.describe("parley.vcs check_anchor_in_diff", function()
     local mock = make_runner({ { code = 0, stdout = diff_hunk(10, 3), stderr = "" } })
     vcs._runner = mock.runner
 
-    local result = vcs.check_anchor_in_diff("/repo", "main", "f.lua", { start_line = 10, end_line = 15 })
+    local result = vcs.check_anchor_in_diff(
+      { vcs = "git", root = "/repo" },
+      "main",
+      "f.lua",
+      { start_line = 10, end_line = 15 }
+    )
 
     assert.is_false(result.ok)
-    assert.is_truthy(result.err:find("15", 1, true))
+    assert.is_truthy(result.err:find("13", 1, true))
   end)
 
   -- ── No diff (file unchanged) ──────────────────────────────────────────────
@@ -397,7 +432,12 @@ a.describe("parley.vcs check_anchor_in_diff", function()
     local mock = make_runner({ { code = 0, stdout = "", stderr = "" } })
     vcs._runner = mock.runner
 
-    local result = vcs.check_anchor_in_diff("/repo", "main", "unchanged.lua", { start_line = 1, end_line = nil })
+    local result = vcs.check_anchor_in_diff(
+      { vcs = "git", root = "/repo" },
+      "main",
+      "unchanged.lua",
+      { start_line = 1, end_line = nil }
+    )
 
     assert.is_false(result.ok)
     assert.is_truthy(result.err:find("unchanged.lua", 1, true))
@@ -405,13 +445,18 @@ a.describe("parley.vcs check_anchor_in_diff", function()
 
   -- ── Git failure ───────────────────────────────────────────────────────────
 
-  a.it("returns ok=true (allows through) when git diff fails", function()
+  a.it("returns ok=false when Git diff fails", function()
     local mock = make_runner({ { code = 128, stdout = "", stderr = "fatal: unknown revision" } })
     vcs._runner = mock.runner
 
-    local result = vcs.check_anchor_in_diff("/repo", "unknown-base", "f.lua", { start_line = 5, end_line = nil })
+    local result = vcs.check_anchor_in_diff(
+      { vcs = "git", root = "/repo" },
+      "unknown-base",
+      "f.lua",
+      { start_line = 5, end_line = nil }
+    )
 
-    assert.is_true(result.ok)
+    assert.is_false(result.ok)
   end)
 
   -- ── Command shape ─────────────────────────────────────────────────────────
@@ -420,15 +465,20 @@ a.describe("parley.vcs check_anchor_in_diff", function()
     local mock = make_runner({ { code = 0, stdout = diff_hunk(5, 3), stderr = "" } })
     vcs._runner = mock.runner
 
-    vcs.check_anchor_in_diff("/my/repo", "main", "src/foo.lua", { start_line = 5, end_line = nil })
+    vcs.check_anchor_in_diff(
+      { vcs = "git", root = "/my/repo" },
+      "main",
+      "src/foo.lua",
+      { start_line = 5, end_line = nil }
+    )
 
     local cmd = mock.calls[1].cmd
     assert.equals("git", cmd[1])
     assert.equals("diff", cmd[2])
-    assert.equals("--unified=0", cmd[3])
-    assert.equals("origin/main...HEAD", cmd[4])
-    assert.equals("--", cmd[5])
-    assert.equals("src/foo.lua", cmd[6])
+    assert.equals("--unified=0", cmd[5])
+    assert.equals("origin/main...HEAD", cmd[6])
+    assert.equals("--", cmd[7])
+    assert.equals("src/foo.lua", cmd[8])
     assert.equals("/my/repo", mock.calls[1].cwd)
   end)
 end)

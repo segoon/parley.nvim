@@ -4,7 +4,6 @@ local async = require("plenary.async")
 local model = require("parley.model")
 local vcs = require("parley.vcs")
 local composer_ui_state = require("parley.ui_states.composer")
-local progress_ui_state = require("parley.ui_states.progress")
 local context_repository = require("parley.repositories.context")
 local provider_repository = require("parley.repositories.provider")
 local review_repository = require("parley.repositories.review")
@@ -41,12 +40,13 @@ M._confirm_delete = function(msg)
   return vim.fn.confirm(msg, "&Delete\n&Keep", 2) == 1
 end
 
---- VCS sync-state check seam; replace in tests to avoid real git calls.
---- @type fun(root: string, rel_path: string, head_sha: string): { ok: boolean, err?: string }
+--- VCS sync-state check seam; replace in tests to avoid real VCS calls.
+--- @type fun(info: parley.VcsInfo, rel_path: string, head_sha: string): { ok: boolean, err?: string }
 M._check_sync_state = vcs.check_sync_state
 
---- Anchor-in-diff check seam; replace in tests to avoid real git calls.
---- @type fun(root: string, base_branch: string, rel_path: string, anch: parley.Anchor): { ok: boolean, err?: string }
+--- Anchor-in-diff check seam; replace in tests to avoid real VCS calls.
+--- @alias parley.VcsCheckResult { ok: boolean, err?: string }
+--- @type fun(v: parley.VcsInfo, b: string, p: string, a: parley.Anchor, h: string): parley.VcsCheckResult
 M._check_anchor_in_diff = vcs.check_anchor_in_diff
 
 M._next_progress_id = 0
@@ -70,7 +70,7 @@ local function resolve_write_context(bufnr)
     provider = provider_snapshot.provider,
     review = review_snapshot.review,
     rel_path = context_snapshot.rel_path,
-    root = context_snapshot.vcs_info and context_snapshot.vcs_info.root or nil,
+    vcs_info = vim.deepcopy(context_snapshot.vcs_info),
   },
     nil
 end
@@ -104,213 +104,71 @@ local function notify_context_error(message)
   M._notify(message or "Parley write context is not ready for this buffer", vim.log.levels.WARN)
 end
 
---- @param instance table
---- @param callback fun(): nil
-local function close_input(instance, callback)
-  instance.close(true)
-  if callback then
-    callback()
-  end
-end
+local operations = require("parley.services.write_operation")(M)
 
+--- @type fun(bufnr: integer): table|nil
+M._refresh_context = context_repository.refresh
+--- @type table<integer, boolean>
+M._validating = {}
+
+--- Recheck the source after drafting and after asynchronous VCS operations.
 --- @param bufnr integer
---- @param callback fun(snapshot: table|nil): nil
-local function refresh_after_write(bufnr, callback)
-  async.run(function()
-    review_repository.invalidate(bufnr, { preserve_snapshot = true })
-    local snapshot = review_repository.refresh(bufnr, { force = true })
-    vim.schedule(function()
-      callback(snapshot)
-    end)
-  end)
-end
-
----@param state 'success'|'failed'|'cancelled'
----@return integer
-local function progress_timeout(state)
-  local config = M._get_config() or {}
-  local progress = config.progress or {}
-  if state == "success" then
-    return progress.success_timeout or 1200
+--- @param expected table
+--- @param anch parley.Anchor
+--- @return string|nil
+local function validate_submission(bufnr, expected, anch)
+  if not vim.api.nvim_buf_is_valid(bufnr) then
+    return "Source buffer is no longer available"
   end
-  if state == "failed" then
-    return progress.failed_timeout or 2500
+  local tick = vim.api.nvim_buf_get_changedtick(bufnr)
+  local current = M._refresh_context(bufnr)
+  if
+    not current
+    or current.rel_path ~= expected.rel_path
+    or not vim.deep_equal(current.vcs_info, expected.vcs_info)
+  then
+    return "Cannot comment: repository context changed. Reopen the draft for the current review."
   end
-  return progress.cancelled_timeout or 1200
-end
-
----@param bufnr integer
----@param message string
----@return { id: string, started_at: integer, title: string }
-local function start_progress(bufnr, message)
-  M._next_progress_id = M._next_progress_id + 1
-  local entry = {
-    id = tostring(M._next_progress_id),
-    bufnr = bufnr,
-    title = "Parley",
-    message = message,
-    kind = "write",
-    state = "running",
-    started_at = M._now(),
-    updated_at = M._now(),
-  }
-  progress_ui_state.upsert(entry)
-  return {
-    id = entry.id,
-    started_at = entry.started_at,
-    title = entry.title,
-  }
-end
-
----@param progress { id: string, started_at: integer, title: string }
----@param bufnr integer
----@param state 'running'|'success'|'failed'|'cancelled'
----@param message string
-local function update_progress(progress, bufnr, state, message)
-  progress_ui_state.upsert({
-    id = progress.id,
-    bufnr = bufnr,
-    title = progress.title,
-    message = message,
-    kind = "write",
-    state = state,
-    started_at = progress.started_at,
-    updated_at = M._now(),
-  })
-end
-
----@param progress { id: string, started_at: integer, title: string }
----@param bufnr integer
----@param state 'success'|'failed'|'cancelled'
----@param message string
-local function finish_progress(progress, bufnr, state, message)
-  update_progress(progress, bufnr, state, message)
-  M._defer(function()
-    progress_ui_state.remove(progress.id)
-  end, progress_timeout(state))
-end
-
---- @param bufnr integer
---- @param cursor_line integer|nil
---- @param starter fun(
----   callback: fun(result: { ok: boolean, err?: string, cancelled?: boolean }): nil
---- ): { cancel: fun(): nil }
---- @param progress_texts { running: string, refreshing: string, success: string, failed: string, cancelled: string }
---- @return boolean
-local function run_action(bufnr, cursor_line, starter, progress_texts)
-  if M._operations[bufnr] ~= nil then
-    M._notify("Parley request already in progress for this buffer", vim.log.levels.WARN)
-    return false
+  local snapshot = review_repository.get(bufnr)
+  if
+    not snapshot
+    or not snapshot.review
+    or snapshot.review.head_sha ~= expected.review.head_sha
+    or snapshot.review.pr.id ~= expected.review.pr.id
+  then
+    return "Cannot comment: review changed. Refresh and reopen the draft."
   end
-
-  local operation
-  local progress = start_progress(bufnr, progress_texts.running)
-  local request = starter(function(result)
-    if M._operations[bufnr] ~= operation then
-      return
-    end
-
-    M._operations[bufnr] = nil
-
-    if result.cancelled then
-      finish_progress(progress, bufnr, "cancelled", progress_texts.cancelled)
-      refresh_after_write(bufnr, function() end)
-      return
-    end
-
-    if not result.ok then
-      finish_progress(progress, bufnr, "failed", progress_texts.failed)
-      M._notify(result.err or "parley: request failed", vim.log.levels.WARN)
-      return
-    end
-
-    update_progress(progress, bufnr, "running", progress_texts.refreshing)
-    refresh_after_write(bufnr, function()
-      finish_progress(progress, bufnr, "success", progress_texts.success)
-      if vim.api.nvim_buf_is_valid(bufnr) then
-        local discussion_window = require("parley.discussion_window")
-        pcall(discussion_window.open_current_line, bufnr, { cursor_line = cursor_line })
-      end
-    end)
-  end)
-
-  operation = {
-    cancel = request.cancel,
-    progress = progress,
-  }
-  M._operations[bufnr] = operation
-  return true
-end
-
---- @param bufnr integer
---- @param instance table
---- @param starter fun(
----   callback: fun(result: { ok: boolean, comment?: parley.Comment, err?: string, cancelled?: boolean }): nil
---- ): { cancel: fun(): nil }
---- @param status_text string
---- @param progress_texts { running: string, refreshing: string, success: string, failed: string, cancelled: string }
---- @param success_opts? { cursor_line?: integer }
-local function run_submit(bufnr, instance, starter, status_text, progress_texts, success_opts)
-  success_opts = success_opts or {}
-  if M._operations[bufnr] ~= nil then
-    M._notify("Parley request already in progress for this buffer", vim.log.levels.WARN)
-    return false
+  if vim.bo[bufnr].modified then
+    return "Cannot comment: source buffer has unsaved changes."
   end
-
-  local operation
-  local progress = start_progress(bufnr, progress_texts.running)
-  composer_ui_state.patch(bufnr, { submit_state = "submitting", error = nil })
-  instance.set_submitting(status_text)
-
-  local request = starter(function(result)
-    if M._operations[bufnr] ~= operation then
-      return
-    end
-
-    M._operations[bufnr] = nil
-
-    if result.cancelled then
-      composer_ui_state.patch(bufnr, { submit_state = "idle" })
-      instance.set_idle("Request cancelled. Draft preserved.")
-      finish_progress(progress, bufnr, "cancelled", progress_texts.cancelled)
-      refresh_after_write(bufnr, function() end)
-      return
-    end
-
-    if not result.ok then
-      composer_ui_state.patch(bufnr, { submit_state = "failed", error = result.err or "parley: request failed" })
-      instance.set_idle("Request failed. Fix the draft and retry.")
-      finish_progress(progress, bufnr, "failed", progress_texts.failed)
-      M._notify(result.err or "parley: request failed", vim.log.levels.WARN)
-      return
-    end
-
-    composer_ui_state.clear(bufnr)
-    update_progress(progress, bufnr, "running", progress_texts.refreshing)
-    close_input(instance, function()
-      refresh_after_write(bufnr, function()
-        finish_progress(progress, bufnr, "success", progress_texts.success)
-        if vim.api.nvim_buf_is_valid(bufnr) then
-          local discussion_window = require("parley.discussion_window")
-          pcall(discussion_window.open_current_line, bufnr, { cursor_line = success_opts.cursor_line })
-        end
-      end)
-    end)
-  end)
-
-  operation = {
-    cancel = request.cancel,
-    input = instance,
-    progress = progress,
-  }
-  M._operations[bufnr] = operation
-  instance.set_cancel(function()
-    local active = M._operations[bufnr]
-    if active ~= nil then
-      active.cancel()
-    end
-  end)
-  return true
+  local check = M._check_sync_state(expected.vcs_info, expected.rel_path, expected.review.head_sha)
+  if not check.ok then
+    return check.err
+  end
+  check = M._check_anchor_in_diff(
+    expected.vcs_info,
+    expected.review.pr.base_branch,
+    expected.rel_path,
+    anch,
+    expected.review.head_sha
+  )
+  if not check.ok then
+    return check.err
+  end
+  if not vim.api.nvim_buf_is_valid(bufnr) or vim.api.nvim_buf_get_changedtick(bufnr) ~= tick then
+    return "Cannot comment: source buffer changed during validation. Retry after saving."
+  end
+  current = context_repository.get(bufnr)
+  snapshot = review_repository.get(bufnr)
+  if
+    not current
+    or not vim.deep_equal(current.vcs_info, expected.vcs_info)
+    or not snapshot
+    or not snapshot.review
+    or snapshot.review.head_sha ~= expected.review.head_sha
+  then
+    return "Cannot comment: review context changed during validation. Reopen the draft."
+  end
 end
 
 --- Open an input window for a new top-level comment.
@@ -325,10 +183,13 @@ function M.open_new_comment_input(bufnr, opts)
   end
   local anchor = resolve_anchor(opts.line, opts.range, opts.line1, opts.line2)
   local target_line = anchor.start_line
-
+  if vim.bo[bufnr].modified then
+    notify_context_error("Cannot comment: source buffer has unsaved changes.")
+    return false
+  end
+  local source_tick = vim.api.nvim_buf_get_changedtick(bufnr)
   async.run(function()
-    local check =
-      M._check_sync_state(write_context.root or "", write_context.rel_path, write_context.review.write_context.head_sha)
+    local check = M._check_sync_state(write_context.vcs_info, write_context.rel_path, write_context.review.head_sha)
     if not check.ok then
       vim.schedule(function()
         M._notify(check.err, vim.log.levels.WARN)
@@ -337,10 +198,11 @@ function M.open_new_comment_input(bufnr, opts)
     end
 
     local diff_check = M._check_anchor_in_diff(
-      write_context.root or "",
+      write_context.vcs_info,
       write_context.review.pr.base_branch,
       write_context.rel_path,
-      anchor
+      anchor,
+      write_context.review.head_sha
     )
     if not diff_check.ok then
       vim.schedule(function()
@@ -349,6 +211,10 @@ function M.open_new_comment_input(bufnr, opts)
       return
     end
 
+    if not vim.api.nvim_buf_is_valid(bufnr) or vim.api.nvim_buf_get_changedtick(bufnr) ~= source_tick then
+      notify_context_error("Cannot comment: source buffer changed during validation. Retry after saving.")
+      return
+    end
     composer_ui_state.set(bufnr, {
       mode = "new",
       visible = true,
@@ -361,57 +227,72 @@ function M.open_new_comment_input(bufnr, opts)
       cursor_line = target_line,
       status = "Drafting top-level comment. Press <C-s> to send, or <Esc>s in normal mode. q closes.",
       on_submit = function(instance, text)
-        local body = model.new_body({ text = text, format = "markdown" })
-        return run_submit(
-          bufnr,
-          instance,
-          function(callback)
-            if write_context.provider.begin_post_top_level_comment then
-              return write_context.provider:begin_post_top_level_comment(
-                write_context.review,
-                write_context.rel_path,
-                anchor,
-                body,
-                callback
-              )
-            end
-
-            local cancelled = false
-            async.run(function()
-              local ok, result = pcall(function()
-                return write_context.provider:post_top_level_comment(
+        if M._validating[bufnr] or M._operations[bufnr] then
+          return false
+        end
+        M._validating[bufnr] = true
+        async.run(function()
+          local validation_ok, validation_err = pcall(validate_submission, bufnr, write_context, anchor)
+          M._validating[bufnr] = nil
+          if not validation_ok or validation_err then
+            local message = tostring(validation_err)
+            instance.set_idle(message .. " Draft preserved.")
+            M._notify(message, vim.log.levels.WARN)
+            return
+          end
+          local body = model.new_body({ text = text, format = "markdown" })
+          operations.run_submit(
+            bufnr,
+            instance,
+            function(callback)
+              if write_context.provider.begin_post_top_level_comment then
+                return write_context.provider:begin_post_top_level_comment(
                   write_context.review,
                   write_context.rel_path,
                   anchor,
-                  body
+                  body,
+                  callback
                 )
+              end
+
+              local cancelled = false
+              async.run(function()
+                local ok, result = pcall(function()
+                  return write_context.provider:post_top_level_comment(
+                    write_context.review,
+                    write_context.rel_path,
+                    anchor,
+                    body
+                  )
+                end)
+                vim.schedule(function()
+                  if cancelled then
+                    callback({ ok = false, cancelled = true })
+                  elseif ok then
+                    callback({ ok = true, comment = result })
+                  else
+                    callback({ ok = false, err = tostring(result) })
+                  end
+                end)
               end)
-              vim.schedule(function()
-                if cancelled then
-                  callback({ ok = false, cancelled = true })
-                elseif ok then
-                  callback({ ok = true, comment = result })
-                else
-                  callback({ ok = false, err = tostring(result) })
-                end
-              end)
-            end)
-            return {
-              cancel = function()
-                cancelled = true
-              end,
-            }
-          end,
-          "Sending request... Press C to cancel request.",
-          {
-            running = "Sending comment",
-            refreshing = "Refreshing discussion",
-            success = "Comment sent",
-            failed = "Comment failed",
-            cancelled = "Comment cancelled",
-          },
-          { cursor_line = target_line }
-        )
+              return {
+                cancel = function()
+                  cancelled = true
+                end,
+              }
+            end,
+            "Sending request... Press C to cancel request.",
+            {
+              running = "Sending comment",
+              refreshing = "Refreshing discussion",
+              success = "Comment sent",
+              failed = "Comment failed",
+              cancelled = "Comment cancelled",
+            },
+            { cursor_line = target_line }
+          )
+        end)
+        return true
       end,
     })
   end)
@@ -451,7 +332,7 @@ function M.open_reply_input(bufnr, discussion, parent_comment)
     status = "Drafting reply. Press <C-s> to send, or <Esc>s in normal mode. q closes.",
     on_submit = function(instance, text)
       local body = model.new_body({ text = text, format = "markdown" })
-      return run_submit(
+      return operations.run_submit(
         bufnr,
         instance,
         function(callback)
@@ -529,7 +410,7 @@ function M.open_edit_input(bufnr, discussion, comment)
     status = "Editing comment. Press <C-s> to save, or <Esc>s in normal mode. q closes.",
     on_submit = function(instance, text)
       local body = model.new_body({ text = text, format = "markdown" })
-      return run_submit(
+      return operations.run_submit(
         bufnr,
         instance,
         function(callback)
@@ -584,7 +465,7 @@ function M.react_comment(bufnr, cursor_line, comment, reaction)
     notify_context_error(err)
     return false
   end
-  return run_action(bufnr, cursor_line, function(callback)
+  return operations.run_action(bufnr, cursor_line, function(callback)
     local cancelled = false
     async.run(function()
       local ok, result = pcall(function()
@@ -633,7 +514,7 @@ function M.delete_comment(bufnr, cursor_line, comment)
     notify_context_error(err)
     return false
   end
-  return run_action(bufnr, cursor_line, function(callback)
+  return operations.run_action(bufnr, cursor_line, function(callback)
     local cancelled = false
     async.run(function()
       local ok, result = pcall(function()
