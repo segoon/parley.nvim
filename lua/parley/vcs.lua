@@ -40,6 +40,19 @@ local M = {}
 --- @type { name: string, fn: fun(path: string): parley.VcsInfo|nil }[]
 local _detectors = {}
 
+--- Register an adapter for revision reads and local validation.
+--- Register custom adapters after setup(); duplicate names are rejected.
+--- @param name string
+--- @param adapter parley.VcsAdapter
+function M.register_adapter(name, adapter)
+  adapters.register(name, adapter)
+end
+
+--- Remove all adapters. Does not change detector registrations.
+function M.reset_adapters()
+  adapters.reset()
+end
+
 --- Register a VCS detector function.
 ---
 --- Detectors are called in registration order with the buffer file path.

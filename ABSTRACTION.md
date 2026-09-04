@@ -17,6 +17,13 @@ Severity uses a 0–10 scale. Effort is a relative implementation estimate.
 
 ### 1. Concrete VCS implementations in shared code
 
+**Status: addressed.** Git/Arc commands and status parsers now live in
+`lua/parley/providers/vcs/`. Shared VCS code resolves an explicitly registered
+adapter; a provider-owned bootstrap registers built-ins and detector precedence.
+Registration, custom-VCS dispatch, setup lifecycle, and dependency-boundary tests
+cover this change. The description below records the original finding. Other
+findings, including Git-only health diagnostics, remain outstanding.
+
 **Severity: 8/10. Effort: medium.**
 
 [`vcs/adapters.lua`](lua/parley/vcs/adapters.lua) owns Git and Arc command arrays,

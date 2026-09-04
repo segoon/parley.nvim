@@ -322,14 +322,8 @@ function M.setup(opts)
   local vcs = require("parley.vcs")
   vcs.reset_detectors()
 
-  -- Register VCS detectors (order matters: first match wins).
-  -- Arc is checked before git so that Arc repos (which also have git metadata
-  -- on some setups) are correctly attributed to the Arcanum provider.
-  local arc_vcs = require("parley.providers.arcanum.vcs_detector")
-  vcs.register_detector("arc", arc_vcs.detect)
-
-  local git_vcs = require("parley.providers.github.vcs_detector")
-  vcs.register_detector("git", git_vcs.detect)
+  vcs.reset_adapters()
+  require("parley.providers.vcs").register(vcs)
 
   -- Probe gh availability once so subsequent calls can fast-fail without
   -- spawning a subprocess.

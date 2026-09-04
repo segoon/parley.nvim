@@ -21,6 +21,9 @@
     "lua/parley/provider.lua",
     "lua/parley/providers/github/auth.lua",
     "lua/parley/providers/github/provider.lua",
+    "lua/parley/providers/vcs.lua",
+    "lua/parley/providers/vcs/arc.lua",
+    "lua/parley/providers/vcs/git.lua",
     "lua/parley/reaction_picker_window.lua",
     "lua/parley/registry.lua",
     "lua/parley/repositories/context.lua",
@@ -226,7 +229,10 @@
         "lua/parley/providers/github/auth.lua",
         "lua/parley/providers/github/provider.lua",
         "lua/parley/vcs/adapters.lua",
-        "lua/parley/local_content.lua"
+        "lua/parley/local_content.lua",
+        "lua/parley/providers/vcs.lua",
+        "lua/parley/providers/vcs/git.lua",
+        "lua/parley/providers/vcs/arc.lua"
       ],
       "capabilities": [
         "buffer_inspect",

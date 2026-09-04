@@ -390,15 +390,38 @@ After calling `setup()`, you can register additional providers: >lua
 The provider must implement all methods defined in `parley.Provider`.
 See `lua/parley/provider.lua` for the full interface.
 
-Custom VCS detectors: ~
+Custom VCS implementations: ~
 
-To support a custom VCS, register a detector via `parley.vcs`: >lua
+After `setup()`, register both a detector and an adapter via `parley.vcs`.
+Concrete VCS modules belong under `lua/parley/providers/`; a module can be
+reused by multiple hosting providers. For example: >lua
     local vcs = require("parley.vcs")
-    vcs.register_detector("my-vcs", function(path)
-      -- Return a parley.VcsInfo table if path is inside your VCS, else nil.
-      -- This function runs in a plenary.async coroutine.
-    end)
+    local custom = require("parley.providers.my_vcs")
+    vcs.register_detector("my-vcs", custom.detect)
+    vcs.register_adapter("my-vcs", custom.adapter)
 <
+The detector runs in a plenary.async coroutine and returns a `parley.VcsInfo`
+with `vcs = "my-vcs"`, or nil when the path is not supported.
+
+The adapter must provide these functions (called without a `self` argument):
+
+  head()                  Command argument array to read the current revision
+  show(revision, path)    Command argument array to read immutable file contents
+  status(path)            Command argument array to inspect file status
+  dirty(output)           Parse status stdout: true if dirty, false if clean,
+                          or nil plus an error string if parsing fails
+  diff(base, head, path)  Command argument array producing a zero-context
+                          unified review diff, with the review head on new side
+
+Commands run asynchronously in the repository root. Adapter registration rejects
+empty names, duplicate names, and missing/non-function methods. Adapter names
+must match `VcsInfo.vcs`; unknown names fail without executing commands.
+
+`vcs.reset_adapters()` removes adapters without changing detectors.
+`vcs.reset_detectors()` removes detectors without changing adapters.
+Every `setup()` resets both and registers built-ins, checking Arc before Git.
+Re-register custom implementations after each setup. Direct revision/validation
+calls before setup require explicit adapter registration.
 
 ==============================================================================
 11. HEALTH CHECK                                     *parley-health*

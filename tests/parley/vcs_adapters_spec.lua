@@ -1,66 +1,93 @@
 local vcs = require("parley.vcs")
 local a = require("plenary.async.tests")
 
-a.describe("VCS adapters", function()
-  local saved
-  local calls
-  local results
-  local arc = { vcs = "arc", root = "/checkout" }
+--- @return parley.VcsAdapter
+local function adapter()
+  return {
+    head = function()
+      return { "custom", "head" }
+    end,
+    show = function(rev, path)
+      return { "custom", "read", rev, path }
+    end,
+    status = function(path)
+      return { "custom", "status", path }
+    end,
+    dirty = function(output)
+      return output ~= "clean"
+    end,
+    diff = function(base, head, path)
+      return { "custom", "diff", base, head, path }
+    end,
+  }
+end
+
+a.describe("VCS adapter registry", function()
+  local saved, calls
   a.before_each(function()
-    saved = vcs._runner
-    calls, results = {}, {}
-    vcs._runner = function(cmd, cwd)
-      calls[#calls + 1] = { cmd = cmd, cwd = cwd }
-      return table.remove(results, 1) or { code = 0, stdout = "", stderr = "" }
+    vcs.reset_adapters()
+    saved, calls = vcs._runner, {}
+    vcs._runner = function(cmd)
+      calls[#calls + 1] = cmd
+      assert.equals("custom", cmd[1])
+      local outputs = { head = "rev", read = "text", status = "clean", diff = "@@ -1 +1 @@\n" }
+      return { code = 0, stdout = outputs[cmd[2]] }
     end
   end)
   a.after_each(function()
     vcs._runner = saved
+    vcs.reset_adapters()
   end)
 
-  a.it("reads Arc revision content without Git or shell interpolation", function()
-    results = { { code = 0, stdout = "content\n" } }
-    assert.equals("content\n", vcs.read_file(arc, "abc", "a b.lua"))
-    assert.same({ "arc", "show", "abc:a b.lua" }, calls[1].cmd)
-    assert.equals("/checkout", calls[1].cwd)
+  a.it("dispatches every shared operation through a registered custom VCS", function()
+    vcs.register_adapter("custom", adapter())
+    local info = { vcs = "custom", root = "/checkout" }
+    assert.equals("text", vcs.read_file(info, "rev", "a b"))
+    assert.is_true(vcs.check_sync_state(info, "a b", "rev").ok)
+    assert.is_true(vcs.check_anchor_in_diff(info, "base", "a b", { start_line = 1 }, "rev").ok)
+    assert.same({
+      { "custom", "read", "rev", "a b" },
+      { "custom", "head" },
+      { "custom", "status", "a b" },
+      { "custom", "diff", "base", "rev", "a b" },
+    }, calls)
   end)
 
-  a.it("accepts a clean Arc file at the shared revision", function()
-    results = { { code = 0, stdout = "abc\n" }, { code = 0, stdout = '{"status":{}}' } }
-    assert.is_true(vcs.check_sync_state(arc, "a.lua", "abc").ok)
-    assert.equals("arc", calls[2].cmd[1])
+  a.it("has no implicit built-ins and executes nothing for missing adapters", function()
+    for _, name in ipairs({ "git", "arc", "unknown" }) do
+      local info = { vcs = name, root = "/checkout" }
+      assert.is_nil(vcs.read_file(info, "rev", "f"))
+      assert.is_false(vcs.check_sync_state(info, "f", "rev").ok)
+      assert.is_false(vcs.check_anchor_in_diff(info, "base", "f", { start_line = 1 }).ok)
+    end
+    assert.equals(0, #calls)
   end)
 
-  for _, kind in ipairs({ "staged", "changed", "untracked", "unmerged" }) do
-    a.it("rejects Arc " .. kind .. " changes", function()
-      results = {
-        { code = 0, stdout = "abc\n" },
-        { code = 0, stdout = vim.json.encode({ status = { [kind] = { { path = "a.lua" } } } }) },
-      }
-      assert.is_false(vcs.check_sync_state(arc, "a.lua", "abc").ok)
+  a.it("rejects invalid definitions and duplicate names", function()
+    assert.has_error(function()
+      vcs.register_adapter("", adapter())
     end)
-  end
-
-  a.it("fails closed for malformed status and missing revisions", function()
-    assert.is_false(vcs.check_sync_state(arc, "a.lua", "").ok)
-    assert.equals(0, #calls)
-    results = { { code = 0, stdout = "abc" }, { code = 0, stdout = "{}" } }
-    assert.is_false(vcs.check_sync_state(arc, "a.lua", "abc").ok)
+    assert.has_error(function()
+      vcs.register_adapter("custom", nil)
+    end)
+    for _, method in ipairs({ "head", "show", "status", "dirty", "diff" }) do
+      local invalid = adapter()
+      invalid[method] = "invalid"
+      assert.has_error(function()
+        vcs.register_adapter("custom", invalid)
+      end)
+    end
+    vcs.register_adapter("custom", adapter())
+    assert.has_error(function()
+      vcs.register_adapter("custom", adapter())
+    end)
   end)
 
-  a.it("never defaults an unknown VCS to Git", function()
-    assert.is_false(vcs.check_sync_state({ vcs = "unknown", root = "/x" }, "a", "abc").ok)
+  a.it("reset removes registrations and permits registering again", function()
+    vcs.register_adapter("custom", adapter())
+    vcs.reset_adapters()
+    assert.is_nil(vcs.read_file({ vcs = "custom", root = "/checkout" }, "rev", "f"))
     assert.equals(0, #calls)
-  end)
-
-  a.it("validates every selected line and fails closed on diff errors", function()
-    results = { { code = 0, stdout = "@@ -1 +1 @@\n@@ -3 +3 @@\n" } }
-    assert.is_false(vcs.check_anchor_in_diff(arc, "trunk", "a", { start_line = 1, end_line = 3 }, "abc").ok)
-    assert.same(
-      { "arc", "diff", "--base", "--git", "--no-color", "--unified=0", "trunk", "abc", "--", "a" },
-      calls[1].cmd
-    )
-    results = { { code = 1, stderr = "bad revision" } }
-    assert.is_false(vcs.check_anchor_in_diff(arc, "trunk", "a", { start_line = 1 }, "abc").ok)
+    vcs.register_adapter("custom", adapter())
   end)
 end)

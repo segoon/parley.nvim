@@ -8,6 +8,8 @@ local composer = require("parley.ui_states.composer")
 describe("Arc new-comment validation", function()
   local saved, buf, compose, sent, notices, dirty, change_during_check
   before_each(function()
+    vcs.reset_adapters()
+    vcs.register_adapter("arc", require("parley.providers.vcs.arc"))
     saved = {
       runner = vcs._runner,
       window = package.loaded["parley.discussion_window"],
@@ -63,6 +65,7 @@ describe("Arc new-comment validation", function()
     }
   end)
   after_each(function()
+    vcs.reset_adapters()
     vcs._runner, write._notify, write._refresh_context = saved.runner, saved.notify, saved.refresh
     package.loaded["parley.discussion_window"] = saved.window
     write._operations[buf], write._validating[buf] = nil, nil

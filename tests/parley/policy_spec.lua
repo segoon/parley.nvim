@@ -246,6 +246,16 @@ local function cycle_violations(policy)
 end
 
 describe("architecture policy", function()
+  it("keeps shared VCS code independent of concrete providers", function()
+    local paths = { "lua/parley/vcs.lua", "lua/parley/anchor.lua", "lua/parley/local_content.lua" }
+    vim.list_extend(paths, vim.fn.glob("lua/parley/vcs/**/*.lua", false, true))
+    for _, path in ipairs(paths) do
+      for _, dep in ipairs(internal_requires(path)) do
+        assert.is_nil(dep:match("^lua/parley/providers/"), path .. " imports " .. dep)
+      end
+    end
+  end)
+
   it("assigns every Lua module to exactly one layer", function()
     local policy = read_policy_json(policy_path)
     local mapping = module_to_layer(policy)
