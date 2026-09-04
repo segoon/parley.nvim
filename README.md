@@ -197,6 +197,33 @@ Full reference documentation is available inside Neovim:
 :help parley.nvim
 ```
 
+## Development checks
+
+Run `make test`, `make format`, `make format-check`, and `make lint` before
+submitting changes. Architecture tests discover every production Lua file under
+`lua/` and `plugin/`. Add each new file to exactly one layer's `modules` list in
+[policy.json](policy.json); remove the assignment when deleting a file. Tests and
+build scripts are outside that production inventory.
+
+All concrete provider code belongs under `lua/parley/providers/` in the
+`providers` layer. Shared code must delegate through contracts and registration.
+The only permitted shared import into that directory is setup's import of
+`parley.providers`. Provider code may use its declared shared infrastructure
+layers. Layer dependencies must remain acyclic; external API capabilities remain
+explicit, including the narrow `ui_notify` capability for provider notifications.
+
+Use literal, dotted module names with `require("module")`, `require "module"`,
+or `pcall(require, "module")`. Computed imports, untracked loader aliases, and
+source-file loaders fail the checker. The existing health `M._require` seam is
+tracked specifically, and its protected calls must also use literal names.
+Missing modules in Parley's namespaces fail even if loaded through `pcall`.
+
+Checker utilities and regression fixtures live under `tests/support/` and
+`tests/parley/policy_checker_spec.lua`. These are structural checks for supported
+Lua import forms, not a sandbox or a semantic proof: copied provider algorithms,
+command tables, and arbitrary runtime indirection still require review and
+provider-independent behavior tests.
+
 ## Roadmap
 
 - `diffview.nvim` integration

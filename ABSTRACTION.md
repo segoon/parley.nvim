@@ -224,6 +224,16 @@ from methods that exist only to raise unsupported-operation errors.
 
 ### Architecture policy does not enforce the directory boundary
 
+**Status: addressed.** Architecture tests now discover all production Lua files
+under `lua/` and `plugin/`, reject missing/duplicate/stale layer assignments, and
+place provider implementations in a distinct layer. Tokenized imports resolve
+against the discovered inventory; missing internal targets and untracked loader
+uses fail validation. Only shared setup may import the provider catalog. The
+injectable health loader is explicitly tracked with literal module names.
+Checker regression tests cover inventory, syntax, and boundary failures; existing
+provider-independent behavior tests remain necessary for copied implementation
+logic. The text below records the original finding.
+
 **Severity: 8/10. Effort: medium.**
 
 [`tests/parley/policy_spec.lua`](tests/parley/policy_spec.lua) compares manually

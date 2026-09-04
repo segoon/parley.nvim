@@ -1,5 +1,6 @@
 local repo_root = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":h:h:h")
 local policy_path = repo_root .. "/policy.json"
+local checker = dofile(repo_root .. "/tests/support/policy.lua")
 
 ---@param file_path string
 ---@return table
@@ -11,11 +12,7 @@ end
 ---@param file_path string
 ---@return string
 local function read_lua_strip_comments(file_path)
-  local out = {}
-  for _, line in ipairs(vim.fn.readfile(file_path)) do
-    out[#out + 1] = line:gsub("%-%-.*$", "")
-  end
-  return table.concat(out, "\n")
+  return checker.code(table.concat(vim.fn.readfile(file_path), "\n"))
 end
 
 ---@param paths string[]
@@ -27,9 +24,8 @@ end
 
 ---@param policy table
 ---@return string[]
-local function source_files(policy)
-  local files = vim.deepcopy(assert(policy.source_files, "missing policy.source_files"))
-  return sort_paths(files)
+local function source_files(_policy)
+  return checker.discover(repo_root)
 end
 
 ---@param policy table
@@ -157,6 +153,12 @@ local function external_api_violations(file_path, policy)
       end
     end
   end
+  local imports = checker.imports(table.concat(vim.fn.readfile(repo_root .. "/" .. file_path), "\n"), file_path)
+  for _, import in ipairs(imports) do
+    if #matching_functions(known, import.name) > 0 and #matching_functions(allowed_functions, import.name) == 0 then
+      violations[#violations + 1] = string.format("%s:%d imports %s", file_path, import.line, import.name)
+    end
+  end
   table.sort(violations)
   return violations
 end
@@ -164,13 +166,17 @@ end
 ---@param file_path string
 ---@return string[]
 local function internal_requires(file_path)
-  local stripped = read_lua_strip_comments(repo_root .. "/" .. file_path)
-  local deps = {}
-  for _, line in ipairs(vim.split(stripped, "\n", { plain = true })) do
-    for module_name in line:gmatch("require%([\"'](parley%.[^\"']+)[\"']%)") do
-      local path = "lua/" .. module_name:gsub("%.", "/")
-      deps[#deps + 1] = vim.fn.filereadable(repo_root .. "/" .. path .. ".lua") == 1 and (path .. ".lua")
-        or (path .. "/init.lua")
+  local imports, errors = checker.imports(table.concat(vim.fn.readfile(repo_root .. "/" .. file_path), "\n"), file_path)
+  assert.same({}, errors)
+  local files, deps = {}, {}
+  for _, path in ipairs(checker.discover(repo_root)) do
+    files[path] = true
+  end
+  for _, import in ipairs(imports) do
+    local target, internal = checker.resolve(import.name, files)
+    assert.is_false(internal and not target, file_path .. " imports missing " .. import.name)
+    if target then
+      deps[#deps + 1] = target
     end
   end
   table.sort(deps)
@@ -180,26 +186,11 @@ end
 ---@param policy table
 ---@return string[]
 local function dependency_violations(policy)
-  local mapping = module_to_layer(policy)
-  local violations = {}
-  for _, file_path in ipairs(source_files(policy)) do
-    local source_layer = assert(mapping[file_path], "missing layer for " .. file_path)
-    local allowed_layers = {}
-    for _, layer_name in ipairs(policy.layers[source_layer].depends) do
-      allowed_layers[layer_name] = true
-    end
-    allowed_layers[source_layer] = true
-
-    for _, dep_path in ipairs(internal_requires(file_path)) do
-      local dep_layer = mapping[dep_path]
-      if dep_layer and not allowed_layers[dep_layer] then
-        violations[#violations + 1] =
-          string.format("%s (%s) depends on %s (%s)", file_path, source_layer, dep_path, dep_layer)
-      end
-    end
+  local sources = {}
+  for _, file in ipairs(checker.discover(repo_root)) do
+    sources[file] = table.concat(vim.fn.readfile(repo_root .. "/" .. file), "\n")
   end
-  table.sort(violations)
-  return violations
+  return checker.dependencies(policy, sources)
 end
 
 ---@param policy table
@@ -298,7 +289,8 @@ describe("architecture policy", function()
 
   it("assigns every Lua module to exactly one layer", function()
     local policy = read_policy_json(policy_path)
-    local mapping = module_to_layer(policy)
+    local errors, mapping = checker.inventory(policy, source_files(policy))
+    assert.same({}, errors)
     for _, file_path in ipairs(source_files(policy)) do
       assert.is_not_nil(mapping[file_path], "missing layer for " .. file_path)
     end

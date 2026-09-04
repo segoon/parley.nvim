@@ -81,12 +81,6 @@ local function path_writable(path)
   return type(path) == "string" and path ~= "" and is_true(M._filewritable(path))
 end
 
---- @param name string
---- @return boolean, any
-local function try_require(name)
-  return pcall(M._require, name)
-end
-
 local function check_runtime()
   local health = health_api()
   health.start("Runtime")
@@ -97,7 +91,7 @@ local function check_runtime()
     health.error("Neovim >= 0.10 is required")
   end
 
-  local available, async = try_require("plenary.async")
+  local available, async = pcall(M._require, "plenary.async")
   if available then
     health.ok("plenary.async is installed")
   else
@@ -157,7 +151,7 @@ local function check_integrations(config)
   health.start("Integrations")
 
   local telescope_enabled = config and config.telescope == true
-  if try_require("telescope") then
+  if pcall(M._require, "telescope") then
     health.ok("telescope.nvim is installed")
   elseif telescope_enabled then
     health.warn("telescope.nvim is enabled in Parley config but not installed")
@@ -165,7 +159,7 @@ local function check_integrations(config)
     health.info("telescope.nvim is not installed")
   end
 
-  if try_require("render-markdown") then
+  if pcall(M._require, "render-markdown") then
     health.ok("render-markdown.nvim is installed")
   else
     health.info("render-markdown.nvim is not installed")
