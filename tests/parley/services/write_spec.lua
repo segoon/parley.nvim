@@ -41,7 +41,6 @@ local function save_seams()
   saved.get_config = write_service._get_config
   saved.confirm_delete = write_service._confirm_delete
   saved.check_sync_state = write_service._check_sync_state
-  saved.check_anchor_in_diff = write_service._check_anchor_in_diff
   saved.discussion = package.loaded["parley.discussion_window"]
 end
 
@@ -56,7 +55,6 @@ local function restore_seams()
   write_service._get_config = saved.get_config
   write_service._confirm_delete = saved.confirm_delete
   write_service._check_sync_state = saved.check_sync_state
-  write_service._check_anchor_in_diff = saved.check_anchor_in_diff
   package.loaded["parley.discussion_window"] = saved.discussion
 end
 
@@ -105,9 +103,6 @@ describe("parley.services.write", function()
       }
     end
     write_service._check_sync_state = function()
-      return { ok = true }
-    end
-    write_service._check_anchor_in_diff = function()
       return { ok = true }
     end
     write_service._confirm_delete = function(_msg)

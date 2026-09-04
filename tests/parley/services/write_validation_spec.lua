@@ -41,7 +41,6 @@ local function save_seams()
   saved.get_config = write_service._get_config
   saved.confirm_delete = write_service._confirm_delete
   saved.check_sync_state = write_service._check_sync_state
-  saved.check_anchor_in_diff = write_service._check_anchor_in_diff
   saved.discussion = package.loaded["parley.discussion_window"]
 end
 
@@ -56,7 +55,6 @@ local function restore_seams()
   write_service._get_config = saved.get_config
   write_service._confirm_delete = saved.confirm_delete
   write_service._check_sync_state = saved.check_sync_state
-  write_service._check_anchor_in_diff = saved.check_anchor_in_diff
   package.loaded["parley.discussion_window"] = saved.discussion
 end
 
@@ -97,9 +95,6 @@ describe("parley.services.write — open_new_comment_input sync-state check", fu
     end
     write_service._get_config = function()
       return { progress = { success_timeout = 1200, failed_timeout = 2500, cancelled_timeout = 1200 } }
-    end
-    write_service._check_anchor_in_diff = function()
-      return { ok = true }
     end
     write_service._confirm_delete = function()
       return true
@@ -248,9 +243,6 @@ describe("parley.services.write — open_new_comment_input anchor-in-diff check"
     write_service._check_sync_state = function()
       return { ok = true }
     end
-    write_service._check_anchor_in_diff = function()
-      return { ok = true }
-    end
     write_service._confirm_delete = function()
       return true
     end
@@ -303,7 +295,7 @@ describe("parley.services.write — open_new_comment_input anchor-in-diff check"
       end,
       open_current_line = function() end,
     }
-    write_service._check_anchor_in_diff = function()
+    provider.validate_comment_target = function()
       return {
         ok = false,
         err = "Cannot comment: line 5 is not part of the PR diff. Move the cursor to a changed line.",
@@ -320,7 +312,7 @@ describe("parley.services.write — open_new_comment_input anchor-in-diff check"
     assert.equals(vim.log.levels.WARN, notify_calls[1].level)
   end)
 
-  it("does not call check_anchor_in_diff when check_sync_state fails", function()
+  it("does not call validate_comment_target when check_sync_state fails", function()
     local provider = mock_provider.new({ pr = SAMPLE_PR })
     seed_with_provider(provider)
     local diff_check_called = false
@@ -331,7 +323,7 @@ describe("parley.services.write — open_new_comment_input anchor-in-diff check"
     write_service._check_sync_state = function()
       return { ok = false, err = "Cannot comment: local branch has commits not yet pushed." }
     end
-    write_service._check_anchor_in_diff = function()
+    provider.validate_comment_target = function()
       diff_check_called = true
       return { ok = true }
     end
@@ -344,7 +336,7 @@ describe("parley.services.write — open_new_comment_input anchor-in-diff check"
     assert.is_false(diff_check_called)
   end)
 
-  it("passes root, base_branch, rel_path, and anchor to check_anchor_in_diff", function()
+  it("passes root, base_branch, rel_path, and anchor to validate_comment_target", function()
     local provider = mock_provider.new({ pr = SAMPLE_PR })
     seed_with_provider(provider)
     local diff_check_args
@@ -352,8 +344,13 @@ describe("parley.services.write — open_new_comment_input anchor-in-diff check"
       show_new_comment_input = function() end,
       open_current_line = function() end,
     }
-    write_service._check_anchor_in_diff = function(root, base_branch, rel_path, anch)
-      diff_check_args = { root = root, base_branch = base_branch, rel_path = rel_path, anchor = anch }
+    provider.validate_comment_target = function(_, review, target)
+      diff_check_args = {
+        root = target.vcs_info,
+        base_branch = review.pr.base_branch,
+        rel_path = target.rel_path,
+        anchor = target.anchor,
+      }
       return { ok = true }
     end
 

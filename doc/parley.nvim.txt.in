@@ -427,6 +427,24 @@ provider validation. The statusline uses this name without inferring a provider
 from review URLs or private cache fields.
 See `lua/parley/provider.lua` for the full interface.
 
+Every provider must implement `validate_comment_target(review, target)`. The
+`target` contains `vcs_info`, `rel_path` (repository-relative), and `anchor`
+(`start_line`, optional `end_line`). Return `{ ok = true }` to accept or
+`{ ok = false, err = "Reason shown to the user" }` to reject; the reason must be
+nonblank. This method runs in a Plenary async context and must not post comments.
+It runs before opening the composer and again before submission. Errors and
+malformed results block the operation; submission failures preserve the draft.
+
+GitHub and Arcanum require every selected line to belong to the review diff.
+Custom providers choose their own eligibility policy, but unsaved-buffer,
+checkout-state, and context-race checks remain mandatory shared protections.
+Existing custom providers must add this method; there is no implicit fallback.
+
+Internal integrations using `parley.vcs.check_anchor_in_diff` should migrate to
+the provider method. Generic diff reads use `parley.vcs.read_diff(vcs_info,
+base_branch, rel_path, head_sha)`, returning diff text or `nil, error`.
+
+
 Provider-owned cache identity: ~
 
 Every provider must implement `provider:cache_identity()`. It runs in a Plenary

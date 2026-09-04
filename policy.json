@@ -65,7 +65,8 @@
     "lua/telescope/_extensions/parley_discussions_file.lua",
     "plugin/parley.lua",
     "lua/parley/providers/github/metadata.lua",
-    "lua/parley/providers/arcanum/metadata.lua"
+    "lua/parley/providers/arcanum/metadata.lua",
+    "lua/parley/providers/comment_target.lua"
   ],
   "capabilities": {
     "ui_direct": {
@@ -268,7 +269,8 @@
         "lua/parley/vcs.lua",
         "lua/parley/vcs/adapters.lua",
         "lua/parley/providers/github/metadata.lua",
-        "lua/parley/providers/arcanum/metadata.lua"
+        "lua/parley/providers/arcanum/metadata.lua",
+        "lua/parley/providers/comment_target.lua"
       ],
       "capabilities": [
         "buffer_inspect",

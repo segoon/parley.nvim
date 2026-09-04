@@ -184,6 +184,14 @@ for every new provider.
 
 ### Local safety versus provider comment eligibility
 
+**Status: addressed.** Eligibility is explicitly provider policy. The required
+`validate_comment_target(review, target)` method runs before opening a composer
+and again before posting. Built-ins retain changed-line eligibility through a
+provider-owned helper; shared VCS code only reads the diff. Shared buffer,
+checkout, and context checks remain enforced. Provider rejection, exceptions,
+and malformed results block posting and preserve existing drafts. Custom providers
+must implement the method. The text below records the original finding.
+
 **Severity: 5/10 as an extensibility gap. Effort: medium if generalized.**
 
 [`services/write.lua`](lua/parley/services/write.lua) calls shared VCS validation

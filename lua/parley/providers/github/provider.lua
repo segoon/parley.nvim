@@ -78,6 +78,7 @@ end
 --- @type parley.github.Provider
 local GitHubProvider = { display_name = require("parley.providers.github.metadata").display_name }
 GitHubProvider.__index = GitHubProvider
+GitHubProvider.validate_comment_target = require("parley.providers.comment_target").validate
 GitHubProvider.cache_identity = require("parley.providers.github.cache_identity").get
 GitHubProvider.reaction_choices = require("parley.providers.github.reactions").choices
 GitHubProvider.reaction_presentation = require("parley.providers.github.reactions").presentation

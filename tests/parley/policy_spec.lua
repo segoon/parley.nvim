@@ -248,6 +248,12 @@ local function cycle_violations(policy)
 end
 
 describe("architecture policy", function()
+  it("keeps shared writes independent of provider eligibility implementations", function()
+    for _, dep in ipairs(internal_requires("lua/parley/services/write.lua")) do
+      assert.is_nil(dep:match("^lua/parley/providers/"), "write service imports " .. dep)
+    end
+  end)
+
   it("keeps statusline independent of concrete providers", function()
     for _, dep in ipairs(internal_requires("lua/parley/statusline.lua")) do
       assert.is_nil(dep:match("^lua/parley/providers/"), "statusline imports " .. dep)

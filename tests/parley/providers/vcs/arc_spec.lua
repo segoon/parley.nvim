@@ -58,12 +58,14 @@ a.describe("VCS adapters", function()
 
   a.it("validates every selected line and fails closed on diff errors", function()
     results = { { code = 0, stdout = "@@ -1 +1 @@\n@@ -3 +3 @@\n" } }
-    assert.is_false(vcs.check_anchor_in_diff(arc, "trunk", "a", { start_line = 1, end_line = 3 }, "abc").ok)
+    assert.is_false(
+      require("parley.providers.comment_target").check(arc, "trunk", "a", { start_line = 1, end_line = 3 }, "abc").ok
+    )
     assert.same(
       { "arc", "diff", "--base", "--git", "--no-color", "--unified=0", "trunk", "abc", "--", "a" },
       calls[1].cmd
     )
     results = { { code = 1, stderr = "bad revision" } }
-    assert.is_false(vcs.check_anchor_in_diff(arc, "trunk", "a", { start_line = 1 }, "abc").ok)
+    assert.is_false(require("parley.providers.comment_target").check(arc, "trunk", "a", { start_line = 1 }, "abc").ok)
   end)
 end)

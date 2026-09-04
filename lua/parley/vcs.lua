@@ -82,7 +82,7 @@ function M.registered_detectors()
 end
 
 -- ---------------------------------------------------------------------------
--- Default async runner (shared by check_sync_state / check_anchor_in_diff)
+-- Default async runner (shared by check_sync_state / read_diff)
 -- ---------------------------------------------------------------------------
 
 --- Run a command asynchronously and return its result.
@@ -192,42 +192,25 @@ function M.check_sync_state(info, rel_path, head_sha)
   return { ok = true }
 end
 
---- Validate every selected new-side line against the review diff.
+--- Read a review diff through the registered VCS adapter.
 --- @param info parley.VcsInfo
 --- @param base_branch string
 --- @param rel_path string
---- @param anch parley.Anchor
 --- @param head_sha? string
---- @return {ok: boolean, err?: string}
-function M.check_anchor_in_diff(info, base_branch, rel_path, anch, head_sha)
+--- @return string|nil, string|nil
+function M.read_diff(info, base_branch, rel_path, head_sha)
   local adapter, err = adapters.get(info)
   if not adapter then
-    return { ok = false, err = "Cannot comment: " .. err }
+    return nil, err
   end
   if type(base_branch) ~= "string" or base_branch == "" or base_branch:sub(1, 1) == "-" then
-    return { ok = false, err = "Cannot comment: review base is unavailable." }
+    return nil, "review base is unavailable."
   end
   local result = M._runner(adapter.diff(base_branch, head_sha or "HEAD", rel_path), info.root)
   if result.code ~= 0 then
-    return { ok = false, err = "Cannot comment: failed to read review diff (" .. (result.stderr or "") .. ")" }
+    return nil, "failed to read review diff (" .. (result.stderr or "") .. ")"
   end
-  if result.stdout == "" then
-    return {
-      ok = false,
-      err = "Cannot comment: '" .. rel_path .. "' has no changes in this PR. Only changed lines can be commented on.",
-    }
-  end
-  local anchor = require("parley.anchor")
-  local hunks = anchor.parse_hunks(result.stdout)
-  for line = anch.start_line, anch.end_line or anch.start_line do
-    if not anchor.is_line_in_hunk(line, hunks) then
-      return {
-        ok = false,
-        err = "Cannot comment: line " .. line .. " is not part of the PR diff. Move the cursor to a changed line.",
-      }
-    end
-  end
-  return { ok = true }
+  return result.stdout
 end
 
 return M

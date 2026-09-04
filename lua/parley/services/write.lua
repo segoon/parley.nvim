@@ -44,11 +44,6 @@ end
 --- @type fun(info: parley.VcsInfo, rel_path: string, head_sha: string): { ok: boolean, err?: string }
 M._check_sync_state = vcs.check_sync_state
 
---- Anchor-in-diff check seam; replace in tests to avoid real VCS calls.
---- @alias parley.VcsCheckResult { ok: boolean, err?: string }
---- @type fun(v: parley.VcsInfo, b: string, p: string, a: parley.Anchor, h: string): parley.VcsCheckResult
-M._check_anchor_in_diff = vcs.check_anchor_in_diff
-
 M._next_progress_id = 0
 
 --- @param bufnr integer
@@ -111,7 +106,40 @@ M._refresh_context = context_repository.refresh
 --- @type table<integer, boolean>
 M._validating = {}
 
---- Recheck the source after drafting and after asynchronous VCS operations.
+--- Invoke provider eligibility and fail closed on contract errors.
+--- @param context table
+--- @param anch parley.Anchor
+--- @return string|nil
+local function validate_target(context, anch)
+  local ok, result = pcall(
+    context.provider.validate_comment_target,
+    context.provider,
+    context.review,
+    { vcs_info = context.vcs_info, rel_path = context.rel_path, anchor = anch }
+  )
+  if not ok then
+    return "Cannot comment: " .. tostring(result)
+  end
+  if
+    type(result) ~= "table"
+    or type(result.ok) ~= "boolean"
+    or (not result.ok and (type(result.err) ~= "string" or not result.err:find("%S")))
+  then
+    return "Cannot comment: provider returned an invalid target validation result."
+  end
+  if not result.ok then
+    return result.err
+  end
+end
+
+--- @param bufnr integer
+--- @param expected table
+--- @return boolean
+local function provider_changed(bufnr, expected)
+  local snapshot = provider_repository.get(bufnr)
+  return not snapshot or snapshot.provider ~= expected.provider
+end
+
 --- @param bufnr integer
 --- @param expected table
 --- @param anch parley.Anchor
@@ -135,6 +163,7 @@ local function validate_submission(bufnr, expected, anch)
     or not snapshot.review
     or snapshot.review.head_sha ~= expected.review.head_sha
     or snapshot.review.pr.id ~= expected.review.pr.id
+    or snapshot.review.pr.base_branch ~= expected.review.pr.base_branch
   then
     return "Cannot comment: review changed. Refresh and reopen the draft."
   end
@@ -145,15 +174,12 @@ local function validate_submission(bufnr, expected, anch)
   if not check.ok then
     return check.err
   end
-  check = M._check_anchor_in_diff(
-    expected.vcs_info,
-    expected.review.pr.base_branch,
-    expected.rel_path,
-    anch,
-    expected.review.head_sha
-  )
-  if not check.ok then
-    return check.err
+  local target_error = validate_target(expected, anch)
+  if target_error then
+    return target_error
+  end
+  if provider_changed(bufnr, expected) then
+    return "Cannot comment: provider context changed. Reopen the draft."
   end
   if not vim.api.nvim_buf_is_valid(bufnr) or vim.api.nvim_buf_get_changedtick(bufnr) ~= tick then
     return "Cannot comment: source buffer changed during validation. Retry after saving."
@@ -166,6 +192,9 @@ local function validate_submission(bufnr, expected, anch)
     or not snapshot
     or not snapshot.review
     or snapshot.review.head_sha ~= expected.review.head_sha
+    or snapshot.review.pr.id ~= expected.review.pr.id
+    or snapshot.review.pr.base_branch ~= expected.review.pr.base_branch
+    or current.rel_path ~= expected.rel_path
   then
     return "Cannot comment: review context changed during validation. Reopen the draft."
   end
@@ -197,17 +226,28 @@ function M.open_new_comment_input(bufnr, opts)
       return
     end
 
-    local diff_check = M._check_anchor_in_diff(
-      write_context.vcs_info,
-      write_context.review.pr.base_branch,
-      write_context.rel_path,
-      anchor,
-      write_context.review.head_sha
-    )
-    if not diff_check.ok then
-      vim.schedule(function()
-        M._notify(diff_check.err, vim.log.levels.WARN)
-      end)
+    local target_error = validate_target(write_context, anchor)
+    if not target_error and provider_changed(bufnr, write_context) then
+      target_error = "Cannot comment: provider context changed. Reopen the draft."
+    end
+    if target_error then
+      notify_context_error(target_error)
+      return
+    end
+
+    local current = context_repository.get(bufnr)
+    local snapshot = review_repository.get(bufnr)
+    if
+      not current
+      or current.rel_path ~= write_context.rel_path
+      or not vim.deep_equal(current.vcs_info, write_context.vcs_info)
+      or not snapshot
+      or not snapshot.review
+      or snapshot.review.head_sha ~= write_context.review.head_sha
+      or snapshot.review.pr.id ~= write_context.review.pr.id
+      or snapshot.review.pr.base_branch ~= write_context.review.pr.base_branch
+    then
+      notify_context_error("Cannot comment: review context changed during validation. Reopen the draft.")
       return
     end
 

@@ -42,7 +42,16 @@ local M = {}
 --- @field repository string
 --- @field account string Non-secret fingerprint of local credential context
 
+--- @class parley.CommentTarget
+--- @field vcs_info parley.VcsInfo
+--- @field rel_path string
+--- @field anchor parley.Anchor
+--- @alias parley.CommentTargetResult {ok: true}|{ok: false, err: string}
+
 --- @class parley.Provider
+--- @field validate_comment_target fun(
+---   self: parley.Provider, review: parley.DetectedReview, target: parley.CommentTarget
+--- ): parley.CommentTargetResult
 --- @field display_name string Nonblank human-readable provider name; local metadata.
 --- @field cache_identity fun(self: parley.Provider): parley.CacheIdentity|nil
 --- Return the authentication token for API calls.
@@ -110,6 +119,7 @@ local M = {}
 --- Used by validate() and by mock_provider to initialise its calls table.
 --- @type string[]
 M.METHOD_NAMES = {
+  "validate_comment_target",
   "cache_identity",
   "auth",
   "detect_pr",

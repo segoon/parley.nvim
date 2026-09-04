@@ -131,6 +131,18 @@ function M.new(opts)
     _id_counter = 0,
   }
 
+  --- @param self parley.Provider
+  --- @param review parley.DetectedReview
+  --- @param target parley.CommentTarget
+  --- @return parley.CommentTargetResult
+  function mock:validate_comment_target(review, target)
+    table.insert(self.calls.validate_comment_target, { review = review, target = target })
+    if self._errors.validate_comment_target then
+      error(self._errors.validate_comment_target)
+    end
+    return { ok = true }
+  end
+
   --- @return parley.CacheIdentity
   function mock.cache_identity()
     return deep_copy(opts.cache_identity or { provider = "mock", host = "test", repository = "repo", account = "test" })

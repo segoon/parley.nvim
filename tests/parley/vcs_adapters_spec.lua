@@ -44,7 +44,7 @@ a.describe("VCS adapter registry", function()
     local info = { vcs = "custom", root = "/checkout" }
     assert.equals("text", vcs.read_file(info, "rev", "a b"))
     assert.is_true(vcs.check_sync_state(info, "a b", "rev").ok)
-    assert.is_true(vcs.check_anchor_in_diff(info, "base", "a b", { start_line = 1 }, "rev").ok)
+    assert.equals("@@ -1 +1 @@\n", vcs.read_diff(info, "base", "a b", "rev"))
     assert.same({
       { "custom", "read", "rev", "a b" },
       { "custom", "head" },
@@ -58,7 +58,7 @@ a.describe("VCS adapter registry", function()
       local info = { vcs = name, root = "/checkout" }
       assert.is_nil(vcs.read_file(info, "rev", "f"))
       assert.is_false(vcs.check_sync_state(info, "f", "rev").ok)
-      assert.is_false(vcs.check_anchor_in_diff(info, "base", "f", { start_line = 1 }).ok)
+      assert.is_nil(vcs.read_diff(info, "base", "f"))
     end
     assert.equals(0, #calls)
   end)

@@ -47,6 +47,7 @@ describe("Arc new-comment validation", function()
     }
     providers._entries[buf] = {
       provider = {
+        validate_comment_target = require("parley.providers.comment_target").validate,
         begin_post_top_level_comment = function()
           sent = sent + 1
           return { cancel = function() end }
@@ -130,5 +131,126 @@ describe("Arc new-comment validation", function()
     end))
     assert.equals(0, sent)
     assert.is_truthy(notices[1]:find("changed during", 1, true))
+  end)
+  it("allows a custom provider to accept unchanged lines at opening and submission", function()
+    local count = 0
+    providers._entries[buf].provider.validate_comment_target = function(_, review, target)
+      count = count + 1
+      assert.equals("abc", review.head_sha)
+      assert.equals("f", target.rel_path)
+      assert.equals(1, target.anchor.start_line)
+      return { ok = true }
+    end
+    local runner = vcs._runner
+    vcs._runner = function(cmd)
+      assert.is_false(cmd[2] == "diff", "Shared writes must not require a diff")
+      return runner(cmd)
+    end
+    local instance = open()
+    compose.on_submit(instance, "comment")
+    assert.is_true(vim.wait(500, function()
+      return sent == 1
+    end))
+    assert.equals(2, count)
+  end)
+
+  for _, case in ipairs({
+    {
+      name = "rejection",
+      validate = function()
+        return { ok = false, err = "Provider rejected target" }
+      end,
+    },
+    {
+      name = "exception",
+      validate = function()
+        error("validation failed")
+      end,
+    },
+    {
+      name = "missing result",
+      validate = function()
+        return nil
+      end,
+    },
+    {
+      name = "nonboolean result",
+      validate = function()
+        return { ok = "yes" }
+      end,
+    },
+    {
+      name = "missing rejection message",
+      validate = function()
+        return { ok = false }
+      end,
+    },
+  }) do
+    it("blocks opening on provider " .. case.name, function()
+      providers._entries[buf].provider.validate_comment_target = case.validate
+      write.open_new_comment_input(buf, { line = 1 })
+      assert.is_true(vim.wait(500, function()
+        return #notices > 0
+      end))
+      assert.is_nil(compose)
+      assert.equals(0, sent)
+    end)
+    it("preserves the draft on submission " .. case.name, function()
+      local instance = open()
+      local message
+      instance.set_idle = function(value)
+        message = value
+      end
+      providers._entries[buf].provider.validate_comment_target = case.validate
+      compose.on_submit(instance, "preserve me")
+      assert.is_true(vim.wait(500, function()
+        return message ~= nil
+      end))
+      assert.is_truthy(message:find("Draft preserved", 1, true))
+      assert.equals(0, sent)
+    end)
+  end
+
+  it("rejects a provider replacement during validation", function()
+    providers._entries[buf].provider.validate_comment_target = function()
+      providers._entries[buf] = { provider = {} }
+      return { ok = true }
+    end
+    write.open_new_comment_input(buf, { line = 1 })
+    assert.is_true(vim.wait(500, function()
+      return #notices > 0
+    end))
+    assert.is_nil(compose)
+    assert.is_truthy(notices[1]:find("provider context changed", 1, true))
+  end)
+  it("preserves the draft if the provider changes during submission validation", function()
+    local instance = open()
+    local message
+    instance.set_idle = function(value)
+      message = value
+    end
+    providers._entries[buf].provider.validate_comment_target = function()
+      providers._entries[buf] = { provider = {} }
+      return { ok = true }
+    end
+    compose.on_submit(instance, "preserve me")
+    assert.is_true(vim.wait(500, function()
+      return message ~= nil
+    end))
+    assert.is_truthy(message:find("Draft preserved", 1, true))
+    assert.equals(0, sent)
+  end)
+
+  it("rejects repository context changes during opening validation", function()
+    providers._entries[buf].provider.validate_comment_target = function()
+      contexts._entries[buf].vcs_info.branch = "another"
+      return { ok = true }
+    end
+    write.open_new_comment_input(buf, { line = 1 })
+    assert.is_true(vim.wait(500, function()
+      return #notices > 0
+    end))
+    assert.is_nil(compose)
+    assert.is_truthy(notices[1]:find("context changed", 1, true))
   end)
 end)

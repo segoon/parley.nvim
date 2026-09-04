@@ -178,7 +178,7 @@ a.describe("parley.vcs check_sync_state", function()
 end)
 
 -- ---------------------------------------------------------------------------
--- Suite: check_anchor_in_diff
+-- Suite: provider changed-line eligibility
 -- ---------------------------------------------------------------------------
 
 --- Build a simple unified diff with one hunk.
@@ -194,7 +194,7 @@ local function diff_hunk(new_start, new_count)
   )
 end
 
-a.describe("parley.vcs check_anchor_in_diff", function()
+a.describe("provider changed-line eligibility with Git", function()
   a.before_each(function()
     original_runner = vcs._runner
     vcs.reset_adapters()
@@ -212,7 +212,7 @@ a.describe("parley.vcs check_anchor_in_diff", function()
     local mock = make_runner({ { code = 0, stdout = diff_hunk(5, 3), stderr = "" } })
     vcs._runner = mock.runner
 
-    local result = vcs.check_anchor_in_diff(
+    local result = require("parley.providers.comment_target").check(
       { vcs = "git", root = "/repo" },
       "main",
       "f.lua",
@@ -227,7 +227,7 @@ a.describe("parley.vcs check_anchor_in_diff", function()
     local mock = make_runner({ { code = 0, stdout = diff_hunk(5, 3), stderr = "" } })
     vcs._runner = mock.runner
 
-    local result = vcs.check_anchor_in_diff(
+    local result = require("parley.providers.comment_target").check(
       { vcs = "git", root = "/repo" },
       "main",
       "f.lua",
@@ -241,7 +241,7 @@ a.describe("parley.vcs check_anchor_in_diff", function()
     local mock = make_runner({ { code = 0, stdout = diff_hunk(10, 5), stderr = "" } })
     vcs._runner = mock.runner
 
-    local result = vcs.check_anchor_in_diff(
+    local result = require("parley.providers.comment_target").check(
       { vcs = "git", root = "/repo" },
       "main",
       "f.lua",
@@ -257,7 +257,7 @@ a.describe("parley.vcs check_anchor_in_diff", function()
     local mock = make_runner({ { code = 0, stdout = diff_hunk(10, 3), stderr = "" } })
     vcs._runner = mock.runner
 
-    local result = vcs.check_anchor_in_diff(
+    local result = require("parley.providers.comment_target").check(
       { vcs = "git", root = "/repo" },
       "main",
       "f.lua",
@@ -273,7 +273,7 @@ a.describe("parley.vcs check_anchor_in_diff", function()
     local mock = make_runner({ { code = 0, stdout = diff_hunk(5, 3), stderr = "" } })
     vcs._runner = mock.runner
 
-    local result = vcs.check_anchor_in_diff(
+    local result = require("parley.providers.comment_target").check(
       { vcs = "git", root = "/repo" },
       "main",
       "f.lua",
@@ -288,7 +288,7 @@ a.describe("parley.vcs check_anchor_in_diff", function()
     local mock = make_runner({ { code = 0, stdout = diff_hunk(10, 3), stderr = "" } })
     vcs._runner = mock.runner
 
-    local result = vcs.check_anchor_in_diff(
+    local result = require("parley.providers.comment_target").check(
       { vcs = "git", root = "/repo" },
       "main",
       "f.lua",
@@ -304,7 +304,7 @@ a.describe("parley.vcs check_anchor_in_diff", function()
     local mock = make_runner({ { code = 0, stdout = diff_hunk(10, 3), stderr = "" } })
     vcs._runner = mock.runner
 
-    local result = vcs.check_anchor_in_diff(
+    local result = require("parley.providers.comment_target").check(
       { vcs = "git", root = "/repo" },
       "main",
       "f.lua",
@@ -321,7 +321,7 @@ a.describe("parley.vcs check_anchor_in_diff", function()
     local mock = make_runner({ { code = 0, stdout = "", stderr = "" } })
     vcs._runner = mock.runner
 
-    local result = vcs.check_anchor_in_diff(
+    local result = require("parley.providers.comment_target").check(
       { vcs = "git", root = "/repo" },
       "main",
       "unchanged.lua",
@@ -338,7 +338,7 @@ a.describe("parley.vcs check_anchor_in_diff", function()
     local mock = make_runner({ { code = 128, stdout = "", stderr = "fatal: unknown revision" } })
     vcs._runner = mock.runner
 
-    local result = vcs.check_anchor_in_diff(
+    local result = require("parley.providers.comment_target").check(
       { vcs = "git", root = "/repo" },
       "unknown-base",
       "f.lua",
@@ -354,7 +354,7 @@ a.describe("parley.vcs check_anchor_in_diff", function()
     local mock = make_runner({ { code = 0, stdout = diff_hunk(5, 3), stderr = "" } })
     vcs._runner = mock.runner
 
-    vcs.check_anchor_in_diff(
+    require("parley.providers.comment_target").check(
       { vcs = "git", root = "/my/repo" },
       "main",
       "src/foo.lua",

@@ -114,6 +114,17 @@ describe("parley.registry resolve", function()
     assert.same(opts_from_detect, received_opts)
   end)
 
+  it("rejects providers without target validation", function()
+    registry.register(make_spec("MissingValidation", {}, function()
+      local p = mock_provider.new({})
+      p.validate_comment_target = nil
+      return p
+    end))
+    assert.has_error(function()
+      registry.resolve(SAMPLE_VCS)
+    end)
+  end)
+
   it("rejects provider instances without display metadata", function()
     registry.register(make_spec("MissingName", {}, function()
       local p = mock_provider.new({})
