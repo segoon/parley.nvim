@@ -57,6 +57,19 @@ describe("parley.registry resolve", function()
     registry.reset()
   end)
 
+  it("validates optional health callbacks", function()
+    local spec = make_spec("Custom", nil, valid_factory)
+    spec.health = "invalid"
+    assert.has_error(function()
+      registry.register(spec)
+    end)
+    spec.health = function()
+      return {}
+    end
+    registry.register(spec)
+    assert.equals(spec.health, registry.registered()[1].health)
+  end)
+
   it("returns nil when no specs are registered", function()
     assert.is_nil(registry.resolve(SAMPLE_VCS))
   end)

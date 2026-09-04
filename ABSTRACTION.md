@@ -21,8 +21,8 @@ Severity uses a 0–10 scale. Effort is a relative implementation estimate.
 `lua/parley/providers/vcs/`. Shared VCS code resolves an explicitly registered
 adapter; a provider-owned bootstrap registers built-ins and detector precedence.
 Registration, custom-VCS dispatch, setup lifecycle, and dependency-boundary tests
-cover this change. The description below records the original finding. Other
-findings, including Git-only health diagnostics, remain outstanding.
+cover this change. The description below records the original finding. See each
+subsequent finding for its current status.
 
 **Severity: 8/10. Effort: medium.**
 
@@ -40,6 +40,13 @@ without making future GitLab support depend on the GitHub implementation. This
 has lower maintenance cost than copying Git behavior into every hosting provider.
 
 ### 2. Health checks implement GitHub detection and authentication policy
+
+**Status: addressed.** Shared health checks now reuse registered detection and
+optional provider-spec diagnostic hooks. GitHub and Arcanum own their tool and
+credential checks under `providers/`; only the current repository's matching
+provider is checked. Diagnostics remain local, have a bounded completion wait,
+and do not construct providers or expose tokens. The text below records the
+original finding; other outstanding findings are unchanged.
 
 **Severity: 8/10. Effort: medium.**
 

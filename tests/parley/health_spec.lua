@@ -1,396 +1,283 @@
---- Tests for parley.health.
---- Run via: make test
-
 local health = require("parley.health")
+local vcs = require("parley.vcs")
+local registry = require("parley.registry")
 
---- @return table, table[]
-local function make_health_sink()
-  local reports = {}
-  local sink = {}
-
-  function sink.start(message)
-    reports[#reports + 1] = { kind = "start", message = message }
-  end
-
-  function sink.ok(message)
-    reports[#reports + 1] = { kind = "ok", message = message }
-  end
-
-  function sink.info(message)
-    reports[#reports + 1] = { kind = "info", message = message }
-  end
-
-  function sink.warn(message)
-    reports[#reports + 1] = { kind = "warn", message = message }
-  end
-
-  function sink.error(message)
-    reports[#reports + 1] = { kind = "error", message = message }
-  end
-
-  return sink, reports
-end
-
---- @param reports table[]
---- @param kind string
---- @param pattern string
-local function assert_report(reports, kind, pattern)
-  for _, report in ipairs(reports) do
-    if report.kind == kind and report.message:find(pattern, 1, true) then
-      return
-    end
-  end
-
-  error(string.format("expected %s report containing %q", kind, pattern))
-end
-
-describe("parley.health.check", function()
-  local saved_health
-  local saved_has_nvim_010
-  local saved_require
-  local saved_executable
-  local saved_get_parley
-  local saved_isdirectory
-  local saved_filewritable
-  local saved_current_buf
-  local saved_get_buf_props
-  local saved_run
-  local saved_read_github_token
-  local saved_parse_remote_url
-
+describe("delegated health diagnostics", function()
+  local saved, reports, config, props
   before_each(function()
-    saved_health = health._health
-    saved_has_nvim_010 = health._has_nvim_010
-    saved_require = health._require
-    saved_executable = health._executable
-    saved_get_parley = health._get_parley
-    saved_isdirectory = health._isdirectory
-    saved_filewritable = health._filewritable
-    saved_current_buf = health._current_buf
-    saved_get_buf_props = health._get_buf_props
-    saved_run = health._run
-    saved_read_github_token = health._read_github_token
-    saved_parse_remote_url = health._parse_remote_url
+    saved = {}
+    for k, v in pairs(health) do
+      saved[k] = v
+    end
+    saved.detect = vcs.detect
+    saved.registered = registry.registered
+    reports = {}
+    health._health = {}
+    for _, level in ipairs({ "start", "ok", "info", "warn", "error" }) do
+      health._health[level] = function(message)
+        reports[#reports + 1] = { level = level, message = message }
+      end
+    end
+    config = { cache_dir = "/tmp/parley-cache" }
+    props = { name = "/checkout/f", buftype = "", filetype = "" }
+    health._get_parley = function()
+      return { config = config }
+    end
+    health._has_nvim_010 = function()
+      return true
+    end
+    health._isdirectory = function()
+      return 1
+    end
+    health._filewritable = function()
+      return 1
+    end
+    health._get_buf_props = function()
+      return props
+    end
+    health._require = function(name)
+      if name == "plenary.async" then
+        return require(name)
+      end
+      error("optional integration absent")
+    end
+    vcs.detect = function()
+      return { vcs = "custom", root = "/checkout", branch = "branch" }
+    end
+    registry.registered = function()
+      return {}
+    end
   end)
-
   after_each(function()
-    health._health = saved_health
-    health._has_nvim_010 = saved_has_nvim_010
-    health._require = saved_require
-    health._executable = saved_executable
-    health._get_parley = saved_get_parley
-    health._isdirectory = saved_isdirectory
-    health._filewritable = saved_filewritable
-    health._current_buf = saved_current_buf
-    health._get_buf_props = saved_get_buf_props
-    health._run = saved_run
-    health._read_github_token = saved_read_github_token
-    health._parse_remote_url = saved_parse_remote_url
+    for k in pairs(health) do
+      if saved[k] == nil then
+        health[k] = nil
+      end
+    end
+    for k, v in pairs(saved) do
+      if k ~= "detect" and k ~= "registered" then
+        health[k] = v
+      end
+    end
+    vcs.detect, registry.registered = saved.detect, saved.registered
   end)
 
-  it("reports a healthy GitHub setup", function()
-    local sink, reports = make_health_sink()
-    health._health = sink
-    health._has_nvim_010 = function()
-      return true
-    end
-    health._require = function(name)
-      if name == "plenary.async" or name == "telescope" or name == "render-markdown" then
-        return { loaded = name }
+  --- @param level string
+  --- @param text string
+  local function expect(level, text)
+    for _, report in ipairs(reports) do
+      if report.level == level and report.message:find(text, 1, true) then
+        return
       end
-      error("unexpected require: " .. name)
     end
-    health._executable = function(bin)
-      return bin == "git" or bin == "gh"
-    end
-    health._get_parley = function()
+    error("missing " .. level .. ": " .. text .. vim.inspect(reports))
+  end
+
+  --- @param hook function|nil
+  local function provider(hook)
+    registry.registered = function()
       return {
-        config = {
-          cache_dir = "/tmp/parley-cache",
-          telescope = true,
+        {
+          name = "Custom",
+          detect = function()
+            return { repository = "repo" }
+          end,
+          factory = function()
+            error("health must not construct providers")
+          end,
+          health = hook,
         },
       }
     end
-    health._isdirectory = function(path)
-      return path == "/tmp/parley-cache"
-    end
-    health._filewritable = function(path)
-      return path == "/tmp/parley-cache"
-    end
-    health._current_buf = function()
-      return 7
-    end
-    health._get_buf_props = function(bufnr)
-      assert.equals(7, bufnr)
-      return {
-        name = "/repo/lua/parley/init.lua",
-        buftype = "",
-        filetype = "lua",
-      }
-    end
-    health._run = function(cmd, cwd)
-      if cmd[1] == "git" and cmd[2] == "rev-parse" and cmd[3] == "--show-toplevel" then
-        assert.equals("/repo/lua/parley", cwd)
-        return { code = 0, stdout = "/repo\n", stderr = "" }
-      end
-      if cmd[1] == "git" and cmd[2] == "rev-parse" and cmd[3] == "--abbrev-ref" then
-        assert.equals("/repo", cwd)
-        return { code = 0, stdout = "feature/health\n", stderr = "" }
-      end
-      if cmd[1] == "git" and cmd[2] == "remote" then
-        assert.equals("/repo", cwd)
-        return { code = 0, stdout = "https://github.com/owner/repo.git\n", stderr = "" }
-      end
-      error("unexpected command")
-    end
-    health._parse_remote_url = function(url)
-      assert.equals("https://github.com/owner/repo.git", url)
-      return { host = "github.com", repository = "owner/repo" }
-    end
-    health._read_github_token = function(host)
-      assert.equals("github.com", host)
-      return "ghp_test", nil
-    end
+  end
 
+  it("delegates context and renders diagnostics without constructing providers", function()
+    provider(function(ctx)
+      assert.equals("custom", ctx.vcs_info.vcs)
+      assert.equals("repo", ctx.opts.repository)
+      assert.equals(config, ctx.config)
+      return { { level = "ok", message = "custom ready" } }
+    end)
     health.check()
-
-    assert_report(reports, "ok", "Neovim >= 0.10")
-    assert_report(reports, "ok", "plenary.async is installed")
-    assert_report(reports, "ok", "git executable found")
-    assert_report(reports, "ok", "gh executable found")
-    assert_report(reports, "ok", "parley.setup() has been called")
-    assert_report(reports, "ok", "cache_dir exists and is writable")
-    assert_report(reports, "ok", "telescope.nvim is installed")
-    assert_report(reports, "ok", "render-markdown.nvim is installed")
-    assert_report(reports, "ok", "current buffer is in git repository: /repo")
-    assert_report(reports, "ok", "current branch: feature/health")
-    assert_report(reports, "ok", "origin remote: https://github.com/owner/repo.git")
-    assert_report(reports, "ok", "GitHub provider matches current repository")
-    assert_report(reports, "ok", "GitHub authentication token resolved for github.com")
+    expect("ok", "custom ready")
   end)
 
-  it("reports missing required runtime dependencies", function()
-    local sink, reports = make_health_sink()
-    health._health = sink
+  it("preserves configuration and integration diagnostics", function()
+    config.telescope = true
+    health._filewritable = function()
+      return 0
+    end
+    health.check()
+    expect("warn", "cache_dir exists but is not writable")
+    expect("warn", "telescope.nvim is enabled")
     health._has_nvim_010 = function()
       return false
     end
-    health._require = function(_name)
-      error("module not found")
+    health.check()
+    expect("error", "Neovim >= 0.10 is required")
+  end)
+
+  it("handles an unavailable health-report source without detecting", function()
+    props = { name = "health://", filetype = "checkhealth", buftype = "nofile" }
+    health._alternate_buf = function()
+      return -1
     end
-    health._executable = function(_bin)
-      return false
+    vcs.detect = function()
+      error("must not detect")
     end
-    health._get_parley = function()
-      return { config = nil }
+    health.check()
+    expect("info", "source file buffer is unavailable")
+  end)
+
+  it("diagnoses a real Arc detection result without Git or API calls", function()
+    local detector = require("parley.providers.arcanum.vcs_detector")
+    local diagnostics = require("parley.providers.arcanum.diagnostics")
+    local old_runner, old_executable, old_token = detector._runner, diagnostics._executable, diagnostics._read_token
+    local commands = {}
+    detector._runner = function(cmd)
+      commands[#commands + 1] = cmd
+      assert.equals("arc", cmd[1])
+      return {
+        code = 0,
+        stdout = cmd[2] == "root" and "/checkout" or '{"remote":"users/alice/branch","user_login":"alice"}',
+      }
     end
-    health._isdirectory = function(_path)
-      return false
-    end
-    health._filewritable = function(_path)
-      return false
-    end
-    health._current_buf = function()
+    diagnostics._executable = function(tool)
+      assert.is_true(tool == "arc" or tool == "curl")
       return 1
     end
-    health._get_buf_props = function(_bufnr)
+    diagnostics._read_token = function()
+      return "SECRET"
+    end
+    vcs.detect = detector.detect
+    registry.registered = function()
       return {
-        name = "",
-        buftype = "nofile",
-        filetype = "",
-      }
-    end
-
-    health.check()
-
-    assert_report(reports, "error", "Neovim >= 0.10 is required")
-    assert_report(reports, "error", "plenary.async is not installed")
-    assert_report(reports, "error", "git executable not found")
-    assert_report(reports, "error", "gh executable not found")
-    assert_report(reports, "warn", "parley.setup() has not been called")
-    assert_report(reports, "info", "current buffer buftype=nofile is not a regular file buffer")
-  end)
-
-  it("warns when telescope is enabled but missing", function()
-    local sink, reports = make_health_sink()
-    health._health = sink
-    health._has_nvim_010 = function()
-      return true
-    end
-    health._require = function(name)
-      if name == "plenary.async" then
-        return {}
-      end
-      error("module not found")
-    end
-    health._executable = function(_bin)
-      return true
-    end
-    health._get_parley = function()
-      return {
-        config = {
-          cache_dir = "/tmp/parley-cache",
-          telescope = true,
+        {
+          name = "Arcanum",
+          detect = require("parley.providers.arcanum.provider").detect,
+          factory = function()
+            error("must not construct")
+          end,
+          health = diagnostics.check,
         },
       }
     end
-    health._isdirectory = function(_path)
+    health.check()
+    detector._runner, diagnostics._executable, diagnostics._read_token = old_runner, old_executable, old_token
+    expect("ok", "Arcanum credential available locally")
+    assert.equals(2, #commands)
+    for _, report in ipairs(reports) do
+      assert.is_nil(report.message:find("SECRET", 1, true))
+    end
+  end)
+
+  it("handles missing hooks and unmatched repositories informationally", function()
+    provider(nil)
+    health.check()
+    expect("info", "additional diagnostics unavailable")
+    registry.registered = function()
+      return {}
+    end
+    health.check()
+    expect("info", "No registered provider")
+  end)
+
+  it("skips repository work before setup or without Plenary", function()
+    vcs.detect = function()
+      error("must not detect")
+    end
+    config = nil
+    health.check()
+    expect("warn", "setup() has not been called")
+    config = {}
+    health._require = function()
+      error("missing")
+    end
+    health.check()
+    expect("error", "plenary.async is not installed")
+  end)
+
+  it("skips unnamed and special buffers", function()
+    vcs.detect = function()
+      error("must not detect")
+    end
+    props = { name = "", buftype = "", filetype = "" }
+    health.check()
+    expect("info", "no file path")
+    props = { name = "terminal", buftype = "terminal", filetype = "" }
+    health.check()
+    expect("info", "not a regular file")
+  end)
+
+  it("reports no repository without claiming missing tools", function()
+    vcs.detect = function()
+      return nil
+    end
+    health.check()
+    expect("info", "No recognized repository")
+    for _, report in ipairs(reports) do
+      assert.is_false(report.level == "error")
+    end
+  end)
+
+  it("contains failed hooks without leaking their exception text", function()
+    provider(function()
+      error("SECRET_TOKEN")
+    end)
+    health.check()
+    expect("warn", "diagnostics failed")
+    for _, report in ipairs(reports) do
+      assert.is_nil(report.message:find("SECRET_TOKEN", 1, true))
+    end
+  end)
+
+  it("rejects malformed hook results", function()
+    provider(function()
+      return { { level = "start", message = "invalid" } }
+    end)
+    health.check()
+    expect("warn", "diagnostics failed")
+  end)
+
+  it("resolves the source file during a real checkhealth invocation", function()
+    local buf = vim.api.nvim_create_buf(true, false)
+    vim.api.nvim_buf_set_name(buf, "/tmp/parley-health-origin")
+    vim.api.nvim_set_current_buf(buf)
+    health._get_buf_props = saved._get_buf_props
+    health._health = nil
+    local detected
+    vcs.detect = function(path)
+      detected = path
+      return { vcs = "custom", root = "/checkout" }
+    end
+    provider(function()
+      return { { level = "ok", message = "real health delegation" } }
+    end)
+    vim.cmd("checkhealth parley")
+    local output = table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "\n")
+    local report_buf = vim.api.nvim_get_current_buf()
+    vim.api.nvim_set_current_buf(buf)
+    vim.api.nvim_buf_delete(report_buf, { force = true })
+    vim.api.nvim_buf_delete(buf, { force = true })
+    assert.equals("/tmp/parley-health-origin", detected)
+    assert.is_truthy(output:find("real health delegation", 1, true))
+  end)
+
+  it("ignores a late coroutine after timeout", function()
+    local finish
+    provider(function()
+      require("parley.runtime.await").callback(function(cb)
+        finish = cb
+      end)
+      return { { level = "ok", message = "late result" } }
+    end)
+    health._wait = function()
       return false
     end
-    health._filewritable = function(_path)
-      return false
-    end
-    health._current_buf = function()
-      return 1
-    end
-    health._get_buf_props = function(_bufnr)
-      return {
-        name = "",
-        buftype = "",
-        filetype = "",
-      }
-    end
-
     health.check()
-
-    assert_report(reports, "warn", "telescope.nvim is enabled in Parley config but not installed")
-    assert_report(reports, "info", "render-markdown.nvim is not installed")
-  end)
-
-  it("reports non-repository file buffers without warning", function()
-    local sink, reports = make_health_sink()
-    health._health = sink
-    health._has_nvim_010 = function()
-      return true
-    end
-    health._require = function(name)
-      if name == "plenary.async" then
-        return {}
-      end
-      error("module not found")
-    end
-    health._executable = function(bin)
-      return bin == "git" or bin == "gh"
-    end
-    health._get_parley = function()
-      return { config = nil }
-    end
-    health._current_buf = function()
-      return 4
-    end
-    health._get_buf_props = function(_bufnr)
-      return {
-        name = "/tmp/file.lua",
-        buftype = "",
-        filetype = "lua",
-      }
-    end
-    health._run = function(cmd, cwd)
-      assert.same({ "git", "rev-parse", "--show-toplevel" }, cmd)
-      assert.equals("/tmp", cwd)
-      return { code = 128, stdout = "", stderr = "fatal: not a git repository" }
-    end
-
-    health.check()
-
-    assert_report(reports, "info", "current buffer is not in a git repository")
-  end)
-
-  it("warns for unsupported current repository remotes", function()
-    local sink, reports = make_health_sink()
-    health._health = sink
-    health._has_nvim_010 = function()
-      return true
-    end
-    health._require = function(name)
-      if name == "plenary.async" then
-        return {}
-      end
-      error("module not found")
-    end
-    health._executable = function(bin)
-      return bin == "git" or bin == "gh"
-    end
-    health._get_parley = function()
-      return { config = nil }
-    end
-    health._current_buf = function()
-      return 5
-    end
-    health._get_buf_props = function(_bufnr)
-      return {
-        name = "/repo/file.lua",
-        buftype = "",
-        filetype = "lua",
-      }
-    end
-    health._run = function(cmd, cwd)
-      if cmd[3] == "--show-toplevel" then
-        assert.equals("/repo", cwd)
-        return { code = 0, stdout = "/repo\n", stderr = "" }
-      end
-      if cmd[3] == "--abbrev-ref" then
-        return { code = 0, stdout = "main\n", stderr = "" }
-      end
-      return { code = 0, stdout = "https://gitlab.com/owner/repo.git\n", stderr = "" }
-    end
-    health._parse_remote_url = function(url)
-      assert.equals("https://gitlab.com/owner/repo.git", url)
-      return { host = "gitlab.com", repository = "owner/repo" }
-    end
-
-    health.check()
-
-    assert_report(reports, "warn", "current repository host gitlab.com is not supported yet")
-  end)
-
-  it("warns when GitHub auth cannot be resolved", function()
-    local sink, reports = make_health_sink()
-    health._health = sink
-    health._has_nvim_010 = function()
-      return true
-    end
-    health._require = function(name)
-      if name == "plenary.async" then
-        return {}
-      end
-      error("module not found")
-    end
-    health._executable = function(bin)
-      return bin == "git" or bin == "gh"
-    end
-    health._get_parley = function()
-      return { config = nil }
-    end
-    health._current_buf = function()
-      return 6
-    end
-    health._get_buf_props = function(_bufnr)
-      return {
-        name = "/repo/file.lua",
-        buftype = "",
-        filetype = "lua",
-      }
-    end
-    health._run = function(cmd, _cwd)
-      if cmd[3] == "--show-toplevel" then
-        return { code = 0, stdout = "/repo\n", stderr = "" }
-      end
-      if cmd[3] == "--abbrev-ref" then
-        return { code = 0, stdout = "main\n", stderr = "" }
-      end
-      return { code = 0, stdout = "https://github.com/owner/repo.git\n", stderr = "" }
-    end
-    health._parse_remote_url = function(_url)
-      return { host = "github.com", repository = "owner/repo" }
-    end
-    health._read_github_token = function(host)
-      assert.equals("github.com", host)
-      return nil, "cannot read hosts.yml"
-    end
-
-    health.check()
-
-    assert_report(reports, "warn", "GitHub auth is not configured for github.com")
+    expect("warn", "timed out")
+    local count = #reports
+    finish()
+    assert.equals(count, #reports)
   end)
 end)

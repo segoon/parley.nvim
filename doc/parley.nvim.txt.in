@@ -384,11 +384,23 @@ After calling `setup()`, you can register additional providers: >lua
       name = "MyProvider",
       detect = function(vcs_info) ... end,
       factory = function(opts) ... end,
+      health = function(context)
+        -- Optional: local-only diagnostics; never construct a provider here.
+        return { { level = "info", message = "Local diagnostics complete" } }
+      end,
     })
 <
 
 The provider must implement all methods defined in `parley.Provider`.
 See `lua/parley/provider.lua` for the full interface.
+
+The optional provider-spec `health(context)` callback runs in a plenary.async
+coroutine. It receives `vcs_info`, the `opts` returned by detection, and current
+`config`. Return a list of `{ level, message }` entries, where level is `ok`,
+`info`, `warn`, or `error`. Keep diagnostics local: no API requests, provider
+construction, or credentials in messages. A missing callback is informational.
+Concrete diagnostic implementations belong under `lua/parley/providers/`.
+
 
 Custom VCS implementations: ~
 
@@ -432,15 +444,25 @@ Run: >vim
 
 The health check verifies:
 
-  - Neovim version (>= 0.10)
-  - `git` and `gh` executables
-  - `plenary.async` availability
-  - Configuration state (whether `setup()` was called, cache directory)
+  - Neovim version (>= 0.10) and `plenary.async` availability
+  - Configuration state and cache-directory accessibility
   - Optional integrations (telescope.nvim, render-markdown.nvim)
-  - Current buffer context (git repo, branch, remote, provider match, auth)
+  - The source file's repository using registered VCS detectors
+  - Local diagnostics supplied by the matching provider
 
-Note: PR detection is not probed during checkhealth because it requires a
-live API call.
+GitHub diagnostics check Git/gh executables, branch, and credentials from the
+environment or hosts.yml. Keyring credentials are not checked. Arcanum diagnostics
+check Arc/curl executables, remote branch, login, and local token availability.
+Missing executables for unrelated providers do not produce warnings.
+
+Credential availability does not verify server authentication. No API requests or
+PR detection are performed. Tokens are never included in built-in diagnostics.
+
+When :checkhealth opens its report buffer, Parley uses the regular alternate
+buffer as the source file. If unavailable, repository diagnostics are skipped.
+Repository checks also require setup() and Plenary; checks time out after ten
+seconds, and late results are discarded. Providers without diagnostic callbacks
+and repositories without matching providers are reported informationally.
 
 ==============================================================================
 12. LUA API                                          *parley-api*

@@ -335,6 +335,7 @@ function M.setup(opts)
     name = "GitHub",
     detect = gh.detect,
     factory = gh.new,
+    health = require("parley.providers.github.diagnostics").check,
   })
 
   local arcanum = require("parley.providers.arcanum.provider")
@@ -342,6 +343,7 @@ function M.setup(opts)
     name = "Arcanum",
     detect = arcanum.detect,
     factory = arcanum.new,
+    health = require("parley.providers.arcanum.diagnostics").check,
   })
 
   if M.config.telescope then

@@ -19,7 +19,9 @@
     "lua/parley/nav.lua",
     "lua/parley/progress_popup.lua",
     "lua/parley/provider.lua",
+    "lua/parley/providers/arcanum/diagnostics.lua",
     "lua/parley/providers/github/auth.lua",
+    "lua/parley/providers/github/diagnostics.lua",
     "lua/parley/providers/github/provider.lua",
     "lua/parley/providers/vcs.lua",
     "lua/parley/providers/vcs/arc.lua",
@@ -162,6 +164,11 @@
       "functions": [
         "vim.fn.has"
       ]
+    },
+    "event_wait": {
+      "functions": [
+        "vim.wait"
+      ]
     }
   },
   "layers": {
@@ -232,7 +239,9 @@
         "lua/parley/local_content.lua",
         "lua/parley/providers/vcs.lua",
         "lua/parley/providers/vcs/git.lua",
-        "lua/parley/providers/vcs/arc.lua"
+        "lua/parley/providers/vcs/arc.lua",
+        "lua/parley/providers/github/diagnostics.lua",
+        "lua/parley/providers/arcanum/diagnostics.lua"
       ],
       "capabilities": [
         "buffer_inspect",
@@ -244,7 +253,8 @@
         "env_read",
         "path_helpers",
         "network_curl",
-        "fs_async"
+        "fs_async",
+        "host_query"
       ],
       "depends": [
         "core",
@@ -307,11 +317,11 @@
         "buffer_inspect",
         "path_helpers",
         "host_query",
-        "fs_read_blocking",
-        "process_blocking"
+        "event_wait"
       ],
       "depends": [
-        "infra"
+        "infra",
+        "core"
       ]
     }
   }

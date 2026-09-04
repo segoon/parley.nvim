@@ -23,12 +23,22 @@ local M = {}
 -- Type annotations
 -- ---------------------------------------------------------------------------
 
+--- @class parley.HealthEntry
+--- @field level 'ok'|'info'|'warn'|'error'
+--- @field message string
+
+--- @class parley.HealthContext
+--- @field vcs_info parley.VcsInfo
+--- @field opts table
+--- @field config table
+
 --- A self-contained descriptor for one hosting provider.
 ---
 --- @class parley.ProviderSpec
 --- @field name    string                                            Human-readable name (e.g. "GitHub")
 --- @field detect  fun(vcs_info: parley.VcsInfo): table|nil           Returns factory opts on match, nil on miss
 --- @field factory fun(opts: table): parley.Provider                  Creates and returns a provider instance
+--- @field health? fun(context: parley.HealthContext): parley.HealthEntry[] Local-only coroutine diagnostics
 
 -- ---------------------------------------------------------------------------
 -- Internal state
@@ -52,6 +62,7 @@ function M.register(spec)
   assert(type(spec.name) == "string" and spec.name ~= "", "spec.name must be a non-empty string")
   assert(type(spec.detect) == "function", "spec.detect must be a function")
   assert(type(spec.factory) == "function", "spec.factory must be a function")
+  assert(spec.health == nil or type(spec.health) == "function", "spec.health must be a function when provided")
   table.insert(_specs, spec)
 end
 

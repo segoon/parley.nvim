@@ -256,6 +256,12 @@ describe("architecture policy", function()
     end
   end)
 
+  it("keeps shared health independent of concrete provider imports", function()
+    for _, dep in ipairs(internal_requires("lua/parley/health.lua")) do
+      assert.is_nil(dep:match("^lua/parley/providers/"), "health imports " .. dep)
+    end
+  end)
+
   it("assigns every Lua module to exactly one layer", function()
     local policy = read_policy_json(policy_path)
     local mapping = module_to_layer(policy)
