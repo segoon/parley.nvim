@@ -202,7 +202,7 @@ function M.render(bufnr, discussions, mappings, opts)
     local mapping = mappings[disc.id]
 
     -- Skip if no mapping or if the anchored line was deleted locally.
-    if mapping and mapping.local_line ~= nil then
+    if mapping and mapping.local_line ~= nil and require("parley.discussion").projectable(disc) then
       local stale = mapping.stale
       local hl_sign = stale and HL_STALE_SIGN or HL_SIGN
       local hl_vtext_meta = stale and HL_STALE_VTEXT_META or HL_VTEXT_META

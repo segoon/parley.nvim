@@ -20,6 +20,12 @@ local M = {}
 --- @field emoji? string
 --- @class parley.ReactionChoice : parley.ReactionPresentation
 --- @field reaction string Opaque provider identifier
+--- @field remove_only? boolean
+--- @class parley.ReviewActionChoice
+--- @field action string
+--- @field label string
+--- @field confirmation string
+--- @field reason? string Unavailable action explanation
 
 --- The abstract provider interface.
 ---
@@ -53,12 +59,28 @@ local M = {}
 --- @field ok boolean
 --- @field comment? parley.Comment
 --- @field err? string
+--- @field refresh? boolean Refresh remote state after a known conflict.
 --- @field cancelled? boolean Must not be true when ok is true.
+--- @field uncertain? boolean The server may have accepted the mutation; check the review before retrying.
 --- @alias parley.WriteCallback fun(result: parley.WriteResult): nil
 --- @class parley.CancelHandle
 --- @field cancel fun(): nil Request cancellation; completion arrives through the callback.
 
 --- @class parley.Provider
+--- Async initialization before publishing cache identity.
+--- @field review_actions? fun(self: parley.Provider,
+--- review: parley.DetectedReview): parley.ReviewActionChoice[], string|nil
+--- @field begin_review_action? fun(self: parley.Provider, review: parley.DetectedReview,
+--- action: string, callback: parley.WriteCallback): parley.CancelHandle
+--- @field begin_set_reaction? fun(self: parley.Provider, review: parley.DetectedReview,
+--- comment_id: string, code: string, present: boolean, callback: parley.WriteCallback): parley.CancelHandle
+--- @field prepare? fun(self: parley.Provider, info?: parley.VcsInfo)
+--- Local-only implemented actions, not token authorization.
+--- @field capabilities? fun(self: parley.Provider, review: parley.DetectedReview): parley.ProviderCapabilities
+--- @field begin_resolve? fun(self: parley.Provider, review: parley.DetectedReview,
+--- discussion_id: string, callback: parley.WriteCallback): parley.CancelHandle
+--- @field begin_unresolve? fun(self: parley.Provider, review: parley.DetectedReview,
+--- discussion_id: string, callback: parley.WriteCallback): parley.CancelHandle
 --- @field validate_comment_target fun(
 ---   self: parley.Provider, review: parley.DetectedReview, target: parley.CommentTarget
 --- ): parley.CommentTargetResult
@@ -159,6 +181,13 @@ M.METHOD_NAMES = {
 --- Optional methods are validated when present; absence preserves fallback behavior.
 --- @type string[]
 M.OPTIONAL_METHOD_NAMES = {
+  "review_actions",
+  "begin_review_action",
+  "begin_set_reaction",
+  "prepare",
+  "capabilities",
+  "begin_resolve",
+  "begin_unresolve",
   "begin_post_top_level_comment",
   "begin_reply",
   "reaction_choices",

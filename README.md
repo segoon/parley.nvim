@@ -6,7 +6,7 @@ Inline pull request discussions for Neovim.
 
 > [!WARNING]
 > Early-stage plugin.
-> Current support is GitHub only, regular file buffers only, and some planned features are not exposed yet.
+> Current support includes GitHub (Git) and Arcanum (Arc) in regular file buffers. Diffview integration is planned; live Arcanum deployment compatibility remains unverified.
 
 ## Features
 
@@ -16,7 +16,7 @@ Inline pull request discussions for Neovim.
 - Add new top-level comments on a line or range
 - Reply to, edit, delete, and react to comments
 - Navigate commented lines within a buffer (`]c` / `[c`) or across the whole review (`]C` / `[C`)
-- Fill the quickfix list with all discussion locations in the active review
+- Fill quickfix with file-associated discussions and their available positions
 - Expose a statusline component with PR number, review state, and unresolved count
 - Cache PR and discussion data on disk
 - Refresh asynchronously on `BufEnter` and on demand
@@ -34,9 +34,10 @@ Parley is intentionally narrower. The goal is to make reading and responding to 
 ## Requirements
 
 - Neovim `>= 0.10`
-- `git`
-- `gh`
 - [`nvim-lua/plenary.nvim`](https://github.com/nvim-lua/plenary.nvim)
+
+GitHub requires `git` and `gh`. Arcanum requires `arc`, `curl`, and HTTPS access
+to its configured API host (default `arcanum.yandex.net`).
 
 Optional:
 
@@ -77,11 +78,11 @@ require("parley").setup({
 ## Quick Start
 
 1. Install the plugin and call `require("parley").setup({})`.
-2. (for GitHub) Authenticate GitHub CLI with `gh auth login`.
-3. Open a file inside a repository whose current branch has an open PR.
+2. For GitHub, configure credentials with `gh auth login` or a supported token environment variable. For Arcanum, configure an OAuth token as described below.
+3. Open a regular file inside a Git or Arc repository whose branch has an open PR. Arcanum requires a remote branch.
 4. Use `]c` / `[c` to move between commented lines in the buffer, or `]C` / `[C` to jump across all files in the review.
 5. Use `:Parley discussion toggle` to open the discussion window for the current line.
-6. Use `:Parley quickfix` to open all discussion locations in quickfix.
+6. Use `:Parley quickfix` for file-associated discussions or `:Parley discussion list` for every thread.
 
 If no matching PR is found, Parley stays silent and inactive.
 
@@ -94,6 +95,42 @@ approximations and reports the reason.
 New comments require a clean file with no unsaved edits and a local HEAD matching
 the review revision. These checks run again when you submit; a failed check keeps
 your draft. Other Arcanum API limitations still apply.
+
+Use `:Parley discussion list` to browse every thread without Telescope. Arcanum
+nested replies and issue states are preserved. General, whole-file, old-side,
+and historical threads open in the discussion float without a guessed line.
+Replies and edits/deletions of your own comments remain available. Only open
+issues contribute to the unresolved count.
+
+Use `:Parley discussion resolve` or `:Parley discussion reopen` to change an
+Arcanum issue between open and resolved. These commands use the selected thread
+or offer the threads at the source cursor. They preserve drafts and refresh the
+issue state. Dropped, non-issue, unknown, and incomplete threads cannot transition.
+GitHub resolution remains unavailable. Unsupported provider actions explain why
+before you compose or choose them; see `:help parley-provider-capabilities`.
+
+Arcanum reactions offer thumbs up, thumbs down, and heart; other existing codes
+remain readable and removable by their author. AI comments allow one reaction
+per account; remove an existing reaction explicitly before replacing it.
+
+Use `:Parley review actions` for Ship, Sticky ship, Unship, Block merge, and
+Unblock merge. The confirmation shows the PR, loaded revision, and current verdict.
+Sticky ship approves future diffs until withdrawn. No review message is bundled.
+Reactions and withdrawals require `GENERIC_WRITE`; ship and block additions
+require `REVIEW_REQUEST_SHIP`. Server permissions remain authoritative.
+The active diff is rechecked after confirmation, but the API cannot atomically
+pin it during the write. Review data failures show status `unknown` and disable
+review actions until refresh; discussions remain available.
+
+Arcanum credentials are read from `ARCANUM_TOKEN`, then `ARC_OAUTH_TOKEN`, then
+`ARC_TOKEN_PATH`, then `~/.arc/token`. An unreadable or empty explicit token file
+is an error. Review loading verifies the token's API account before showing cached
+discussions; failed verification stops loading, and the local Arc login is never
+used to guess ownership. Credential changes require a refreshed session.
+
+Discovery searches successive prefix-result pages for the exact remote branch.
+Without a remote branch, Parley remains inactive. Configure a hostname with an
+optional port under `providers.arcanum.host`; do not include a URL scheme or path.
 
 ## Telescope
 
@@ -108,14 +145,15 @@ require("telescope").extensions.parley_discussions_file.parley_discussions_file(
 
 ## Quickfix
 
-Populate the quickfix list with all discussions from the active review:
+Populate the quickfix list with file-associated discussions from the active review:
 
 ```vim
 :Parley quickfix
 ```
 
-Parley uses review-wide anchor mappings when available, so quickfix entries jump to
-best-effort local buffer lines across files.
+Parley uses review-wide anchor mappings when available. Entries with unavailable
+positions remain invalid rows; general discussions are omitted. Use
+`:Parley discussion list` or the review-wide Telescope picker to access every thread.
 
 
 ## Statusline
@@ -153,8 +191,8 @@ Common options:
 
 ```lua
 require("parley").setup({
-  refresh_interval = 120,          -- seconds (0 = disabled)
-  telescope = false,               -- disable Telescope extensions
+  refresh_interval = 300,          -- seconds between polling rounds; 0 disables
+  telescope = false,              -- disable Telescope extensions
   keymaps = {
     buf_next    = "]c",   -- "" to disable
     buf_prev    = "[c",
@@ -165,9 +203,29 @@ require("parley").setup({
 ```
 
 See `:help parley-configuration` for the full reference with all defaults.
+`refresh_interval` defaults to 300 seconds; set it to `0` to disable polling.
+Positive values must be whole seconds within the timer range. Polling refreshes
+already-loaded reviews visible in the current tab, including discussion/input
+windows, once per shared review. It skips reviews with an active read or write.
+
+Polling pauses when Neovim loses focus. The first round starts a full interval
+after setup or focus returns; subsequent rounds wait a full interval after the
+previous round finishes. Reviews are refreshed sequentially without catch-up bursts.
+Hidden reviews and branches without an active PR are not polled. Buffer entry and
+`:Parley refresh` still discover reviews, and writes still refresh remote state.
+
+Background refresh is quiet: no progress popups or error notifications. Available
+review data and drafts remain visible, with existing identity checks still applied.
+Use `:Parley refresh` for an explicit progress-enabled refresh and error reporting.
+Repeated `setup()` replaces the polling schedule; editor shutdown stops it.
 
 Requests to GitHub are made through the standard `gh` CLI.
-Arcanum requests are make through `arc` CLI.
+Arcanum uses asynchronous HTTPS. Its default request budget is 10 seconds,
+including queueing and retry waits, with request starts spaced one second apart.
+Comment and reply retries are opt-in via
+`providers.arcanum.idempotent_write_retries = true`; enable this only after
+confirming the deployed server supports idempotency keys. After an uncertain
+write failure or cancellation, check the review before resubmitting your draft.
 See `:help parley-providers` for details.
 
 ## Health Check
@@ -181,13 +239,14 @@ Run:
 This checks:
 
 - Neovim version
-- `git` and `gh` availability
-- `arc` availability
+- provider-specific tools (`git`/`gh` or `arc`/`curl`)
 - `plenary.async`
 - cache directory setup
 - optional integrations
 - whether the current buffer is in a supported repository
-- whether GitHub authentication can be resolved
+- local credential availability and, for Arcanum, the token source and configured host
+
+Health checks remain local-only and do not verify credentials with the server.
 
 ## Documentation
 
@@ -227,5 +286,9 @@ provider-independent behavior tests.
 ## Roadmap
 
 - `diffview.nvim` integration
-- real thread resolved state for GitHub via GraphQL
-- PR-level review actions (resolve / unresolve)
+- GitHub thread resolution/reopening via GraphQL
+- optional Arcanum drafts/publication, suggestions, and additional comment anchors
+
+See [TODO.md](TODO.md) for remaining work and
+[ARCANUM_COMPATIBILITY.md](ARCANUM_COMPATIBILITY.md) for current Arcanum support
+and validation limits.

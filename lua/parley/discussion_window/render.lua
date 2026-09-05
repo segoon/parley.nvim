@@ -1,4 +1,7 @@
 local M = {}
+local semantics = require("parley.discussion")
+local tree = require("parley.comment_tree")
+local entries = require("parley.discussion_entries")
 
 ---@param text string
 ---@return string[]
@@ -28,26 +31,6 @@ local function reaction_summary(reactions, presentation)
   return "Reactions: " .. table.concat(parts, ", ")
 end
 
----@param comment parley.Comment
----@param by_id table<string, parley.Comment>
----@param cache table<string, integer>
----@return integer
-local function comment_depth(comment, by_id, cache)
-  local cached = cache[comment.id]
-  if cached ~= nil then
-    return cached
-  end
-
-  if not comment.parent_comment_id or not by_id[comment.parent_comment_id] then
-    cache[comment.id] = 0
-    return 0
-  end
-
-  local depth = comment_depth(by_id[comment.parent_comment_id], by_id, cache) + 1
-  cache[comment.id] = depth
-  return depth
-end
-
 ---@param discussion parley.Discussion
 ---@param mapping parley.anchor.Mapping|nil
 ---@param out string[]
@@ -56,7 +39,10 @@ end
 --- reaction_presentation?: fun(code: string): parley.ReactionPresentation }
 ---@return string
 local function render_discussion(discussion, mapping, out, ranges, deps)
-  local title = discussion.resolved and "resolved" or "unresolved"
+  local title = entries.status(discussion)
+  if discussion.anchor then
+    title = title .. " · " .. semantics.anchor(discussion).kind
+  end
   if mapping and mapping.stale then
     title = title .. " · stale"
   end
@@ -67,14 +53,34 @@ local function render_discussion(discussion, mapping, out, ranges, deps)
     return title
   end
 
-  local by_id = {}
-  local depth_cache = {}
-  for _, comment in ipairs(discussion.comments) do
-    by_id[comment.id] = comment
+  local ordered, depths, ancestry = tree.order(discussion.comments)
+  local a = discussion.anchor
+  if a then
+    local parts = { a.path or (a.kind == "general" and "General discussion" or "Location unavailable") }
+    if a.side then
+      parts[#parts + 1] = a.side .. " side"
+    end
+    if a.line then
+      parts[#parts + 1] = "line " .. a.line .. (a.end_line and ("–" .. a.end_line) or "")
+    end
+    if a.diff_id then
+      parts[#parts + 1] = "diff " .. a.diff_id
+    end
+    if a.revision then
+      parts[#parts + 1] = "revision " .. a.revision
+    end
+    if a.unavailable_reason then
+      parts[#parts + 1] = a.unavailable_reason
+    end
+    out[#out + 1], out[#out + 2] = table.concat(parts, " · "), ""
   end
-
-  for _, comment in ipairs(discussion.comments) do
-    local depth = comment_depth(comment, by_id, depth_cache)
+  if ancestry or discussion.ancestry then
+    out[#out + 1] = (ancestry or discussion.ancestry) == "cycle" and "Thread contains cyclic ancestry."
+      or "Some parent comments are unavailable."
+    out[#out + 1] = ""
+  end
+  for _, comment in ipairs(ordered) do
+    local depth = math.min(depths[comment.id], 12)
     local indent = string.rep("  ", depth)
     local start_line = #out + 1
 

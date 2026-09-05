@@ -62,7 +62,7 @@ function M._sorted_review_discussions(bufnr)
   local state = require("parley.repositories.review").get(bufnr)
   local mapped = state and state.all_mappings or {}
   local sorted = vim.tbl_filter(function(d)
-    return d.file and d.file ~= "" and d.line and d.line > 0 and not (mapped[d.id] and mapped[d.id].local_line == nil)
+    return require("parley.discussion").projectable(d) and not (mapped[d.id] and mapped[d.id].local_line == nil)
   end, vim.deepcopy(all))
   table.sort(sorted, function(a, b)
     if a.file ~= b.file then

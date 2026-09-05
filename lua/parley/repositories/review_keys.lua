@@ -10,7 +10,7 @@ local function disk(snapshot, kind, value)
   if not snapshot.persistent then
     return nil
   end
-  return { provider = "reviews-v2", repository = snapshot.scope, subkey = digest({ kind, tostring(value) }) }
+  return { provider = "reviews-v3", repository = snapshot.scope, subkey = digest({ kind, tostring(value) }) }
 end
 
 --- @param snapshot table
@@ -35,6 +35,6 @@ function M.make(snapshot, ctx)
   if not snapshot or not snapshot.scope or not branch or branch == "" then
     return nil
   end
-  return "reviews-v2/" .. snapshot.scope .. "/" .. digest({ "branch", branch })
+  return "reviews-v3/" .. snapshot.scope .. "/" .. digest({ "branch", branch })
 end
 return M

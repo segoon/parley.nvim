@@ -10,12 +10,12 @@ local progress_popup = require("parley.progress_popup")
 describe("parley command completion", function()
   it("returns top-level groups for the first argument", function()
     local items = parley._complete_parley("", ":Parley ")
-    assert.same({ "discussion", "comment", "nav", "quickfix", "refresh" }, items)
+    assert.same({ "discussion", "comment", "review", "nav", "quickfix", "refresh" }, items)
   end)
 
   it("returns discussion actions for the second argument", function()
     local items = parley._complete_parley("", ":Parley discussion ")
-    assert.same({ "open", "close", "toggle", "new", "reply" }, items)
+    assert.same({ "open", "close", "toggle", "new", "reply", "list", "resolve", "reopen" }, items)
   end)
 
   it("returns comment actions for the second argument", function()
@@ -55,6 +55,7 @@ describe("parley setup", function()
   end)
 
   after_each(function()
+    require("parley.periodic_refresh").stop()
     require("parley.vcs").reset_adapters()
     require("parley.vcs").reset_detectors()
     cache.setup = saved_cache_setup
@@ -69,6 +70,32 @@ describe("parley setup", function()
     pcall(vim.api.nvim_del_user_command, "Parley")
   end)
 
+  it("keeps the active config when polling interval validation fails", function()
+    local old = parley.config
+    assert.has_error(function()
+      parley.setup({ refresh_interval = -1 })
+    end)
+    assert.equals(old, parley.config)
+  end)
+  it("wires focus and shutdown events to one polling lifecycle", function()
+    local periodic = require("parley.periodic_refresh")
+    local clock = dofile("tests/support/clock.lua").new()
+    local defer = periodic._defer
+    periodic._defer = clock.defer
+    cache.setup = function() end
+    signs.setup_highlights = function() end
+    progress_popup.setup = function() end
+    parley.setup({ telescope = false, refresh_interval = 2 })
+    assert.equals(2000, clock.timers[1].at)
+    vim.api.nvim_exec_autocmds("FocusLost", {})
+    assert.is_true(clock.timers[1].closed)
+    vim.api.nvim_exec_autocmds("FocusGained", {})
+    assert.equals(2, #clock.timers)
+    parley.setup({ telescope = false, refresh_interval = 0 })
+    assert.is_true(clock.timers[2].closed)
+    vim.api.nvim_exec_autocmds("VimLeavePre", {})
+    periodic._defer = defer
+  end)
   it("resets and registers VCS adapters on repeated setup", function()
     local vcs = require("parley.vcs")
     local adapters = require("parley.vcs.adapters")
@@ -105,14 +132,14 @@ describe("parley setup", function()
     local p = factory({ _auth = auth })
     opts.providers.arcanum.host = "mutated.example"
     parley.config.providers.arcanum.host = "mutated.example"
-    assert.equals("first.example", p:cache_identity().host)
-    assert.equals("first.example", factory({ _auth = auth }):cache_identity().host)
+    assert.equals("first.example", p._host)
+    assert.equals("first.example", factory({ _auth = auth })._host)
     assert.equals(0, require("parley.providers.arcanum.transport").transport_config(p).retry_count)
     parley.setup({ telescope = false, providers = { arcanum = { host = "second.example" } } })
-    assert.equals("second.example", specs[4].factory({ _auth = auth }):cache_identity().host)
-    assert.equals("first.example", p:cache_identity().host)
+    assert.equals("second.example", specs[4].factory({ _auth = auth })._host)
+    assert.equals("first.example", p._host)
     parley.setup({ telescope = false })
-    assert.equals("arcanum.yandex.net", specs[6].factory({ _auth = auth }):cache_identity().host)
+    assert.equals("arcanum.yandex.net", specs[6].factory({ _auth = auth })._host)
   end)
 
   it("wires :Parley refresh to a progress-enabled refresh", function()

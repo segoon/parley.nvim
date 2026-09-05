@@ -44,7 +44,8 @@ a.describe("content anchoring", function()
       { id = "a", file = "f", line = 1 },
       { id = "b", file = "f", line = 3 },
     })
-    assert.is_nil(result.general)
+    assert.is_nil(result.general.local_line)
+    assert.is_truthy(result.general.unavailable_reason)
     assert.equals(1, count)
   end)
 

@@ -9,6 +9,13 @@ local signs = require("parley.signs")
 
 local M = {}
 M._subscriptions = {}
+--- @type table<integer, integer> Active read counts, including preparation.
+M._active = {}
+--- @param bufnr integer
+--- @return boolean
+function M.is_refreshing(bufnr)
+  return (M._active[bufnr] or 0) > 0
+end
 
 --- @type fun(msg: string, level: integer): nil
 M._notify = function(msg, level)
@@ -23,6 +30,10 @@ end
 --- @param bufnr integer
 --- @param snapshot table|nil
 local function render_snapshot(bufnr, snapshot)
+  local window = package.loaded["parley.discussion_window"]
+  if window and window.refresh_snapshot then
+    window.refresh_snapshot(bufnr, snapshot)
+  end
   if not snapshot or not snapshot.discussions or #snapshot.discussions == 0 then
     signs.clear(bufnr)
     return
@@ -47,12 +58,18 @@ end
 --- Perform the blocking review refresh for bufnr.
 --- Must be called from within a plenary.async coroutine.
 --- @param bufnr integer
---- @param opts { force?: boolean, notify_errors?: boolean }
+--- @param opts table
 --- @return table|nil
 local function do_refresh(bufnr, opts)
   ensure_subscription(bufnr)
   local snapshot = review_repository.refresh(bufnr, opts)
-  if snapshot and snapshot.status == "error" and opts.notify_errors ~= false and snapshot.error then
+  if
+    snapshot
+    and snapshot.status == "error"
+    and not opts.background
+    and opts.notify_errors ~= false
+    and snapshot.error
+  then
     M._notify("parley: refresh failed: " .. tostring(snapshot.error), vim.log.levels.WARN)
   end
   return snapshot
@@ -121,73 +138,111 @@ end
 --- which schedules its own coroutine for the actual network work.
 ---
 --- @param bufnr integer
---- @param opts? { force?: boolean, notify_errors?: boolean, progress?: boolean }
+--- Completion occurs exactly once, including early exits and preparation errors.
+--- @param opts? { force?: boolean, notify_errors?: boolean, progress?: boolean,
+--- background?: boolean, expected_key?: string }
 --- @param callback? fun(snapshot: table|nil): nil
 function M.refresh_async(bufnr, opts, callback)
-  opts = opts or {}
+  opts = vim.tbl_extend("force", {}, opts or {})
+  if opts.background then
+    opts.force, opts.notify_errors = true, false
+    local activity = review_repository.activity(bufnr)
+    local provider = provider_repository.get(bufnr)
+    local context = context_repository.get(bufnr)
+    opts.expected_temporary = provider and provider.persistent == false
+    opts.expected_vcs_info = context and context.vcs_info
+    opts.expected_key = opts.expected_key or (activity and activity.key)
+  end
+  local completed = false
+  M._active[bufnr] = (M._active[bufnr] or 0) + 1
+  local function finish(snapshot)
+    if completed then
+      return
+    end
+    completed = true
+    local count = (M._active[bufnr] or 1) - 1
+    M._active[bufnr] = count > 0 and count or nil
+    if callback then
+      vim.schedule(function()
+        callback(snapshot)
+      end)
+    end
+  end
 
   -- Phase 1: silent detection. VCS git subprocesses require a coroutine context;
   -- this wrapper provides it without showing any popup.
   async.run(function()
-    local ctx = context_repository.refresh(bufnr)
-    if not ctx or ctx.kind ~= "regular" or not ctx.rel_path then
-      M.clear_buffer_state(bufnr)
-      return
-    end
-    if not ctx.vcs_info or not ctx.vcs_info.branch or ctx.vcs_info.branch == "" then
-      M.clear_buffer_state(bufnr)
-      return
-    end
-    local resolved, provider_result = pcall(provider_repository.refresh, bufnr)
-    if not resolved or not provider_result then
-      if not resolved then
-        M._notify("Provider identity or construction failed", vim.log.levels.WARN)
+    local ok, err = pcall(function()
+      local ctx = context_repository.refresh(bufnr)
+      if not ctx or ctx.kind ~= "regular" or not ctx.rel_path then
+        M.clear_buffer_state(bufnr)
+        finish(nil)
+        return
       end
-      M.clear_buffer_state(bufnr)
-      return
-    end
+      if not ctx.vcs_info or not ctx.vcs_info.branch or ctx.vcs_info.branch == "" then
+        M.clear_buffer_state(bufnr)
+        finish(nil)
+        return
+      end
+      local resolved, provider_result = pcall(provider_repository.refresh, bufnr)
+      if not resolved or not provider_result then
+        if not resolved and opts.notify_errors ~= false then
+          M._notify("Provider identity or construction failed", vim.log.levels.WARN)
+        end
+        M.clear_buffer_state(bufnr)
+        finish(nil)
+        return
+      end
 
-    local provider_snapshot = provider_repository.get(bufnr)
-    local review_key = review_repository.make_key(provider_snapshot, ctx)
-    if not review_repository.get(bufnr) then
-      signs.clear(bufnr)
-    end
-    local has_data = review_key and review_repository.has_review(review_key) or false
-    if not has_data and review_key then
-      has_data = review_repository.has_cached_review(provider_snapshot, ctx.vcs_info.branch)
-    end
-    local silent = not opts.progress and has_data
+      local provider_snapshot = provider_repository.get(bufnr)
+      local review_key = review_repository.make_key(provider_snapshot, ctx)
+      if not review_repository.get(bufnr) then
+        signs.clear(bufnr)
+      end
+      local has_data = review_key and review_repository.has_review(review_key) or false
+      if not opts.background and not has_data and review_key then
+        has_data = review_repository.has_cached_review(provider_snapshot, ctx.vcs_info.branch)
+      end
+      local silent = opts.background or not opts.progress and has_data
 
-    -- Capture the snapshot in a closure so the callback always receives it even
-    -- when fn throws due to an error snapshot (fn's return value is lost on throw).
-    local last_snapshot = nil
+      -- Capture the snapshot in a closure so the callback always receives it even
+      -- when fn throws due to an error snapshot (fn's return value is lost on throw).
+      local last_snapshot = nil
 
-    -- Phase 2: start the fetch operation. Called from within the Phase 1
-    -- coroutine: start() shows the popup synchronously (queued via vim.schedule)
-    -- then schedules a new coroutine for the network work.
-    async_operation
-      .new({
-        bufnr = bufnr,
-        silent = silent,
-        fn = function()
-          local snapshot = do_refresh(bufnr, opts)
-          last_snapshot = snapshot
-          if snapshot and snapshot.status == "error" then
-            error(snapshot.error or "refresh failed", 0)
-          end
-          return snapshot
-        end,
-        popup = silent and nil
-          or {
-            progress = "Refreshing discussions (" .. provider_snapshot.provider:progress_label() .. ")...",
-            success = "Refresh complete",
-            error = "Refresh failed",
-          },
-        finally_scheduled_fn = callback and function(_ok, _result)
-          callback(last_snapshot)
-        end or nil,
-      })
-      :start()
+      -- Phase 2: start the fetch operation. Called from within the Phase 1
+      -- coroutine: start() shows the popup synchronously (queued via vim.schedule)
+      -- then schedules a new coroutine for the network work.
+      async_operation
+        .new({
+          bufnr = bufnr,
+          silent = silent,
+          fn = function()
+            local snapshot = do_refresh(bufnr, opts)
+            last_snapshot = snapshot
+            if snapshot and snapshot.status == "error" then
+              error(snapshot.error or "refresh failed", 0)
+            end
+            return snapshot
+          end,
+          popup = not silent
+              and {
+                progress = "Refreshing discussions (" .. provider_snapshot.provider:progress_label() .. ")...",
+                success = "Refresh complete",
+                error = "Refresh failed",
+              }
+            or nil,
+          finally_scheduled_fn = function(_ok, _result)
+            finish(last_snapshot)
+          end,
+        })
+        :start()
+    end)
+    if not ok then
+      if opts.notify_errors ~= false then
+        M._notify("parley: refresh failed: " .. tostring(err), vim.log.levels.WARN)
+      end
+      finish(nil)
+    end
   end)
 end
 

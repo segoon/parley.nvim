@@ -1,6 +1,7 @@
 --- Generic reaction presentation, availability, and picker context guards.
 local providers = require("parley.repositories.provider")
 local reviews = require("parley.repositories.review")
+local capabilities = require("parley.capabilities")
 local M = {}
 
 --- @param bufnr integer
@@ -19,7 +20,13 @@ end
 function M.capture(bufnr)
   local ctx = M.context(bufnr)
   if ctx then
-    return { provider = ctx.provider, id = ctx.review.pr.id, head = ctx.review.head_sha }
+    return {
+      provider = ctx.provider,
+      id = ctx.review.pr.id,
+      head = ctx.review.head_sha,
+      identity_checked = ctx.provider.cache_identity ~= nil,
+      identity = ctx.provider.cache_identity and vim.deepcopy(ctx.provider:cache_identity()),
+    }
   end
 end
 
@@ -45,6 +52,10 @@ end
 --- @param comment parley.Comment
 --- @return table[], string|nil
 function M.items(provider, review, comment)
+  local capability_reason = capabilities.reason(provider, review, "react")
+  if capability_reason then
+    return {}, capability_reason
+  end
   local reason = "Reaction changes are unavailable for this provider"
   if not provider or not provider.reaction_choices then
     return {}, reason
@@ -73,6 +84,7 @@ function M.items(provider, review, comment)
       reaction = choice.reaction,
       label = choice.label,
       emoji = choice.emoji,
+      remove_only = choice.remove_only,
       count = state.count or 0,
       viewer_reacted = state.viewer_reacted or false,
     }
@@ -96,9 +108,34 @@ function M.validate(bufnr, comment, code, expected)
   then
     return "Review context changed; reopen the reaction picker"
   end
+  if ctx.provider.begin_set_reaction then
+    local snapshot = reviews.get(bufnr)
+    local current
+    for _, thread in ipairs(snapshot.all_discussions or snapshot.discussions or {}) do
+      for _, candidate in ipairs(thread.comments) do
+        if candidate.id == comment.id then
+          current = candidate
+        end
+      end
+    end
+    if not current then
+      return "Comment is no longer available; refresh the review"
+    end
+    comment = current
+  end
+  if
+    expected
+    and expected.identity_checked
+    and not vim.deep_equal(expected.identity, ctx.provider.cache_identity and ctx.provider:cache_identity())
+  then
+    return "Account changed; reopen the reaction picker"
+  end
   local items, reason = M.items(ctx.provider, ctx.review, comment)
   for _, item in ipairs(items) do
     if item.reaction == code then
+      if expected and expected.present and item.remove_only then
+        return "This reaction can only be removed"
+      end
       return nil
     end
   end
@@ -126,6 +163,7 @@ function M.select(bufnr, line, comment, picker, notify)
     if not item then
       return
     end
+    expected.present = not item.viewer_reacted
     local err = M.validate(bufnr, comment, item.reaction, expected)
     if err then
       notify(err, vim.log.levels.INFO)

@@ -1,6 +1,7 @@
 --- parley.discussion_entries — shared discussion list formatting helpers.
 
 local M = {}
+local semantics = require("parley.discussion")
 
 --- @param text string
 --- @param max_width? integer
@@ -17,7 +18,14 @@ end
 --- @param discussion parley.Discussion
 --- @return string
 function M.status(discussion)
-  return discussion.resolved and "resolved" or "unresolved"
+  local state = semantics.issue_state(discussion)
+  return ({
+    open = "unresolved",
+    resolved = "resolved",
+    dropped = "dropped",
+    not_issue = "not an issue",
+    unknown = "unknown",
+  })[state] or "unknown"
 end
 
 --- @param discussion parley.Discussion
@@ -37,26 +45,47 @@ end
 --- @param discussion parley.Discussion
 --- @param root string
 --- @param mappings? table<string, parley.anchor.Mapping>
---- @return { path: string, line: integer|nil, status: string, preview: string, text: string }
+--- @return { path: string|nil, line: integer|nil, status: string, preview: string, text: string }
 function M.location(discussion, root, mappings)
+  local a = semantics.anchor(discussion)
   local mapping = mappings and mappings[discussion.id] or nil
-  local line = mapping and mapping.local_line or discussion.line
-  if mapping and mapping.local_line == nil then
+  local line
+  if semantics.projectable(discussion) then
+    if mapping then
+      line = mapping.local_line
+    elseif not discussion.anchor then
+      line = discussion.line
+    end
+  end
+  local path = semantics.valid_path(a.path) and (root .. "/" .. a.path) or nil
+  if not path or not semantics.valid_line(line) then
     line = nil
   end
-  if not discussion.file or discussion.file == "" or not line or line < 1 then
-    line = nil
-  end
-  local first_comment = discussion.comments and discussion.comments[1] or nil
-  local preview = M.snippet(first_comment and first_comment.body and first_comment.body.text or "")
+  local first = discussion.comments and discussion.comments[1]
+  local preview = M.snippet(first and first.body and first.body.text or "")
+  local reason = a.unavailable_reason or mapping and mapping.unavailable_reason
+  local category = a.kind == "general" and "general"
+    or a.kind == "file" and "whole file"
+    or (not line and "unavailable" or nil)
+  local prefix = category and ("[" .. category .. "] ") or (mapping and mapping.stale and "[approximate] " or "")
   return {
-    path = root .. "/" .. (discussion.file or ""),
+    path = path,
     line = line,
     status = M.status(discussion),
     preview = preview,
-    text = (not line and "[unavailable] " or (mapping and mapping.stale and "[approximate] " or ""))
-      .. M.summary_text(discussion),
+    text = prefix .. M.summary_text(discussion) .. (reason and (" · " .. reason) or ""),
   }
+end
+
+--- @param discussion parley.Discussion
+--- @param root string
+--- @param mappings? table
+--- @return string
+function M.label(discussion, root, mappings)
+  local location = M.location(discussion, root, mappings)
+  local a = semantics.anchor(discussion)
+  local path = a.path and (a.path .. ":" .. tostring(location.line or "—") .. " ") or ""
+  return path .. location.text
 end
 
 return M

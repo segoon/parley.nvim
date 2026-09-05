@@ -94,6 +94,11 @@ end
 -- ---------------------------------------------------------------------------
 
 describe("parley.providers.arcanum.mapping — map_reactions", function()
+  it("handles sparse reaction authors without claiming ownership", function()
+    local mapped = mapping.map_reactions({ { code = ":heart:", user = vim.NIL } }, "")
+    assert.equals(1, mapped[1].count)
+    assert.is_false(mapped[1].viewer_reacted)
+  end)
   it("returns empty list for nil reactions", function()
     local result = mapping.map_reactions(nil, "viewer")
     assert.same({}, result)
@@ -392,16 +397,16 @@ describe("parley.providers.arcanum.mapping — group_comments_into_discussions",
     assert.is_false(result[1].resolved)
   end)
 
-  it("preserves insertion order", function()
+  it("orders roots deterministically", function()
     local comments = {
       make_raw_comment({ id = 3, anchor = make_anchor("a.lua", 1), reply_to_id = vim.NIL }),
       make_raw_comment({ id = 1, anchor = make_anchor("b.lua", 2), reply_to_id = vim.NIL }),
       make_raw_comment({ id = 2, anchor = make_anchor("c.lua", 3), reply_to_id = vim.NIL }),
     }
     local result = mapping.group_comments_into_discussions(comments, "")
-    assert.equals("3", result[1].id)
-    assert.equals("1", result[2].id)
-    assert.equals("2", result[3].id)
+    assert.equals("1", result[1].id)
+    assert.equals("2", result[2].id)
+    assert.equals("3", result[3].id)
   end)
 end)
 
@@ -455,27 +460,27 @@ describe("parley.providers.arcanum.mapping — map_pr", function()
     assert.equals("bob", pr.author)
   end)
 
-  it("maps 'merged' status to review_status='approved'", function()
+  it("maps 'merged' status to review_status='unknown'", function()
     local raw = { id = 1, summary = "", status = "merged", vcs = {}, author = "", url = "" }
     local pr = mapping.map_pr(raw)
-    assert.equals("approved", pr.review_status)
+    assert.equals("unknown", pr.review_status)
   end)
 
-  it("maps 'discarded' status to review_status='dismissed'", function()
+  it("maps 'discarded' status to review_status='unknown'", function()
     local raw = { id = 1, summary = "", status = "discarded", vcs = {}, author = "", url = "" }
     local pr = mapping.map_pr(raw)
-    assert.equals("dismissed", pr.review_status)
+    assert.equals("unknown", pr.review_status)
   end)
 
-  it("maps 'open' status to review_status='pending'", function()
+  it("maps 'open' status to review_status='unknown'", function()
     local raw = { id = 1, summary = "", status = "open", vcs = {}, author = "", url = "" }
     local pr = mapping.map_pr(raw)
-    assert.equals("pending", pr.review_status)
+    assert.equals("unknown", pr.review_status)
   end)
 
-  it("maps unknown status to review_status='pending'", function()
+  it("maps unknown status to review_status='unknown'", function()
     local raw = { id = 1, summary = "", status = "unknown", vcs = {}, author = "", url = "" }
     local pr = mapping.map_pr(raw)
-    assert.equals("pending", pr.review_status)
+    assert.equals("unknown", pr.review_status)
   end)
 end)

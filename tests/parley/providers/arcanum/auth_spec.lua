@@ -67,8 +67,8 @@ describe("parley.providers.arcanum.auth — read_token", function()
   -- ── File fallback ──────────────────────────────────────────────────────
 
   it("falls back to ~/.arc/token when env var is absent", function()
-    auth._getenv = function(_name)
-      return nil
+    auth._getenv = function(name)
+      return name == "HOME" and "/home/test" or nil
     end
     auth._read_file = function(_path)
       return "file-oauth-token\n"
@@ -99,8 +99,8 @@ describe("parley.providers.arcanum.auth — read_token", function()
   end)
 
   it("trims whitespace from file token", function()
-    auth._getenv = function(_name)
-      return nil
+    auth._getenv = function(name)
+      return name == "HOME" and "/home/test" or nil
     end
     auth._read_file = function(_path)
       return "  trimmed-token  \n"
@@ -114,8 +114,8 @@ describe("parley.providers.arcanum.auth — read_token", function()
   -- ── Failure cases ──────────────────────────────────────────────────────
 
   it("returns nil + error when no token found", function()
-    auth._getenv = function(_name)
-      return nil
+    auth._getenv = function(name)
+      return name == "HOME" and "/home/test" or nil
     end
     auth._read_file = function(_path)
       return nil
@@ -129,8 +129,8 @@ describe("parley.providers.arcanum.auth — read_token", function()
   end)
 
   it("returns nil + error when file contains only whitespace", function()
-    auth._getenv = function(_name)
-      return nil
+    auth._getenv = function(name)
+      return name == "HOME" and "/home/test" or nil
     end
     auth._read_file = function(_path)
       return "   \n\t  "
@@ -144,6 +144,9 @@ describe("parley.providers.arcanum.auth — read_token", function()
 
   it("skips empty ARCANUM_TOKEN env var and tries file", function()
     auth._getenv = function(name)
+      if name == "HOME" then
+        return "/home/test"
+      end
       if name == "ARCANUM_TOKEN" then
         return ""
       end

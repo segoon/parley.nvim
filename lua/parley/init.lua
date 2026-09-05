@@ -11,7 +11,7 @@ local M = {}
 
 --- Default configuration values.
 --- @class parley.Config
---- @field refresh_interval integer  Auto-refresh interval in seconds (0 = disabled)
+--- @field refresh_interval integer  Seconds between visible-review polling rounds; 0 disables periodic refresh
 --- @field cache_dir         string  Directory for disk-cached API responses
 --- @field signs             parley.SignsConfig
 --- @field virtual_text      parley.VirtualTextConfig
@@ -55,7 +55,7 @@ local M = {}
 
 --- @type parley.Config
 local defaults = {
-  refresh_interval = 300, -- 5 minutes
+  refresh_interval = 300, -- Seconds between background refresh rounds
   cache_dir = vim.fn.stdpath("cache") .. "/parley",
   debug = false,
   telescope = true,
@@ -101,14 +101,8 @@ M._notify = function(msg, level)
   vim.notify(msg, level)
 end
 
---- @type table<string, string[]>
-local PARLEY_GROUPS = {
-  discussion = { "open", "close", "toggle", "new", "reply" },
-  comment = { "react", "edit", "delete" },
-  nav = { "buf-next", "buf-prev", "review-next", "review-prev" },
-}
-
-local PARLEY_TOP_LEVEL = { "discussion", "comment", "nav", "quickfix", "refresh" }
+local commands = require("parley.commands")
+local PARLEY_GROUPS, PARLEY_TOP_LEVEL = commands.groups, commands.top_level
 
 --- @param items string[]
 --- @param prefix string
@@ -170,6 +164,14 @@ function M._dispatch_parley(fargs, bufnr, cmd_opts)
     return
   end
 
+  if group == "review" then
+    if action ~= "actions" then
+      error("parley: expected review actions", 0)
+    end
+    require("parley.review_actions").run(bufnr)
+    return
+  end
+
   if group == "quickfix" then
     if action ~= nil and action ~= "" then
       error("parley: quickfix does not accept subcommands", 0)
@@ -182,6 +184,14 @@ function M._dispatch_parley(fargs, bufnr, cmd_opts)
     local discussion_window = require("parley.discussion_window")
     if action == nil or action == "" then
       error("parley: expected a discussion action", 0)
+    end
+    if commands.issue_actions[action] then
+      require("parley.discussion_actions").run(bufnr, commands.issue_actions[action])
+      return
+    end
+    if action == "list" then
+      require("parley.discussion_picker").open(bufnr)
+      return
     end
     if action == "open" then
       discussion_window.open_current_line(bufnr)
@@ -271,14 +281,17 @@ end
 ---
 --- ```lua
 --- require("parley").setup({
----   refresh_interval = 120,
+---   telescope = false,
 --- })
 --- ```
 ---
 --- @param opts parley.Config | nil  Partial config; merged with defaults.
 function M.setup(opts)
   local providers = require("parley.providers")
-  M.config = vim.tbl_deep_extend("force", vim.deepcopy(defaults), { providers = providers.defaults() }, opts or {})
+  local config = vim.tbl_deep_extend("force", vim.deepcopy(defaults), { providers = providers.defaults() }, opts or {})
+  local periodic = require("parley.periodic_refresh")
+  periodic.validate(config.refresh_interval)
+  M.config = config
 
   require("parley.debug").tracing_enable(M.config.debug)
 
@@ -337,6 +350,19 @@ function M.setup(opts)
   -- whose remote matches a registered provider).
   local augroup = vim.api.nvim_create_augroup("parley", { clear = true })
   pcall(vim.api.nvim_del_user_command, "Parley")
+  periodic.setup(M.config.refresh_interval)
+  vim.api.nvim_create_autocmd({ "FocusLost", "FocusGained" }, {
+    group = augroup,
+    callback = function(args)
+      periodic.focus(args.event == "FocusGained")
+    end,
+    desc = "Parley: pause periodic refresh while unfocused",
+  })
+  vim.api.nvim_create_autocmd("VimLeavePre", {
+    group = augroup,
+    callback = periodic.stop,
+    desc = "Parley: stop periodic refresh",
+  })
 
   vim.api.nvim_create_autocmd("BufEnter", {
     group = augroup,

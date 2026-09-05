@@ -13,6 +13,7 @@ local input = require("parley.discussion_window.input")
 local selection = require("parley.discussion_window.selection")
 local window_helpers = require("parley.discussion_window.window")
 local dbg = require("parley.debug")
+local semantics = require("parley.discussion")
 local M = {}
 local INPUT_HEIGHT = 6
 local HIGHLIGHT_NS = vim.api.nvim_create_namespace("parley.discussion_window")
@@ -93,38 +94,7 @@ M._select_reaction = function(items, on_choice)
   }, on_choice)
 end
 
-local PICKER_PREVIEW_WIDTH = 60
-
----@param discussion parley.Discussion
----@return string
-function M._format_discussion_picker_item(discussion)
-  local first = discussion.comments and discussion.comments[1] or nil
-  if not first then
-    return "(no comments) (?)"
-  end
-
-  local body = first.body and first.body.text or ""
-  local first_line = vim.split(body, "\n", { plain = true })[1] or ""
-  first_line = vim.trim(first_line)
-  if first_line == "" then
-    first_line = "(empty)"
-  end
-  if vim.fn.strdisplaywidth(first_line) > PICKER_PREVIEW_WIDTH then
-    first_line = vim.fn.strcharpart(first_line, 0, PICKER_PREVIEW_WIDTH - 1) .. "…"
-  end
-
-  local extras = math.max(0, #discussion.comments - 1)
-  local suffix
-  if extras == 0 then
-    suffix = ""
-  elseif extras == 1 then
-    suffix = " (1 more comment)"
-  else
-    suffix = string.format(" (%d more comments)", extras)
-  end
-
-  return string.format("%s (%s)%s", first_line, first.author, suffix)
-end
+M._format_discussion_picker_item = require("parley.discussion_picker").line_preview
 
 --- Discussion picker hook; replace in tests.
 --- @type fun(items: parley.Discussion[], source_winid: integer|nil,
@@ -222,18 +192,6 @@ local function discussions_for_line(state, cursor_line)
   return hits
 end
 
----@param state { discussions: parley.Discussion[] }
----@param discussion_id string
----@return parley.Discussion|nil
-local function discussion_by_id(state, discussion_id)
-  for _, discussion in ipairs(state.discussions) do
-    if discussion.id == discussion_id then
-      return discussion
-    end
-  end
-  return nil
-end
-
 ---@param bufnr integer
 ---@param instance parley.DiscussionWindowInstance
 ---@param lines string[]
@@ -295,6 +253,40 @@ local function open_discussions(bufnr, discussions, mappings, source_winid, sour
   return true
 end
 
+--- Refresh the selected thread in place, retaining composer text and selection.
+--- @param bufnr integer
+--- @param snapshot table|nil
+function M.refresh_snapshot(bufnr, snapshot)
+  local instance = live_instance(bufnr)
+  local state = discussion_ui_state.get(bufnr)
+  if not instance or not state or not state.current_discussion_id then
+    return
+  end
+  local discussion = snapshot and semantics.find(snapshot, state.current_discussion_id)
+  if not discussion then
+    if instance.input_state == "hidden" then
+      M.close(bufnr)
+    end
+    return
+  end
+  local lines, ranges, title = render.render_lines(
+    { discussion },
+    vim.tbl_extend("force", snapshot.mappings or {}, snapshot.all_mappings or {}),
+    {
+      format_timestamp = format_timestamp,
+      reaction_presentation = reactions.presentation(bufnr),
+    }
+  )
+  local selected = state.selected_comment_id
+  local cursor = vim.api.nvim_win_get_cursor(instance.winid)[1]
+  instance.comment_ranges = ranges
+  write_lines(bufnr, instance, lines)
+  vim.api.nvim_win_set_config(instance.winid, { title = title, title_pos = "center" })
+  local row = selected and ranges[selected] and ranges[selected].start_line or math.min(cursor, math.max(1, #lines))
+  vim.api.nvim_win_set_cursor(instance.winid, { row, 0 })
+  sync_selected_comment(bufnr)
+end
+
 --- Return whether the discussion window is open for `bufnr`.
 ---@param bufnr integer
 ---@return boolean
@@ -325,7 +317,7 @@ end
 
 --- Open the discussion window for the current line in `bufnr`.
 ---@param bufnr integer
----@param opts? { cursor_line?: integer }
+---@param opts? { cursor_line?: integer, on_select?: fun(discussion: parley.Discussion): boolean }
 ---@return boolean
 function M.open_current_line(bufnr, opts)
   opts = opts or {}
@@ -356,11 +348,18 @@ function M.open_current_line(bufnr, opts)
   end
 
   if #discussions == 1 then
+    if opts.on_select then
+      return opts.on_select(discussions[1])
+    end
     return open_discussions(bufnr, discussions, state.mappings or {}, source_winid, cursor_line)
   end
 
   M._select_discussion(discussions, source_winid, function(chosen)
     if not chosen then
+      return
+    end
+    if opts.on_select then
+      opts.on_select(chosen)
       return
     end
     open_discussions(bufnr, { chosen }, state.mappings or {}, source_winid, cursor_line)
@@ -390,16 +389,20 @@ function M.open_discussion(bufnr, discussion_id)
     return false
   end
 
-  local discussion = discussion_by_id(state, discussion_id)
+  local discussion = semantics.find(state, discussion_id)
   if not discussion then
     M.close(bufnr)
     M._notify("Parley discussion not found", vim.log.levels.INFO)
     return false
   end
 
-  local mapping = state.mappings and state.mappings[discussion.id] or nil
+  local mappings = vim.tbl_extend("force", state.mappings or {}, state.all_mappings or {})
+  local mapping = mappings[discussion.id]
   local source_line = mapping and mapping.local_line or nil
-  return open_discussions(bufnr, { discussion }, state.mappings or {}, source_winid, source_line)
+  if state.rel_path and discussion.file ~= state.rel_path then
+    source_line = nil
+  end
+  return open_discussions(bufnr, { discussion }, mappings, source_winid, source_line)
 end
 
 --- Return the first discussion for the current source buffer line.
@@ -411,11 +414,7 @@ function M.current_discussion(bufnr)
   local snapshot = read_service.get_buffer_state(bufnr)
   local discussion_id = ui_state and ui_state.current_discussion_id or nil
   if snapshot and discussion_id then
-    for _, discussion in ipairs(snapshot.discussions or {}) do
-      if discussion.id == discussion_id then
-        return discussion
-      end
-    end
+    return semantics.find(snapshot, discussion_id)
   end
   return nil
 end
@@ -440,7 +439,8 @@ function M.reply_current_line(bufnr)
     return false
   end
 
-  local parent = discussion.comments[#discussion.comments]
+  local _, selected = current_selection(bufnr)
+  local parent = selected or discussion.comments[#discussion.comments]
   if not parent then
     M._notify("Cannot reply to an empty Parley discussion", vim.log.levels.WARN)
     return false

@@ -61,7 +61,7 @@ describe("provider configuration", function()
     local old_factory = registrations[2].factory
     local p = old_factory({ login = "alice", _auth = auth })
     assert.equals("https://configured.example/api/v1/test", arc_transport.api_url(p, "/v1/test"))
-    assert.equals("configured.example", p:cache_identity().host)
+    assert.equals("configured.example", p._host)
     assert.equals(123, arc_transport.transport_config(p).timeout_ms)
     assert.equals(
       321,
@@ -70,10 +70,10 @@ describe("provider configuration", function()
     config.arcanum.host = "next.example"
     config.arcanum.timeout_ms = 456
     catalog.register(deps, config)
-    assert.equals("configured.example", old_factory({ _auth = auth }):cache_identity().host)
+    assert.equals("configured.example", old_factory({ _auth = auth })._host)
     assert.equals(123, arc_transport.transport_config(p).timeout_ms)
     local next_provider = registrations[4].factory({ _auth = auth })
-    assert.equals("next.example", next_provider:cache_identity().host)
+    assert.equals("next.example", next_provider._host)
     assert.equals(456, arc_transport.transport_config(next_provider).timeout_ms)
   end)
 end)

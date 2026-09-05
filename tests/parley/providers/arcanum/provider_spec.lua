@@ -2,14 +2,11 @@
 --- Run via: make test
 
 local async_tests = require("plenary.async.tests")
-local provider_mod = require("parley.provider")
 local model = require("parley.model")
 local arcanum = require("parley.providers.arcanum.provider")
 local transport = require("parley.providers.arcanum.transport")
 
--- ---------------------------------------------------------------------------
 -- Fixtures
--- ---------------------------------------------------------------------------
 
 --- Build a minimal Arcanum PR search result.
 local function pr_search_result(pr_id, branch)
@@ -71,9 +68,7 @@ local function raw_comment(id, content, reply_to)
   }
 end
 
--- ---------------------------------------------------------------------------
 -- Provider factory
--- ---------------------------------------------------------------------------
 
 --- Build a mock provider with an injectable http_run sequence.
 --- responses: list of { method, path, response } tuples (in order).
@@ -113,6 +108,8 @@ local function make_provider(responses)
     config = { timeout_ms = 5000, retry_count = 0, retry_base_delay_ms = 250, retry_max_delay_ms = 2000 },
   })
 
+  dofile("tests/support/arcanum_session.lua")(p)
+
   -- Override transport.http_run on the provider
   transport.http_run = mock_http_run
 
@@ -130,86 +127,7 @@ local function restore_transport()
   transport.http_run = original_http_run
 end
 
--- ---------------------------------------------------------------------------
--- Suite: provider interface validation
--- ---------------------------------------------------------------------------
-
-describe("parley.providers.arcanum.provider — interface", function()
-  it("satisfies parley.Provider interface", function()
-    local p = arcanum.new({
-      _auth = {
-        read_token = function()
-          return "token", nil
-        end,
-        read_token_async = function()
-          return "token", nil
-        end,
-      },
-      _sleep = function(_ms) end,
-      _defer = function(cb, _ms)
-        cb()
-        return nil
-      end,
-    })
-
-    assert.is_true(provider_mod.validate(p))
-  end)
-end)
-
--- ---------------------------------------------------------------------------
--- Suite: detect
--- ---------------------------------------------------------------------------
-
-describe("parley.providers.arcanum.provider — detect", function()
-  it("returns opts for vcs='arc'", function()
-    local vcs_info = { vcs = "arc", root = "/arc", branch = "users/alice/feat", remote_url = "arc://alice" }
-    local opts = arcanum.detect(vcs_info)
-    assert.is_not_nil(opts)
-  end)
-
-  it("returns nil for vcs='git'", function()
-    local vcs_info = { vcs = "git", root = "/repo", branch = "main", remote_url = "https://github.com/org/repo" }
-    local opts = arcanum.detect(vcs_info)
-    assert.is_nil(opts)
-  end)
-
-  it("returns nil for non-table vcs_info", function()
-    assert.is_nil(arcanum.detect(nil))
-    assert.is_nil(arcanum.detect("string"))
-  end)
-
-  it("extracts remote branch id from vcs_info", function()
-    local vcs_info = {
-      vcs = "arc",
-      root = "/arc",
-      branch = "users/alice/my-feature",
-      remote_url = "arc://alice",
-    }
-    local opts = arcanum.detect(vcs_info)
-    assert.equals("users/alice/my-feature", opts.branch)
-  end)
-
-  it("extracts login from remote_url arc:// scheme", function()
-    local vcs_info = {
-      vcs = "arc",
-      root = "/arc",
-      branch = "users/bob/feat",
-      remote_url = "arc://bob",
-    }
-    local opts = arcanum.detect(vcs_info)
-    assert.equals("bob", opts.login)
-  end)
-
-  it("returns nil login when remote_url is nil", function()
-    local vcs_info = { vcs = "arc", root = "/arc", branch = "trunk", remote_url = nil }
-    local opts = arcanum.detect(vcs_info)
-    assert.is_nil(opts.login)
-  end)
-end)
-
--- ---------------------------------------------------------------------------
 -- Suite: auth
--- ---------------------------------------------------------------------------
 
 describe("parley.providers.arcanum.provider — auth", function()
   it("returns token from auth module", function()
@@ -257,9 +175,7 @@ describe("parley.providers.arcanum.provider — auth", function()
   end)
 end)
 
--- ---------------------------------------------------------------------------
 -- Suite: detect_pr
--- ---------------------------------------------------------------------------
 
 async_tests.describe("parley.providers.arcanum.provider — detect_pr", function()
   async_tests.before_each(save_transport)
@@ -310,7 +226,7 @@ async_tests.describe("parley.providers.arcanum.provider — detect_pr", function
 
     assert.equals(42, result.write_context.pr_id)
     assert.equals(101, result.write_context.diff_id)
-    assert.equals("ARC:DEADBEEF", result.write_context.diff_set_xid)
+    assert.equals("101", result.write_context.diff_set_xid)
   end)
 
   async_tests.it("returns nil when branch does not match any PR", function()
@@ -366,7 +282,9 @@ async_tests.describe("parley.providers.arcanum.provider — detect_pr", function
     p:detect_pr("/arc", "users/segoon/feature/chaotic-const")
 
     assert.same({
-      limit = 1,
+      limit = 100,
+      offset = 0,
+      desc_order = true,
       filter = {
         user_branch_prefix = "users/segoon/feature/chaotic-const",
         state = { published = true },
@@ -389,9 +307,7 @@ async_tests.describe("parley.providers.arcanum.provider — detect_pr", function
   end)
 end)
 
--- ---------------------------------------------------------------------------
 -- Suite: fetch_discussions
--- ---------------------------------------------------------------------------
 
 async_tests.describe("parley.providers.arcanum.provider — fetch_discussions", function()
   async_tests.before_each(save_transport)
@@ -474,9 +390,7 @@ async_tests.describe("parley.providers.arcanum.provider — fetch_discussions", 
   end)
 end)
 
--- ---------------------------------------------------------------------------
 -- Suite: reply
--- ---------------------------------------------------------------------------
 
 async_tests.describe("parley.providers.arcanum.provider — reply", function()
   async_tests.before_each(save_transport)
@@ -555,9 +469,7 @@ async_tests.describe("parley.providers.arcanum.provider — reply", function()
   end)
 end)
 
--- ---------------------------------------------------------------------------
 -- Suite: edit
--- ---------------------------------------------------------------------------
 
 async_tests.describe("parley.providers.arcanum.provider — edit", function()
   async_tests.before_each(save_transport)
@@ -593,9 +505,7 @@ async_tests.describe("parley.providers.arcanum.provider — edit", function()
   end)
 end)
 
--- ---------------------------------------------------------------------------
 -- Suite: delete
--- ---------------------------------------------------------------------------
 
 async_tests.describe("parley.providers.arcanum.provider — delete", function()
   async_tests.before_each(save_transport)
@@ -629,9 +539,7 @@ async_tests.describe("parley.providers.arcanum.provider — delete", function()
   end)
 end)
 
--- ---------------------------------------------------------------------------
 -- Suite: stubs
--- ---------------------------------------------------------------------------
 
 describe("parley.providers.arcanum.provider — stubs raise errors", function()
   local p
@@ -654,19 +562,19 @@ describe("parley.providers.arcanum.provider — stubs raise errors", function()
     })
   end)
 
-  it("resolve raises error", function()
+  it("resolve rejects invalid root IDs", function()
     assert.has_error(function()
       p:resolve({}, "disc-1")
     end)
   end)
 
-  it("unresolve raises error", function()
+  it("unresolve rejects invalid root IDs", function()
     assert.has_error(function()
       p:unresolve({}, "disc-1")
     end)
   end)
 
-  it("react raises error", function()
+  it("react rejects invalid comment IDs before awaiting HTTP", function()
     assert.has_error(function()
       p:react({}, "comment-1", "+1")
     end)

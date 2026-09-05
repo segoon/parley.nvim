@@ -23,7 +23,7 @@ describe("provider cache identities", function()
       assert.is_not.equals(base.scope, snapshot({ [field] = "different" }).scope)
     end
     assert.is_nil(base.opts.repository)
-    assert.equals("reviews-v2", keys.pr(base, "a/b").provider)
+    assert.equals("reviews-v3", keys.pr(base, "a/b").provider)
     assert.is_not.equals(keys.pr(base, "a/b").subkey, keys.pr(base, "a_b").subkey)
     assert.is_not.equals(keys.pr(base, "42").subkey, keys.discussions(base, "42").subkey)
   end)

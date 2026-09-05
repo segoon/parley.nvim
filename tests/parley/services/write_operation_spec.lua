@@ -65,6 +65,23 @@ for _, mode in ipairs({ "submit", "action" }) do
       end
       return ops.run_action(1, nil, starter, texts)
     end
+    it("preserves uncertain write outcomes in the visible failure message", function()
+      local idle
+      instance.set_idle = function(message)
+        idle = message
+      end
+      local message = "Check the review before retrying; the change may have been sent."
+      run(function(callback)
+        callback({ ok = false, uncertain = true, cancelled = true, err = message })
+        return { cancel = function() end }
+      end)
+      if mode == "submit" then
+        assert.matches(message, idle, 1, true)
+        assert.equals("keep me", composer.get(1).draft)
+      else
+        assert.equals(message, notices[1])
+      end
+    end)
     it("allows retry after GitHub detects a missing executable", function()
       transport._gh_available = nil
       transport._executable = function()

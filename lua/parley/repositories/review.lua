@@ -59,7 +59,7 @@ end
 local function build_summary(discussions)
   local unresolved_count = 0
   for _, discussion in ipairs(discussions) do
-    if discussion.resolved ~= true then
+    if require("parley.model").is_open_issue(discussion) then
       unresolved_count = unresolved_count + 1
     end
   end
@@ -312,7 +312,8 @@ end
 --- Refresh review data for the given buffer. Must be called from within a
 --- plenary.async coroutine (network + disk I/O).
 --- @param bufnr integer
---- @param opts? { force?: boolean }
+--- @param opts? { force?: boolean, background?: boolean, expected_key?: string,
+--- expected_temporary?: boolean, expected_vcs_info?: parley.VcsInfo }
 --- @return table|nil
 function M.refresh(bufnr, opts)
   opts = opts or {}
@@ -324,7 +325,12 @@ function M.refresh(bufnr, opts)
     return nil
   end
 
-  local provider_snapshot = provider_repository.refresh(bufnr)
+  local prepared, provider_snapshot = pcall(provider_repository.refresh, bufnr)
+  if not prepared then
+    publish_to_bufnr(bufnr, nil)
+    M.detach(bufnr, true)
+    error(provider_snapshot, 0)
+  end
   if not provider_snapshot then
     publish_to_bufnr(bufnr, nil)
     M.detach(bufnr, true)
@@ -346,10 +352,24 @@ function M.refresh(bufnr, opts)
     return nil
   end
 
+  if opts.background then
+    local expected = opts.expected_key and M._reviews[opts.expected_key]
+    -- Temporary identities are renewed on provider construction; only the same
+    -- previously loaded checkout context may continue into a new temporary scope.
+    local same_temporary = expected
+      and expected.branch == ctx.vcs_info.branch
+      and opts.expected_temporary
+      and not provider_snapshot.persistent
+      and vim.deep_equal(opts.expected_vcs_info, ctx.vcs_info)
+    if not expected or not expected.review or (review_key ~= opts.expected_key and not same_temporary) then
+      publish_to_bufnr(bufnr, nil)
+      M.detach(bufnr, true)
+      return nil
+    end
+  end
   register_bufnr(bufnr, review_key)
-
   if M._in_flight[review_key] then
-    if opts.force then
+    if opts.force and not opts.background then
       M._pending_force[review_key] = true
     end
     local existing = M._reviews[review_key]
@@ -447,7 +467,8 @@ function M.refresh(bufnr, opts)
 end
 
 --- @param bufnr integer
---- @param opts? { force?: boolean }
+--- @param opts? { force?: boolean, background?: boolean, expected_key?: string,
+--- expected_temporary?: boolean, expected_vcs_info?: parley.VcsInfo }
 function M.refresh_async(bufnr, opts)
   async.run(function()
     M.refresh(bufnr, opts)
@@ -556,33 +577,12 @@ function M.subscribe(bufnr, cb)
   end
 end
 
---- Seed both shared and per-file data from a single composite snapshot.
---- @param bufnr integer
---- @param snapshot table|nil  same shape as the old _entries[bufnr]
---- @param review_key? string  defaults to "test/repository/branch"
-function M._seed(bufnr, snapshot, review_key)
-  review_key = review_key or "test/repository/branch"
-  register_bufnr(bufnr, review_key)
-  if not snapshot then
-    M._reviews[review_key] = nil
-    M._views[bufnr] = nil
-    return
-  end
-  M._reviews[review_key] = {
-    status = snapshot.status or "ready",
-    stale = snapshot.stale or false,
-    review = snapshot.review,
-    pr = snapshot.pr or (snapshot.review and snapshot.review.pr or nil),
-    all_discussions = snapshot.all_discussions or {},
-    summary = snapshot.summary or build_summary(snapshot.all_discussions or {}),
-    error = snapshot.error,
-    head_sha = snapshot.head_sha or "",
-  }
-  M._views[bufnr] = {
-    discussions = snapshot.discussions or {},
-    mappings = snapshot.mappings or {},
-    all_mappings = snapshot.all_mappings or snapshot.mappings or {},
-  }
-end
+M._seed = require("parley.repositories.review_seed")(M, register_bufnr, build_summary)
 
+--- @param bufnr integer
+--- @return table|nil Shared review key, read activity, and associated buffers.
+function M.activity(bufnr)
+  local key = M._bufnr_key[bufnr]
+  return key and { key = key, in_flight = M._in_flight[key] == true, buffers = vim.tbl_keys(M._key_bufnrs[key] or {}) }
+end
 return M
