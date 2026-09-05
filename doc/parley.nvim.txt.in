@@ -280,9 +280,29 @@ With the built-in statusline: >vim
 
 Provider defaults are merged separately; see |parley-providers|.
 
-`refresh_interval` is accepted but currently has no effect. Periodic refresh is
-not implemented. Buffer entry may reuse cached data; `:Parley refresh` forces a
-fetch. Writes refresh remote state, and local edits update mappings separately.
+Periodic refresh: ~
+
+`refresh_interval` defaults to 300 seconds. Set it to 0 to disable polling; other
+values must be nonnegative whole seconds whose milliseconds fit a safe integer.
+Invalid settings are rejected before replacing the active setup/configuration.
+
+Each round refreshes already-loaded reviews visible in the current tab, including
+source files represented by discussion/input windows. Buffers sharing a review
+produce one refresh. Reviews with active reads or writes in any associated buffer
+are skipped. Hidden tabs/buffers and branches without active reviews are not polled.
+
+Polling pauses on FocusLost. The first round waits a full interval after setup or
+FocusGained; later rounds wait a full interval after the previous round completes.
+Reviews run sequentially, and missed rounds do not accumulate. Repeated setup
+replaces the timer; disabling polling and VimLeavePre close it. Already-started
+reads may finish, but obsolete callbacks cannot resume an old schedule.
+
+Timer refreshes do not display progress popups or error notifications. Existing
+snapshot, identity, and draft-preservation rules still apply. A failed active
+review can retry next round; failed preparation may clear obsolete state, requiring
+buffer entry or manual refresh to load it again. `:Parley refresh` retains explicit
+progress/error reporting. Buffer entry still discovers reviews, writes refresh
+remote state, and local edits update mappings separately.
 
 ==============================================================================
 9. HIGHLIGHTS                                        *parley-highlights*

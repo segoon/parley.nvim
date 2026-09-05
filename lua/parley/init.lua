@@ -11,7 +11,7 @@ local M = {}
 
 --- Default configuration values.
 --- @class parley.Config
---- @field refresh_interval integer  Reserved interval in seconds; currently inactive (no periodic refresh)
+--- @field refresh_interval integer  Seconds between visible-review polling rounds; 0 disables periodic refresh
 --- @field cache_dir         string  Directory for disk-cached API responses
 --- @field signs             parley.SignsConfig
 --- @field virtual_text      parley.VirtualTextConfig
@@ -55,7 +55,7 @@ local M = {}
 
 --- @type parley.Config
 local defaults = {
-  refresh_interval = 300, -- Reserved; periodic refresh is not implemented
+  refresh_interval = 300, -- Seconds between background refresh rounds
   cache_dir = vim.fn.stdpath("cache") .. "/parley",
   debug = false,
   telescope = true,
@@ -288,7 +288,10 @@ end
 --- @param opts parley.Config | nil  Partial config; merged with defaults.
 function M.setup(opts)
   local providers = require("parley.providers")
-  M.config = vim.tbl_deep_extend("force", vim.deepcopy(defaults), { providers = providers.defaults() }, opts or {})
+  local config = vim.tbl_deep_extend("force", vim.deepcopy(defaults), { providers = providers.defaults() }, opts or {})
+  local periodic = require("parley.periodic_refresh")
+  periodic.validate(config.refresh_interval)
+  M.config = config
 
   require("parley.debug").tracing_enable(M.config.debug)
 
@@ -347,6 +350,19 @@ function M.setup(opts)
   -- whose remote matches a registered provider).
   local augroup = vim.api.nvim_create_augroup("parley", { clear = true })
   pcall(vim.api.nvim_del_user_command, "Parley")
+  periodic.setup(M.config.refresh_interval)
+  vim.api.nvim_create_autocmd({ "FocusLost", "FocusGained" }, {
+    group = augroup,
+    callback = function(args)
+      periodic.focus(args.event == "FocusGained")
+    end,
+    desc = "Parley: pause periodic refresh while unfocused",
+  })
+  vim.api.nvim_create_autocmd("VimLeavePre", {
+    group = augroup,
+    callback = periodic.stop,
+    desc = "Parley: stop periodic refresh",
+  })
 
   vim.api.nvim_create_autocmd("BufEnter", {
     group = augroup,

@@ -12,6 +12,7 @@ a.describe("review identity lifecycle", function()
   local saved, ctx, provider, disk, writes, reads
   a.before_each(function()
     saved = {
+      periodic_defer = require("parley.periodic_refresh")._defer,
       context_get = contexts.get,
       context_refresh = contexts.refresh,
       specs = registry.registered(),
@@ -71,6 +72,11 @@ a.describe("review identity lifecycle", function()
     end
   end)
   a.after_each(function()
+    local periodic = require("parley.periodic_refresh")
+    periodic.stop()
+    periodic._defer = saved.periodic_defer
+    require("parley.discussion_window").close(1)
+    require("parley.services.read").clear_buffer_state(1)
     contexts.get, contexts.refresh = saved.context_get, saved.context_refresh
     registry.reset()
     for _, spec in ipairs(saved.specs) do
@@ -91,6 +97,34 @@ a.describe("review identity lifecycle", function()
     end
   end)
 
+  a.it("does not queue a background force refresh behind an active fetch", function()
+    review.refresh(1)
+    local key = review.activity(1).key
+    review._in_flight[key] = true
+    review.refresh(1, { force = true, background = true, expected_key = key })
+    assert.equals(1, #provider.calls.detect_pr)
+    assert.is_nil(review._pending_force[key])
+    review.refresh(1, { force = true })
+    assert.is_true(review._pending_force[key])
+    review._in_flight[key], review._pending_force[key] = nil, nil
+  end)
+  a.it("does not discover a new branch from an old polling candidate", function()
+    review.refresh(1)
+    local key = review.activity(1).key
+    ctx.vcs_info.branch = "new-branch"
+    assert.is_nil(review.refresh(1, { force = true, background = true, expected_key = key }))
+    assert.equals(1, #provider.calls.detect_pr)
+    assert.is_nil(review.get(1))
+  end)
+  a.it("does not discover a review after the active PR disappears", function()
+    review.refresh(1)
+    local key = review.activity(1).key
+    provider.state.pr = nil
+    assert.is_nil(review.refresh(1, { force = true, background = true, expected_key = key }))
+    local calls = #provider.calls.detect_pr
+    assert.is_nil(review.refresh(1, { force = true, background = true, expected_key = key }))
+    assert.equals(calls, #provider.calls.detect_pr)
+  end)
   a.it("keeps live reviews available with no persistent identity and no disk calls", function()
     provider.cache_identity = function()
       return nil
@@ -171,5 +205,50 @@ a.describe("review identity lifecycle", function()
     assert.has_error(function()
       providers.refresh(1)
     end)
+  end)
+  a.it("polls a temporary-identity review and preserves a real discussion draft", function()
+    local model = require("parley.model")
+    local window = require("parley.discussion_window")
+    local read = require("parley.services.read")
+    local periodic = require("parley.periodic_refresh")
+    local clock = dofile("tests/support/clock.lua").new()
+    periodic._defer = clock.defer
+    provider.cache_identity = function()
+      return nil
+    end
+    provider.state.discussions = {
+      model.new_discussion({
+        id = "42",
+        anchor = { kind = "general" },
+        issue_state = "open",
+        comments = {
+          model.new_comment({
+            id = "42",
+            author = "a",
+            created_at = "",
+            updated_at = "",
+            body = { text = "old body", format = "markdown" },
+          }),
+        },
+      }),
+    }
+    vim.api.nvim_set_current_buf(1)
+    review.refresh(1)
+    assert.is_true(window.open_discussion(1, "42"))
+    window.show_reply_input(1, { parent_comment_id = "42", status = "Draft", on_submit = function() end })
+    local instance = window._instances[1]
+    local input, win = instance.input_bufnr, instance.winid
+    vim.api.nvim_buf_set_lines(input, 0, -1, false, { "unsent reply" })
+    provider.state.discussions[1].comments[1].body.text = "updated remote body"
+    periodic.setup(1)
+    clock.advance(1000)
+    assert.is_true(vim.wait(500, function()
+      return #provider.calls.fetch_discussions == 2 and not read.is_refreshing(1)
+    end))
+    assert.equals(win, window._instances[1].winid)
+    assert.same({ "unsent reply" }, vim.api.nvim_buf_get_lines(input, 0, -1, false))
+    local text = table.concat(vim.api.nvim_buf_get_lines(instance.bufnr, 0, -1, false), "\n")
+    assert.matches("updated remote body", text)
+    assert.equals("42", require("parley.ui_states.discussion").get(1).current_discussion_id)
   end)
 end)

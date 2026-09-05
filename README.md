@@ -191,7 +191,8 @@ Common options:
 
 ```lua
 require("parley").setup({
-  telescope = false,               -- disable Telescope extensions
+  refresh_interval = 300,          -- seconds between polling rounds; 0 disables
+  telescope = false,              -- disable Telescope extensions
   keymaps = {
     buf_next    = "]c",   -- "" to disable
     buf_prev    = "[c",
@@ -202,9 +203,21 @@ require("parley").setup({
 ```
 
 See `:help parley-configuration` for the full reference with all defaults.
-`refresh_interval` is accepted but currently inactive; periodic refresh is not
-implemented. Refresh runs on buffer entry, on demand, and after writes. Buffer
-entry may reuse cached data; `:Parley refresh` forces a fetch.
+`refresh_interval` defaults to 300 seconds; set it to `0` to disable polling.
+Positive values must be whole seconds within the timer range. Polling refreshes
+already-loaded reviews visible in the current tab, including discussion/input
+windows, once per shared review. It skips reviews with an active read or write.
+
+Polling pauses when Neovim loses focus. The first round starts a full interval
+after setup or focus returns; subsequent rounds wait a full interval after the
+previous round finishes. Reviews are refreshed sequentially without catch-up bursts.
+Hidden reviews and branches without an active PR are not polled. Buffer entry and
+`:Parley refresh` still discover reviews, and writes still refresh remote state.
+
+Background refresh is quiet: no progress popups or error notifications. Available
+review data and drafts remain visible, with existing identity checks still applied.
+Use `:Parley refresh` for an explicit progress-enabled refresh and error reporting.
+Repeated `setup()` replaces the polling schedule; editor shutdown stops it.
 
 Requests to GitHub are made through the standard `gh` CLI.
 Arcanum uses asynchronous HTTPS. Its default request budget is 10 seconds,
@@ -274,7 +287,6 @@ provider-independent behavior tests.
 
 - `diffview.nvim` integration
 - GitHub thread resolution/reopening via GraphQL
-- periodic refresh scheduling
 - optional Arcanum drafts/publication, suggestions, and additional comment anchors
 
 See [TODO.md](TODO.md) for remaining work and

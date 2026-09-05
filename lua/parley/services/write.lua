@@ -514,4 +514,10 @@ require("parley.services.comment_actions")(M, operations, resolve_write_context,
 require("parley.services.issue_actions")(M, operations)
 require("parley.services.review_actions")(M, operations)
 
+--- @param bufnr integer
+--- @return boolean
+function M.is_busy(bufnr)
+  return M._operations[bufnr] ~= nil
+end
+
 return M

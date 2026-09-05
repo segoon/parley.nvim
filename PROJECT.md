@@ -115,9 +115,18 @@ persistent caching; otherwise review state remains isolated and temporary.
 
 ### Refresh and transport
 
-Refresh runs asynchronously on buffer entry, explicit `:Parley refresh`, and after
-writes. Cache reuse can avoid a network fetch on buffer entry. Periodic refresh
-is not implemented: `refresh_interval` is accepted but currently has no effect.
+Refresh runs asynchronously on buffer entry, explicit `:Parley refresh`, after
+writes, and in periodic rounds. `refresh_interval` defaults to 300 seconds; `0`
+disables polling. Each round refreshes already-loaded reviews visible in the
+current tab once, sequentially, skipping reviews with active reads or writes.
+Discussion/composer windows count toward source-review visibility. Branches
+without an active review are discovered on buffer entry or manual refresh.
+
+Polling pauses while Neovim is unfocused. Setup, focus regain, and completed
+rounds each wait a full interval before another round. Missed intervals do not
+accumulate. Background errors are quiet; snapshots and drafts retain their existing
+failure/identity protections. Repeated setup replaces the timer and shutdown stops
+it. Manual refresh keeps its progress and error reporting.
 
 All remote operations are asynchronous. Arcanum requests have a shared per-process
 host/credential queue, request spacing, 429 cooldowns, and a deadline covering
@@ -152,8 +161,7 @@ they do not verify authentication or deployment compatibility over the network.
   and inline composition in its diff buffers. Context detection exists, but the
   current review services accept only regular file buffers. Revision/side mapping
   and float placement need a separately designed and tested integration.
-- Periodic refresh needs a real scheduling lifecycle before `refresh_interval`
-  can control polling. GitHub resolution needs GraphQL integration.
+- GitHub resolution needs GraphQL integration.
 - Optional Arcanum extensions include drafts/publication, old-side or whole-file
   comment creation, and suggestions. Reading existing threads does not imply
   these creation workflows are supported.

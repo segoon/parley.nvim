@@ -22,7 +22,7 @@ and token authorization remain unverified.
 | Reactions | Thumbs up/down and heart; removal of other viewer-owned codes | AI comments permit one viewer reaction; replacement requires explicit removal |
 | Review actions | Ship, sticky ship, unship, block merge, unblock merge | Confirmation and active-diff recheck; no generic review message transaction |
 | Review status | Actual reviewer verdicts and remaining approval requirements | Failed/malformed reads yield unknown and disable review actions, while discussions remain readable |
-| Refresh and caching | Async buffer-entry/manual/write refresh; versioned account-isolated disk caches | No periodic polling; `refresh_interval` is currently inactive |
+| Refresh and caching | Async buffer-entry/manual/write and periodic visible-review refresh; versioned account-isolated caches | Polling pauses while unfocused, skips busy reviews, and does not discover new PRs |
 | Diffview | Context detection exists | Review services currently support regular buffers only |
 
 See [README](README.md) for setup and [the help template](doc/parley.nvim.txt.in)
@@ -122,8 +122,8 @@ an accepted write: check remote state before retrying an uncertain outcome.
 
 ## Validation and evidence
 
-The current implementation and documentation passed **1,049 tests, 0 failures/errors**,
-plus `make format`, `make format-check`, and `make lint` (187 Lua files, zero lint
+The current implementation and documentation passed **1,073 tests, 0 failures/errors**,
+plus `make format`, `make format-check`, and `make lint` (192 Lua files, zero lint
 warnings/errors). Generated help was checked in a temporary copy, including tag
 generation and reference resolution; the repository's generated help file was not
 edited. Changed Lua files remain within 600 lines.
@@ -159,14 +159,23 @@ this compatibility work.
 
 The eight-item compatibility backlog is complete. Next work is explicitly separate:
 
-- Design and implement Diffview integration and periodic refresh scheduling.
+- Design and implement Diffview integration.
 - Add optional Arcanum drafts/publication, suggestions, and additional creation anchors.
 - Validate deployed API behavior and permissions with representative environments.
 
-Documentation reconciliation found misplaced Arcanum host rules, stale cache-version
-text, a stale statusline help reference, and claims of active timer/Diffview support. These are corrected in the main
-documentation. Command/help and provider-capability contracts remain test-checked;
-behavioral prose is checked against implementation during changes.
+Periodic refresh is implemented as a follow-up: `refresh_interval` defaults to
+300 seconds, with 0 disabling polling. Only active reviews visible in the current
+tab are polled, once per shared review, including discussion/composer source files.
+Rounds are sequential and quiet, skip busy reads/writes, and pause on focus loss.
+Setup/focus regain and completed rounds wait a full interval. Timer replacement,
+shutdown, and generation guards prevent obsolete callbacks from restarting work.
+
+Implementation difficulties: early returns in the read service did not complete
+callbacks, which could leave a polling round stuck. Completion is now exactly once,
+including preparation failures. Background refresh also needs to distinguish a
+changed review from a custom provider's renewed temporary identity; checkout and
+branch checks preserve uncached live reviews without polling a newly selected branch.
+Regression tests cover these cases and real discussion-draft preservation.
 
 ### Where to report
 

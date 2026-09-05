@@ -11,7 +11,6 @@
 
 ## Refresh and transport
 
-- Implement periodic refresh scheduling; `refresh_interval` is currently inactive
 - Broader GitHub `X-RateLimit-*`, 429, and 403 handling
 - Review consistency of setup options across integrations
 
@@ -35,3 +34,6 @@ explicit review actions, and documentation reconciliation.
 
 Current behavior and validation limits are described in ARCANUM_COMPATIBILITY.md.
 Completed mocked validation does not replace the live compatibility work above.
+
+Periodic refresh is implemented: visible active reviews, per-review deduplication,
+quiet sequential rounds, focus pause/resume, and timer cleanup on setup/shutdown.

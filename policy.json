@@ -254,7 +254,9 @@
         "lua/parley/services/comment_actions.lua",
         "lua/parley/services/issue_actions.lua",
         "lua/parley/review_actions.lua",
-        "lua/parley/services/review_actions.lua"
+        "lua/parley/services/review_actions.lua",
+        "lua/parley/periodic_refresh.lua",
+        "lua/parley/repositories/review_seed.lua"
       ],
       "capabilities": [
         "ui_direct",
