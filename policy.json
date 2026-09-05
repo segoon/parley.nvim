@@ -1,47 +1,5 @@
 {
-  "version": 1,
-  "source_files": [
-    "lua/parley/anchor.lua",
-    "lua/parley/buffer_context.lua",
-    "lua/parley/cache.lua",
-    "lua/parley/debug.lua",
-    "lua/parley/discussion_window.lua",
-    "lua/parley/discussion_window/input.lua",
-    "lua/parley/discussion_window/render.lua",
-    "lua/parley/discussion_window/selection.lua",
-    "lua/parley/discussion_window/window.lua",
-    "lua/parley/health.lua",
-    "lua/parley/http.lua",
-    "lua/parley/init.lua",
-    "lua/parley/mock_provider.lua",
-    "lua/parley/model.lua",
-    "lua/parley/nav.lua",
-    "lua/parley/progress_popup.lua",
-    "lua/parley/provider.lua",
-    "lua/parley/providers/github/auth.lua",
-    "lua/parley/providers/github/provider.lua",
-    "lua/parley/reaction_picker_window.lua",
-    "lua/parley/registry.lua",
-    "lua/parley/repositories/context.lua",
-    "lua/parley/repositories/provider.lua",
-    "lua/parley/repositories/review.lua",
-    "lua/parley/runtime/await.lua",
-    "lua/parley/runtime/fs.lua",
-    "lua/parley/runtime/ui.lua",
-    "lua/parley/services/read.lua",
-    "lua/parley/services/write.lua",
-    "lua/parley/signs.lua",
-    "lua/parley/statusline.lua",
-    "lua/parley/telescope.lua",
-    "lua/parley/timestamp.lua",
-    "lua/parley/ui_states/composer.lua",
-    "lua/parley/ui_states/discussion.lua",
-    "lua/parley/ui_states/progress.lua",
-    "lua/parley/vcs.lua",
-    "lua/telescope/_extensions/parley_discussions.lua",
-    "lua/telescope/_extensions/parley_discussions_file.lua",
-    "plugin/parley.lua"
-  ],
+  "version": 2,
   "capabilities": {
     "ui_direct": {
       "functions": [
@@ -82,7 +40,11 @@
         "vim.api.nvim_tabpage_list_wins",
         "vim.api.nvim_buf_is_valid",
         "vim.api.nvim_win_is_valid",
-        "vim.bo"
+        "vim.bo",
+        "vim.api.nvim_list_bufs",
+        "vim.api.nvim_buf_is_loaded",
+        "vim.api.nvim_buf_get_lines",
+        "vim.api.nvim_buf_get_changedtick"
       ]
     },
     "fs_async": {
@@ -150,15 +112,26 @@
       "functions": [
         "vim.fn.has"
       ]
+    },
+    "event_wait": {
+      "functions": [
+        "vim.wait"
+      ]
+    },
+    "ui_notify": {
+      "functions": [
+        "vim.notify"
+      ]
     }
   },
   "layers": {
     "core": {
       "modules": [
+        "lua/parley/discussion_entries.lua",
+        "lua/parley/discussion_window/render.lua",
         "lua/parley/model.lua",
         "lua/parley/provider.lua",
-        "lua/parley/registry.lua",
-        "lua/parley/discussion_window/render.lua"
+        "lua/parley/registry.lua"
       ],
       "capabilities": [],
       "depends": []
@@ -208,14 +181,15 @@
     },
     "infra": {
       "modules": [
-        "lua/parley/debug.lua",
-        "lua/parley/http.lua",
-        "lua/parley/cache.lua",
-        "lua/parley/vcs.lua",
         "lua/parley/anchor.lua",
         "lua/parley/buffer_context.lua",
-        "lua/parley/providers/github/auth.lua",
-        "lua/parley/providers/github/provider.lua"
+        "lua/parley/cache.lua",
+        "lua/parley/cache_identity.lua",
+        "lua/parley/debug.lua",
+        "lua/parley/http.lua",
+        "lua/parley/local_content.lua",
+        "lua/parley/vcs.lua",
+        "lua/parley/vcs/adapters.lua"
       ],
       "capabilities": [
         "buffer_inspect",
@@ -226,7 +200,9 @@
         "json",
         "env_read",
         "path_helpers",
-        "network_curl"
+        "network_curl",
+        "fs_async",
+        "host_query"
       ],
       "depends": [
         "core",
@@ -237,29 +213,37 @@
     },
     "app": {
       "modules": [
-        "plugin/parley.lua",
+        "lua/parley/async_operation.lua",
+        "lua/parley/discussion_window.lua",
+        "lua/parley/discussion_window/input.lua",
+        "lua/parley/discussion_window/new_comment.lua",
+        "lua/parley/discussion_window/selection.lua",
+        "lua/parley/discussion_window/window.lua",
         "lua/parley/init.lua",
         "lua/parley/mock_provider.lua",
-        "lua/parley/discussion_window.lua",
-        "lua/parley/discussion_window/selection.lua",
-        "lua/parley/discussion_window/input.lua",
-        "lua/parley/discussion_window/window.lua",
+        "lua/parley/nav.lua",
+        "lua/parley/progress_popup.lua",
+        "lua/parley/quickfix.lua",
+        "lua/parley/reaction_picker_window.lua",
+        "lua/parley/reactions.lua",
+        "lua/parley/repositories/context.lua",
+        "lua/parley/repositories/local_mappings.lua",
+        "lua/parley/repositories/provider.lua",
+        "lua/parley/repositories/review.lua",
+        "lua/parley/repositories/review_cache.lua",
+        "lua/parley/repositories/review_keys.lua",
+        "lua/parley/services/read.lua",
+        "lua/parley/services/write.lua",
+        "lua/parley/services/write_operation.lua",
         "lua/parley/signs.lua",
         "lua/parley/statusline.lua",
         "lua/parley/telescope.lua",
-        "lua/parley/services/read.lua",
-        "lua/parley/services/write.lua",
-        "lua/parley/repositories/review.lua",
-        "lua/parley/repositories/provider.lua",
-        "lua/parley/repositories/context.lua",
-        "lua/parley/reaction_picker_window.lua",
-        "lua/parley/progress_popup.lua",
-        "lua/parley/nav.lua",
+        "lua/parley/ui_states/composer.lua",
         "lua/parley/ui_states/discussion.lua",
         "lua/parley/ui_states/progress.lua",
-        "lua/parley/ui_states/composer.lua",
         "lua/telescope/_extensions/parley_discussions.lua",
-        "lua/telescope/_extensions/parley_discussions_file.lua"
+        "lua/telescope/_extensions/parley_discussions_file.lua",
+        "plugin/parley.lua"
       ],
       "capabilities": [
         "ui_direct",
@@ -274,7 +258,8 @@
         "core",
         "time_utils",
         "runtime_ui",
-        "infra"
+        "infra",
+        "providers"
       ]
     },
     "diagnostics": {
@@ -286,11 +271,64 @@
         "buffer_inspect",
         "path_helpers",
         "host_query",
-        "fs_read_blocking",
-        "process_blocking"
+        "event_wait"
       ],
       "depends": [
-        "infra"
+        "infra",
+        "core",
+        "app"
+      ]
+    },
+    "providers": {
+      "modules": [
+        "lua/parley/providers/arcanum/auth.lua",
+        "lua/parley/providers/arcanum/cache_identity.lua",
+        "lua/parley/providers/arcanum/config.lua",
+        "lua/parley/providers/arcanum/descriptor.lua",
+        "lua/parley/providers/arcanum/diagnostics.lua",
+        "lua/parley/providers/arcanum/mapping.lua",
+        "lua/parley/providers/arcanum/metadata.lua",
+        "lua/parley/providers/arcanum/provider.lua",
+        "lua/parley/providers/arcanum/reactions.lua",
+        "lua/parley/providers/arcanum/transport.lua",
+        "lua/parley/providers/arcanum/vcs_detector.lua",
+        "lua/parley/providers/comment_target.lua",
+        "lua/parley/providers/github/auth.lua",
+        "lua/parley/providers/github/cache_identity.lua",
+        "lua/parley/providers/github/config.lua",
+        "lua/parley/providers/github/descriptor.lua",
+        "lua/parley/providers/github/diagnostics.lua",
+        "lua/parley/providers/github/mapping.lua",
+        "lua/parley/providers/github/metadata.lua",
+        "lua/parley/providers/github/provider.lua",
+        "lua/parley/providers/github/reactions.lua",
+        "lua/parley/providers/github/transport.lua",
+        "lua/parley/providers/github/vcs_detector.lua",
+        "lua/parley/providers/init.lua",
+        "lua/parley/providers/vcs.lua",
+        "lua/parley/providers/vcs/arc.lua",
+        "lua/parley/providers/vcs/git.lua"
+      ],
+      "capabilities": [
+        "buffer_inspect",
+        "fs_read_blocking",
+        "process_async",
+        "ui_timers",
+        "time",
+        "json",
+        "env_read",
+        "path_helpers",
+        "network_curl",
+        "fs_async",
+        "host_query",
+        "ui_notify"
+      ],
+      "depends": [
+        "core",
+        "infra",
+        "runtime_ui",
+        "runtime_async",
+        "runtime_fs"
       ]
     }
   }

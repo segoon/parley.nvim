@@ -53,19 +53,6 @@ local M = {}
 --- @field review_next string  Jump to next comment in the whole review
 --- @field review_prev string  Jump to previous comment in the whole review
 
---- @class parley.GitHubProviderConfig
---- @field timeout_ms integer
---- @field retry_count integer
---- @field retry_base_delay_ms integer
---- @field retry_max_delay_ms integer
-
---- @class parley.ArcanumProviderConfig
---- @field timeout_ms integer
---- @field retry_count integer
---- @field retry_base_delay_ms integer
---- @field retry_max_delay_ms integer
---- @field host string  Arcanum API hostname (default: "arcanum.yandex.net")
-
 --- @type parley.Config
 local defaults = {
   refresh_interval = 300, -- 5 minutes
@@ -103,21 +90,7 @@ local defaults = {
     review_next = "]C",
     review_prev = "[C",
   },
-  providers = {
-    github = {
-      timeout_ms = 5000,
-      retry_count = 2,
-      retry_base_delay_ms = 250,
-      retry_max_delay_ms = 2000,
-    },
-    arcanum = {
-      timeout_ms = 10000,
-      retry_count = 2,
-      retry_base_delay_ms = 250,
-      retry_max_delay_ms = 2000,
-      host = "arcanum.yandex.net",
-    },
-  },
+  providers = {},
 }
 
 --- Active (merged) configuration. Nil until setup() is called.
@@ -304,7 +277,8 @@ end
 ---
 --- @param opts parley.Config | nil  Partial config; merged with defaults.
 function M.setup(opts)
-  M.config = vim.tbl_deep_extend("force", defaults, opts or {})
+  local providers = require("parley.providers")
+  M.config = vim.tbl_deep_extend("force", vim.deepcopy(defaults), { providers = providers.defaults() }, opts or {})
 
   require("parley.debug").tracing_enable(M.config.debug)
 
@@ -322,33 +296,8 @@ function M.setup(opts)
   local vcs = require("parley.vcs")
   vcs.reset_detectors()
 
-  -- Register VCS detectors (order matters: first match wins).
-  -- Arc is checked before git so that Arc repos (which also have git metadata
-  -- on some setups) are correctly attributed to the Arcanum provider.
-  local arc_vcs = require("parley.providers.arcanum.vcs_detector")
-  vcs.register_detector("arc", arc_vcs.detect)
-
-  local git_vcs = require("parley.providers.github.vcs_detector")
-  vcs.register_detector("git", git_vcs.detect)
-
-  -- Probe gh availability once so subsequent calls can fast-fail without
-  -- spawning a subprocess.
-  require("parley.providers.github.transport").probe_gh_executable()
-
-  -- Register built-in providers.
-  local gh = require("parley.providers.github.provider")
-  registry.register({
-    name = "GitHub",
-    detect = gh.detect,
-    factory = gh.new,
-  })
-
-  local arcanum = require("parley.providers.arcanum.provider")
-  registry.register({
-    name = "Arcanum",
-    detect = arcanum.detect,
-    factory = arcanum.new,
-  })
+  vcs.reset_adapters()
+  providers.register({ registry = registry, vcs = vcs }, M.config.providers)
 
   if M.config.telescope then
     local ok_telescope, telescope = pcall(require, "telescope")
@@ -395,6 +344,14 @@ function M.setup(opts)
       read_service.refresh_async(args.buf, { notify_errors = false })
     end,
     desc = "Parley: refresh PR discussions on buffer enter",
+  })
+
+  vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI", "BufWritePost", "BufReadPost", "BufUnload" }, {
+    group = augroup,
+    callback = function(args)
+      require("parley.repositories.review").remap_async(args.buf)
+    end,
+    desc = "Parley: update local discussion positions",
   })
 
   vim.api.nvim_create_user_command("Parley", function(cmd_opts)

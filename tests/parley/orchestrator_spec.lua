@@ -5,13 +5,20 @@
 --- double:
 ---   • buffer_context._get_buf_props / _vcs_detect — fixed buffer kind
 ---   • registry — a single mock-provider spec
----   • parley.anchor._runner — empty diff (identity mapping)
+---   • parley.anchor._diff — empty diff (identity mapping)
 ---   • parley.signs.render / .clear — recorders
 ---   • parley.cache._fs — in-memory dictionary
 ---   • read_service._notify / _get_config — recorders / fixed config
 ---   • async_operation._defer / _get_config — prevent real timers in tests
 ---
 --- No real filesystem, network, or git invocations.
+
+local identities = require("parley.cache_identity")
+local review_keys = require("parley.repositories.review_keys")
+--- @return table
+local function default_identity()
+  return identities.snapshot(require("parley.mock_provider").new({}), {})
+end
 
 local anchor = require("parley.anchor")
 local async_operation = require("parley.async_operation")
@@ -115,7 +122,7 @@ local saved = {}
 local function save_seams()
   saved.buf_props = buffer_context._get_buf_props
   saved.vcs_detect = buffer_context._vcs_detect
-  saved.anchor_runner = anchor._runner
+  saved.anchor_runner = anchor._diff
   saved.signs_render = signs.render
   saved.signs_clear = signs.clear
   saved.cache_fs = cache._fs
@@ -128,7 +135,7 @@ end
 local function restore_seams()
   buffer_context._get_buf_props = saved.buf_props
   buffer_context._vcs_detect = saved.vcs_detect
-  anchor._runner = saved.anchor_runner
+  anchor._diff = saved.anchor_runner
   signs.render = saved.signs_render
   signs.clear = saved.signs_clear
   cache._fs = saved.cache_fs
@@ -175,8 +182,8 @@ local function setup(o)
   end
 
   -- Anchor: empty diff → identity mapping (local_line == pr_line, not stale).
-  anchor._runner = function(_cmd, _cwd)
-    return { code = 0, stdout = "", stderr = "" }
+  anchor._diff = function()
+    return ""
   end
 
   -- Signs recorders.
@@ -386,12 +393,9 @@ describe("parley.services.read refresh", function()
     local s = setup({ pr = nil })
 
     -- Pre-seed the cache with a stale PR record so we can verify it goes away.
-    cache.set(
-      { provider = "github", repository = "owner/repo", subkey = "pr_branch_feature" },
-      { review = make_review(SAMPLE_PR) }
-    )
+    cache.set(review_keys.pr(default_identity(), "feature"), { review = make_review(SAMPLE_PR) })
     assert.is_not_nil(
-      cache.get({ provider = "github", repository = "owner/repo", subkey = "pr_branch_feature" }),
+      cache.get(review_keys.pr(default_identity(), "feature")),
       "precondition: cache should hold the seeded entry"
     )
 
@@ -400,7 +404,7 @@ describe("parley.services.read refresh", function()
       return #s.provider.calls.detect_pr >= 1
     end))
 
-    local entry = cache.get({ provider = "github", repository = "owner/repo", subkey = "pr_branch_feature" })
+    local entry = cache.get(review_keys.pr(default_identity(), "feature"))
     assert.is_nil(entry)
     -- Suppress unused warning.
     assert.is_table(s.fs._files)
@@ -417,14 +421,8 @@ describe("parley.services.read refresh", function()
     })
 
     -- Pre-seed cache (after setup so the in-memory fs is in place).
-    cache.set(
-      { provider = "github", repository = "owner/repo", subkey = "pr_branch_feature" },
-      { review = make_review(SAMPLE_PR) }
-    )
-    cache.set(
-      { provider = "github", repository = "owner/repo", subkey = "discussions_42" },
-      { make_discussion(99, "src/foo.lua", 5, "stale") }
-    )
+    cache.set(review_keys.pr(default_identity(), "feature"), { review = make_review(SAMPLE_PR) })
+    cache.set(review_keys.discussions(default_identity(), "42"), { make_discussion(99, "src/foo.lua", 5, "stale") })
 
     read_service.refresh_async(1)
     assert.is_true(vim.wait(200, function()
@@ -443,14 +441,8 @@ describe("parley.services.read refresh", function()
       discussions = { make_discussion(1, "src/foo.lua", 10, "fresh") },
     })
 
-    cache.set(
-      { provider = "github", repository = "owner/repo", subkey = "pr_branch_feature" },
-      { review = make_review(SAMPLE_PR) }
-    )
-    cache.set(
-      { provider = "github", repository = "owner/repo", subkey = "discussions_42" },
-      { make_discussion(99, "src/foo.lua", 5, "stale") }
-    )
+    cache.set(review_keys.pr(default_identity(), "feature"), { review = make_review(SAMPLE_PR) })
+    cache.set(review_keys.discussions(default_identity(), "42"), { make_discussion(99, "src/foo.lua", 5, "stale") })
 
     read_service.refresh_async(1, { force = true })
     assert.is_true(vim.wait(200, function()
@@ -511,14 +503,8 @@ describe("parley.services.read refresh", function()
     })
 
     -- Pre-seed cache so the stale render runs first (after setup so fake fs is in place).
-    cache.set(
-      { provider = "github", repository = "owner/repo", subkey = "pr_branch_feature" },
-      { review = make_review(SAMPLE_PR) }
-    )
-    cache.set(
-      { provider = "github", repository = "owner/repo", subkey = "discussions_42" },
-      { make_discussion(99, "src/foo.lua", 5, "stale") }
-    )
+    cache.set(review_keys.pr(default_identity(), "feature"), { review = make_review(SAMPLE_PR) })
+    cache.set(review_keys.discussions(default_identity(), "42"), { make_discussion(99, "src/foo.lua", 5, "stale") })
 
     read_service.refresh_async(1)
     assert.is_true(vim.wait(200, function()
@@ -542,14 +528,8 @@ describe("parley.services.read refresh", function()
       provider_error = { method = "fetch_discussions", msg = "network down" },
     })
 
-    cache.set(
-      { provider = "github", repository = "owner/repo", subkey = "pr_branch_feature" },
-      { review = make_review(SAMPLE_PR) }
-    )
-    cache.set(
-      { provider = "github", repository = "owner/repo", subkey = "discussions_42" },
-      { make_discussion(99, "src/foo.lua", 5, "stale") }
-    )
+    cache.set(review_keys.pr(default_identity(), "feature"), { review = make_review(SAMPLE_PR) })
+    cache.set(review_keys.discussions(default_identity(), "42"), { make_discussion(99, "src/foo.lua", 5, "stale") })
 
     read_service.refresh_async(1, { notify_errors = false })
     assert.is_true(vim.wait(200, function()
@@ -596,7 +576,7 @@ describe("parley.services.read refresh", function()
     local s = setup({ pr = SAMPLE_PR, discussions = {} })
 
     -- Simulate an in-flight call (keyed by review_key, not bufnr).
-    local rk = "github/owner/repo/feature"
+    local rk = review_keys.make(default_identity(), { vcs_info = { branch = "feature" } })
     review_repository._in_flight[rk] = true
 
     read_service.refresh_async(1)
@@ -613,7 +593,7 @@ describe("parley.services.read refresh", function()
   it("queues a forced rerun when force=true arrives during an in-flight refresh", function()
     local s = setup({ pr = SAMPLE_PR, discussions = {} })
 
-    local rk = "github/owner/repo/feature"
+    local rk = review_keys.make(default_identity(), { vcs_info = { branch = "feature" } })
     review_repository._in_flight[rk] = true
 
     read_service.refresh_async(1, { force = true })
@@ -629,10 +609,10 @@ describe("parley.services.read refresh", function()
   end)
 
   -- -------------------------------------------------------------------------
-  -- 7. Non-regular buffers are silently skipped
+  -- 7. Non-regular buffers are clear stale UI without fetching
   -- -------------------------------------------------------------------------
 
-  it("does nothing for a diffview buffer", function()
+  it("clears stale UI for a diffview buffer", function()
     local s = setup({
       filetype = "DiffviewFiles",
       pr = SAMPLE_PR,
@@ -644,11 +624,11 @@ describe("parley.services.read refresh", function()
     end)
 
     assert.equals(0, #s.render_calls)
-    assert.equals(0, #s.clear_calls)
+    assert.equals(1, #s.clear_calls)
     assert.equals(0, #s.provider.calls.detect_pr)
   end)
 
-  it("does nothing for a non-VCS buffer", function()
+  it("clears stale UI for a non-VCS buffer", function()
     local s = setup({
       vcs_info = false,
       pr = SAMPLE_PR,
@@ -660,11 +640,11 @@ describe("parley.services.read refresh", function()
     end)
 
     assert.equals(0, #s.render_calls)
-    assert.equals(0, #s.clear_calls)
+    assert.equals(1, #s.clear_calls)
     assert.equals(0, #s.provider.calls.detect_pr)
   end)
 
-  it("does nothing when no provider matches the vcs_info", function()
+  it("clears stale UI when no provider matches the vcs_info", function()
     local s = setup({
       no_provider = true,
       pr = SAMPLE_PR,
@@ -676,7 +656,7 @@ describe("parley.services.read refresh", function()
     end)
 
     assert.equals(0, #s.render_calls)
-    assert.equals(0, #s.clear_calls)
+    assert.equals(1, #s.clear_calls)
     assert.is_nil(s.provider)
   end)
 
@@ -811,8 +791,8 @@ describe("parley.services.read multi-repo", function()
       return nil
     end
 
-    anchor._runner = function(_cmd, _cwd)
-      return { code = 0, stdout = "", stderr = "" }
+    anchor._diff = function()
+      return ""
     end
 
     local render_calls = {}
@@ -862,7 +842,9 @@ describe("parley.services.read multi-repo", function()
       write_context = { number = tonumber(o.pr_a.id), head_sha = "deadbeef" },
       discussions = o.discussions_a,
     })
-    provider_a._cache_provider = "host-a"
+    provider_a.cache_identity = function()
+      return { provider = "host-a", host = "test", repository = "repo-a", account = "test" }
+    end
 
     local provider_b = mock_provider.new({
       pr = o.pr_b,
@@ -870,7 +852,9 @@ describe("parley.services.read multi-repo", function()
       write_context = { number = tonumber(o.pr_b.id), head_sha = "deadbeef" },
       discussions = o.discussions_b,
     })
-    provider_b._cache_provider = "host-b"
+    provider_b.cache_identity = function()
+      return { provider = "host-b", host = "test", repository = "repo-b", account = "test" }
+    end
 
     registry.reset()
     registry.register({
@@ -979,15 +963,15 @@ describe("parley.services.read multi-repo", function()
     local snap_b = provider_repository.get(202)
     assert.is_not_nil(snap_a)
     assert.is_not_nil(snap_b)
-    assert.equals("host-a", snap_a.provider._cache_provider)
-    assert.equals("host-b", snap_b.provider._cache_provider)
+    assert.equals("host-a", snap_a.identity.provider)
+    assert.equals("host-b", snap_b.identity.provider)
     assert.are_not.equal(snap_a.provider, snap_b.provider)
     assert.equals("owner-a/repo-a", snap_a.opts.repository)
     assert.equals("owner-b/repo-b", snap_b.opts.repository)
 
     -- Composite review keys are distinct and both present.
-    local key_a = "host-a/owner-a/repo-a/feature-a"
-    local key_b = "host-b/owner-b/repo-b/feature-b"
+    local key_a = review_keys.make(snap_a, { vcs_info = { branch = "feature-a" } })
+    local key_b = review_keys.make(snap_b, { vcs_info = { branch = "feature-b" } })
     assert.is_not_nil(review_repository._reviews[key_a])
     assert.is_not_nil(review_repository._reviews[key_b])
     assert.equals(key_a, review_repository._bufnr_key[101])

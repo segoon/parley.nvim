@@ -45,7 +45,7 @@ local M = {}
 --- ): vim.SystemObj|nil
 --- @field _sleep        fun(timeout_ms: integer): nil
 --- @field _defer        fun(callback: fun(), timeout_ms: integer): uv_timer_t|nil
---- @field _get_config   fun(): parley.Config|nil
+--- @field _config parley.GitHubProviderConfig
 --- @field _auth         table
 --- @field _viewer_login string|nil
 --- @field _cache_provider string
@@ -76,8 +76,12 @@ end
 -- ---------------------------------------------------------------------------
 
 --- @type parley.github.Provider
-local GitHubProvider = {}
+local GitHubProvider = { display_name = require("parley.providers.github.metadata").display_name }
 GitHubProvider.__index = GitHubProvider
+GitHubProvider.validate_comment_target = require("parley.providers.comment_target").validate
+GitHubProvider.cache_identity = require("parley.providers.github.cache_identity").get
+GitHubProvider.reaction_choices = require("parley.providers.github.reactions").choices
+GitHubProvider.reaction_presentation = require("parley.providers.github.reactions").presentation
 
 -- ---------------------------------------------------------------------------
 -- Constructor
@@ -99,13 +103,14 @@ GitHubProvider.__index = GitHubProvider
 ---   ): vim.SystemObj|nil,
 ---   _sleep?: fun(timeout_ms: integer): nil,
 ---   _defer?: fun(callback: fun(), timeout_ms: integer): uv_timer_t|nil,
----   _get_config?: fun(): parley.Config|nil,
+---   config?: parley.GitHubProviderConfig,
 ---   _system?: fun(cmd: string[], opts: table, callback: fun(result: vim.SystemCompleted)): vim.SystemObj,
 ---   _auth?: table,
 --- }
 --- @return parley.github.Provider
 function M.new(opts)
   opts = opts or {}
+  local config = require("parley.providers.github.config").resolve(opts.config)
   assert(
     type(opts.repository) == "string" and opts.repository ~= "",
     "parley.github: opts.repository must be a non-empty string"
@@ -144,9 +149,7 @@ function M.new(opts)
     _spawn = opts._spawn or default_spawn,
     _sleep = opts._sleep or await.sleep,
     _defer = opts._defer or vim.defer_fn,
-    _get_config = opts._get_config or function()
-      return require("parley").config
-    end,
+    _config = config,
     _auth = opts._auth or require("parley.providers.github.auth"),
     _viewer_login = nil,
     _cache_provider = "github",
@@ -289,8 +292,8 @@ end
 --- @param file string
 --- @param anchor parley.Anchor
 --- @param body parley.Body
---- @param callback fun(result: { ok: boolean, comment?: parley.Comment, err?: string, cancelled?: boolean }): nil
---- @return { cancel: fun(): nil }
+--- @param callback parley.WriteCallback
+--- @return parley.CancelHandle
 function GitHubProvider:begin_post_top_level_comment(review, file, anchor, body, callback)
   local write_context = review.write_context
   dbg.trace(
@@ -352,8 +355,8 @@ end
 --- @param discussion parley.Discussion
 --- @param parent_comment parley.Comment
 --- @param body parley.Body
---- @param callback fun(result: { ok: boolean, comment?: parley.Comment, err?: string, cancelled?: boolean }): nil
---- @return { cancel: fun(): nil }
+--- @param callback parley.WriteCallback
+--- @return parley.CancelHandle
 function GitHubProvider:begin_reply(review, discussion, parent_comment, body, callback)
   local write_context = review.write_context
   local url = repo_path(self) .. "/pulls/" .. write_context.number .. "/comments"
@@ -413,6 +416,7 @@ end
 --- @param comment_id string
 --- @param reaction   string  e.g. "+1", "heart"
 function GitHubProvider:react(_review, comment_id, reaction)
+  assert(require("parley.providers.github.reactions").supports(reaction), "unsupported GitHub reaction")
   transport.fetch_viewer_login(self)
   local viewer = self._viewer_login or ""
   local base_url = repo_path(self) .. "/pulls/comments/" .. comment_id .. "/reactions"

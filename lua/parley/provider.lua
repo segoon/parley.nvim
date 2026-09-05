@@ -15,13 +15,19 @@ local M = {}
 -- Type annotations
 -- ---------------------------------------------------------------------------
 
+--- @class parley.ReactionPresentation
+--- @field label string
+--- @field emoji? string
+--- @class parley.ReactionChoice : parley.ReactionPresentation
+--- @field reaction string Opaque provider identifier
+
 --- The abstract provider interface.
 ---
 --- All methods are called as `provider:method(...)` (colon syntax).
---- Async providers must wrap blocking calls in `plenary.async.run`; callers
---- always invoke methods from within a plenary async context.
+--- Yielding operation methods run in a Plenary async context. Optional begin_*
+--- starters run without yielding; their callbacks run on the main loop, inline
+--- or later. Local presentation hooks do not yield.
 ---
---- @class parley.Provider
 --- @class parley.Anchor
 --- @field start_line integer
 --- @field end_line integer|nil
@@ -31,6 +37,33 @@ local M = {}
 --- @field head_sha string
 --- @field write_context table|nil
 ---
+--- @class parley.CacheIdentity
+--- @field provider string
+--- @field host string
+--- @field repository string
+--- @field account string Non-secret fingerprint of local credential context
+
+--- @class parley.CommentTarget
+--- @field vcs_info parley.VcsInfo
+--- @field rel_path string
+--- @field anchor parley.Anchor
+--- @alias parley.CommentTargetResult {ok: true}|{ok: false, err: string}
+
+--- @class parley.WriteResult
+--- @field ok boolean
+--- @field comment? parley.Comment
+--- @field err? string
+--- @field cancelled? boolean Must not be true when ok is true.
+--- @alias parley.WriteCallback fun(result: parley.WriteResult): nil
+--- @class parley.CancelHandle
+--- @field cancel fun(): nil Request cancellation; completion arrives through the callback.
+
+--- @class parley.Provider
+--- @field validate_comment_target fun(
+---   self: parley.Provider, review: parley.DetectedReview, target: parley.CommentTarget
+--- ): parley.CommentTargetResult
+--- @field display_name string Nonblank human-readable provider name; local metadata.
+--- @field cache_identity fun(self: parley.Provider): parley.CacheIdentity|nil
 --- Return the authentication token for API calls.
 --- @field auth fun(self: parley.Provider): string
 ---
@@ -83,6 +116,22 @@ local M = {}
 --- e.g. "github.com" or "github.mycompany.com".
 --- @field progress_label fun(self: parley.Provider): string
 
+--- Optional cancellable operations. Return promptly without yielding and invoke
+--- the callback exactly once on the main loop, including after cancellation.
+--- @field begin_post_top_level_comment? fun(
+---   self: parley.Provider, review: parley.DetectedReview, file: string, anchor: parley.Anchor,
+---   body: parley.Body, callback: parley.WriteCallback
+--- ): parley.CancelHandle
+--- @field begin_reply? fun(
+---   self: parley.Provider, review: parley.DetectedReview, discussion: parley.Discussion,
+---   parent_comment: parley.Comment, body: parley.Body, callback: parley.WriteCallback
+--- ): parley.CancelHandle
+
+--- Optional local-only metadata; missing choices means mutation is unavailable.
+--- @field reaction_choices? fun(self: parley.Provider, review: parley.DetectedReview,
+--- comment: parley.Comment): parley.ReactionChoice[], string|nil
+--- @field reaction_presentation? fun(self: parley.Provider, code: string): parley.ReactionPresentation
+
 -- ---------------------------------------------------------------------------
 -- Required method names (single source of truth)
 -- ---------------------------------------------------------------------------
@@ -91,6 +140,8 @@ local M = {}
 --- Used by validate() and by mock_provider to initialise its calls table.
 --- @type string[]
 M.METHOD_NAMES = {
+  "validate_comment_target",
+  "cache_identity",
   "auth",
   "detect_pr",
   "fetch_discussions",
@@ -105,6 +156,15 @@ M.METHOD_NAMES = {
   "progress_label",
 }
 
+--- Optional methods are validated when present; absence preserves fallback behavior.
+--- @type string[]
+M.OPTIONAL_METHOD_NAMES = {
+  "begin_post_top_level_comment",
+  "begin_reply",
+  "reaction_choices",
+  "reaction_presentation",
+}
+
 -- ---------------------------------------------------------------------------
 -- Interface validation
 -- ---------------------------------------------------------------------------
@@ -114,6 +174,8 @@ M.METHOD_NAMES = {
 --- Checks:
 ---   • `p` is a non-nil table.
 ---   • Every name in METHOD_NAMES is present and is a function.
+---   • display_name is a nonblank string.
+---   • Every present optional method is a function.
 ---
 --- @param p any
 --- @return boolean
@@ -121,8 +183,16 @@ function M.validate(p)
   if type(p) ~= "table" then
     return false
   end
+  if type(p.display_name) ~= "string" or not p.display_name:find("%S") then
+    return false
+  end
   for _, name in ipairs(M.METHOD_NAMES) do
     if type(p[name]) ~= "function" then
+      return false
+    end
+  end
+  for _, name in ipairs(M.OPTIONAL_METHOD_NAMES) do
+    if p[name] ~= nil and type(p[name]) ~= "function" then
       return false
     end
   end

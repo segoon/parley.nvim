@@ -202,58 +202,55 @@ function M.render(bufnr, discussions, mappings, opts)
     local mapping = mappings[disc.id]
 
     -- Skip if no mapping or if the anchored line was deleted locally.
-    if not mapping or mapping.local_line == nil then
-      goto continue
-    end
+    if mapping and mapping.local_line ~= nil then
+      local stale = mapping.stale
+      local hl_sign = stale and HL_STALE_SIGN or HL_SIGN
+      local hl_vtext_meta = stale and HL_STALE_VTEXT_META or HL_VTEXT_META
+      local hl_vtext = stale and HL_STALE_VTEXT or HL_VTEXT
 
-    local stale = mapping.stale
-    local hl_sign = stale and HL_STALE_SIGN or HL_SIGN
-    local hl_vtext_meta = stale and HL_STALE_VTEXT_META or HL_VTEXT_META
-    local hl_vtext = stale and HL_STALE_VTEXT or HL_VTEXT
+      -- Extmark options (always placed; sign/vtext conditional on config).
+      --- @type table
+      local ext_opts = {}
 
-    -- Extmark options (always placed; sign/vtext conditional on config).
-    --- @type table
-    local ext_opts = {}
+      -- Gutter sign.
+      if opts.signs.enabled then
+        ext_opts.sign_text = opts.signs.text
+        ext_opts.sign_hl_group = hl_sign
+      end
 
-    -- Gutter sign.
-    if opts.signs.enabled then
-      ext_opts.sign_text = opts.signs.text
-      ext_opts.sign_hl_group = hl_sign
-    end
+      -- Virtual lines below the anchored line: metadata, full multiline body,
+      -- then a bottom rule that doubles as the "(N more comments)" indicator.
+      -- Each interior row is wrapped in side bars so the whole block reads as
+      -- a left/right/bottom-bordered box (no top rule — meta is the first row).
+      if opts.virtual_text.enabled then
+        local first = model.first_comment(disc)
+        if first then
+          local width = opts.virtual_text.max_width
+          local bar_l = { "│ ", hl_vtext }
+          local bar_r = { " │", hl_vtext }
 
-    -- Virtual lines below the anchored line: metadata, full multiline body,
-    -- then a bottom rule that doubles as the "(N more comments)" indicator.
-    -- Each interior row is wrapped in side bars so the whole block reads as
-    -- a left/right/bottom-bordered box (no top rule — meta is the first row).
-    if opts.virtual_text.enabled then
-      local first = model.first_comment(disc)
-      if first then
-        local width = opts.virtual_text.max_width
-        local bar_l = { "│ ", hl_vtext }
-        local bar_r = { " │", hl_vtext }
-
-        local meta_text = string.format("%s · %s", first.author, format_comment_timestamp(first.created_at))
-        ext_opts.virt_lines = {
-          { bar_l, { M._pad_to_width(M._truncate(meta_text, width), width), hl_vtext_meta }, bar_r },
-        }
-        for _, line in ipairs(vim.split(first.body.text, "\n", { plain = true })) do
+          local meta_text = string.format("%s · %s", first.author, format_comment_timestamp(first.created_at))
+          ext_opts.virt_lines = {
+            { bar_l, { M._pad_to_width(M._truncate(meta_text, width), width), hl_vtext_meta }, bar_r },
+          }
+          for _, line in ipairs(vim.split(first.body.text, "\n", { plain = true })) do
+            ext_opts.virt_lines[#ext_opts.virt_lines + 1] = {
+              bar_l,
+              { M._pad_to_width(M._truncate(line, width), width), hl_vtext },
+              bar_r,
+            }
+          end
+          local more_comments = model.comment_count(disc) - 1
           ext_opts.virt_lines[#ext_opts.virt_lines + 1] = {
-            bar_l,
-            { M._pad_to_width(M._truncate(line, width), width), hl_vtext },
-            bar_r,
+            { M._bottom_rule(width, more_comments), hl_vtext },
           }
         end
-        local more_comments = model.comment_count(disc) - 1
-        ext_opts.virt_lines[#ext_opts.virt_lines + 1] = {
-          { M._bottom_rule(width, more_comments), hl_vtext },
-        }
       end
+
+      -- Row is 0-indexed; local_line is 1-indexed.
+      local line = math.max(1, math.min(mapping.local_line, vim.api.nvim_buf_line_count(bufnr)))
+      vim.api.nvim_buf_set_extmark(bufnr, ns, line - 1, 0, ext_opts)
     end
-
-    -- Row is 0-indexed; local_line is 1-indexed.
-    vim.api.nvim_buf_set_extmark(bufnr, ns, mapping.local_line - 1, 0, ext_opts)
-
-    ::continue::
   end
 end
 

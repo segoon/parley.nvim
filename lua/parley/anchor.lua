@@ -1,27 +1,8 @@
---- parley.anchor — Line anchoring engine.
----
---- Maps (file, line-in-PR-diff-space) to (line-in-local-buffer) by running
---- `git diff --unified=0 {base_commit} -- {file}` and walking the resulting
---- hunks.
----
---- Design notes:
----   • parse_hunks and remap_line are pure functions with no I/O — unit-testable
----     without any subprocess.
----   • map_line and map_discussions are async; they must be called from within
----     a plenary.async coroutine context.
----   • map_discussions batches by file: one git call per unique file path.
----   • M._runner is the single I/O seam; replace it in tests to avoid real git.
----
---- Staleness semantics:
----   • stale = false, confidence = 1.0  — line maps exactly; no local change
----     affects it.
----   • stale = true,  confidence = 0.0  — the anchored line was modified or
----     deleted locally.
----   • local_line = nil                 — the anchored line was deleted
----     entirely (pure-deletion hunk, new_count = 0); there is no sensible
----     local position.
+--- VCS-independent line anchoring against revision and local text.
+--- File reads are asynchronous; hunk parsing and line remapping are pure.
+--- Failed reads preserve stale approximations; deleted lines have no position.
 
-local await = require("parley.runtime.await")
+local content = require("parley.local_content")
 
 local M = {}
 
@@ -44,23 +25,28 @@ local M = {}
 ---                                    anchors; nil for single-line anchors or when
 ---                                    the end line was deleted entirely.
 --- @field confidence     number       1.0 = exact mapping; 0.0 = stale/deleted.
---- @field stale          boolean      true when pr_line was inside a changed hunk.
+--- @field stale          boolean      true when changed or unavailable.
+--- @field error? string  Reason mapping is approximate.
 
 -- ---------------------------------------------------------------------------
 -- Injectable runner seam
 -- ---------------------------------------------------------------------------
 
---- Run a command and return { code, stdout, stderr }.
---- Replace in tests to avoid real git invocations.
----
---- @type fun(cmd: string[], cwd: string): { code: integer, stdout: string, stderr: string }
-M._runner = function(cmd, cwd)
-  local result = await.system(cmd, { cwd = cwd, text = true })
-  return {
-    code = result.code,
-    stdout = result.stdout or "",
-    stderr = result.stderr or "",
-  }
+--- Read revision/local text and produce unified hunks. Injectable in tests.
+--- @type fun(info: parley.VcsInfo, revision: string, file: string): string|nil, string|nil
+M._diff = function(info, revision, file)
+  local before, err = content.revision(info, revision, file)
+  if before == nil then
+    return nil, err
+  end
+  local after, local_err = content.read_local(info.root .. "/" .. file)
+  if after == nil then
+    return nil, local_err
+  end
+  if before:find("\0", 1, true) or after:find("\0", 1, true) then
+    return nil, "binary content cannot be mapped"
+  end
+  return vim.diff(content.normalize(before), content.normalize(after), { ctxlen = 0 })
 end
 
 -- ---------------------------------------------------------------------------
@@ -138,7 +124,7 @@ function M.remap_line(pr_line, hunks)
   local offset = 0
 
   for _, h in ipairs(hunks) do
-    if pr_line < h.old_start then
+    if pr_line < h.old_start or (h.old_count == 0 and pr_line == h.old_start) then
       -- Line is before this hunk; no further offset needed.
       return {
         local_line = pr_line + offset,
@@ -177,74 +163,66 @@ end
 -- Async public API
 -- ---------------------------------------------------------------------------
 
---- Map a single anchor from PR-diff space to local buffer space.
----
---- Must be called from within a plenary.async coroutine.
----
---- @param repo_root   string   Absolute path to the git repository root
---- @param base_commit string   PR head commit SHA
---- @param file        string   Repo-relative file path
---- @param pr_line     integer  Line number in PR-diff space
+--- @param line integer
+--- @param err string
 --- @return parley.anchor.Mapping
-function M.map_line(repo_root, base_commit, file, pr_line)
-  local result = M._runner({ "git", "diff", "--unified=0", base_commit, "--", file }, repo_root)
-
-  if result.code ~= 0 or result.stdout == "" then
-    -- No diff or git error: treat line as unchanged.
-    return { local_line = pr_line, confidence = 1.0, stale = false }
-  end
-
-  local hunks = M.parse_hunks(result.stdout)
-  return M.remap_line(pr_line, hunks)
+local function approximate(line, err)
+  return { local_line = line, confidence = 0, stale = true, error = err }
 end
 
---- Map all discussion anchors to local buffer positions.
----
---- Batches git calls by file: one `git diff` invocation per unique file path
---- referenced across all discussions.
----
---- Must be called from within a plenary.async coroutine.
----
---- @param repo_root   string               Absolute path to the git repo root
---- @param base_commit string               PR head commit SHA
+--- Map a single line, retaining a marked approximation on read failure.
+--- @param info parley.VcsInfo
+--- @param revision string
+--- @param file string
+--- @param line integer
+--- @return parley.anchor.Mapping
+function M.map_line(info, revision, file, line)
+  local ok, diff, err = pcall(M._diff, info, revision, file)
+  if not ok then
+    err, diff = tostring(diff), nil
+  end
+  if diff == nil then
+    return approximate(line, err or "mapping unavailable")
+  end
+  return M.remap_line(line, M.parse_hunks(diff))
+end
+
+--- Map discussions against loaded buffers or working-tree files; one read per file.
+--- @param info parley.VcsInfo
+--- @param revision string
 --- @param discussions parley.Discussion[]
---- @return table<string, parley.anchor.Mapping>  Keyed by discussion.id
-function M.map_discussions(repo_root, base_commit, discussions)
-  if #discussions == 0 then
-    return {}
-  end
-
-  -- Build a set of unique file paths and collect discussions per file.
-  --- @type table<string, parley.Discussion[]>
-  local by_file = {}
+--- @return table<string, parley.anchor.Mapping>
+function M.map_discussions(info, revision, discussions)
+  local by_file, mappings = {}, {}
   for _, disc in ipairs(discussions) do
-    if not by_file[disc.file] then
-      by_file[disc.file] = {}
+    if type(disc.file) == "string" and disc.file ~= "" and disc.line and disc.line > 0 then
+      by_file[disc.file] = by_file[disc.file] or {}
+      table.insert(by_file[disc.file], disc)
     end
-    table.insert(by_file[disc.file], disc)
   end
-
-  -- For each unique file, run git diff once and remap all its discussions.
-  --- @type table<string, parley.anchor.Mapping>
-  local mappings = {}
-
-  for file, file_discussions in pairs(by_file) do
-    local result = M._runner({ "git", "diff", "--unified=0", base_commit, "--", file }, repo_root)
-
-    local hunks = {}
-    if result.code == 0 and result.stdout ~= "" then
-      hunks = M.parse_hunks(result.stdout)
+  for file, entries in pairs(by_file) do
+    local ok, diff, err = pcall(M._diff, info, revision, file)
+    if not ok then
+      err, diff = tostring(diff), nil
     end
-
-    for _, disc in ipairs(file_discussions) do
-      local mapping = M.remap_line(disc.line, hunks)
+    local hunks = diff and M.parse_hunks(diff) or {}
+    for _, disc in ipairs(entries) do
+      local mapping = diff and M.remap_line(disc.line, hunks) or approximate(disc.line, err or "mapping unavailable")
       if disc.end_line then
-        mapping.local_end_line = M.remap_line(disc.end_line, hunks).local_line
+        if diff then
+          mapping.local_end_line = M.remap_line(disc.end_line, hunks).local_line
+        else
+          mapping.local_end_line = disc.end_line
+        end
+        for line = disc.line, disc.end_line do
+          if M.remap_line(line, hunks).stale then
+            mapping.stale, mapping.confidence = true, 0
+          end
+        end
       end
       mappings[disc.id] = mapping
     end
   end
-
   return mappings
 end
 

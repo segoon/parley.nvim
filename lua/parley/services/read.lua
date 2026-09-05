@@ -68,6 +68,7 @@ function M.get_buffer_state(bufnr)
   local provider_snapshot = provider_repository.get(bufnr)
   local context_snapshot = context_repository.get(bufnr)
   snapshot.provider = provider_snapshot and provider_snapshot.provider or nil
+  snapshot.provider_display_name = snapshot.provider and snapshot.provider.display_name or nil
   snapshot.vcs_info = context_snapshot and context_snapshot.vcs_info or nil
   snapshot.rel_path = context_snapshot and context_snapshot.rel_path or nil
   return snapshot
@@ -94,7 +95,7 @@ function M.clear_buffer_state(bufnr)
     M._subscriptions[bufnr]()
     M._subscriptions[bufnr] = nil
   end
-  review_repository.invalidate(bufnr)
+  review_repository.detach(bufnr)
   provider_repository.invalidate(bufnr)
   context_repository.invalidate(bufnr)
   signs.clear(bufnr)
@@ -130,21 +131,30 @@ function M.refresh_async(bufnr, opts, callback)
   async.run(function()
     local ctx = context_repository.refresh(bufnr)
     if not ctx or ctx.kind ~= "regular" or not ctx.rel_path then
+      M.clear_buffer_state(bufnr)
       return
     end
     if not ctx.vcs_info or not ctx.vcs_info.branch or ctx.vcs_info.branch == "" then
+      M.clear_buffer_state(bufnr)
       return
     end
-    if not provider_repository.refresh(bufnr) then
+    local resolved, provider_result = pcall(provider_repository.refresh, bufnr)
+    if not resolved or not provider_result then
+      if not resolved then
+        M._notify("Provider identity or construction failed", vim.log.levels.WARN)
+      end
+      M.clear_buffer_state(bufnr)
       return
     end
 
     local provider_snapshot = provider_repository.get(bufnr)
     local review_key = review_repository.make_key(provider_snapshot, ctx)
+    if not review_repository.get(bufnr) then
+      signs.clear(bufnr)
+    end
     local has_data = review_key and review_repository.has_review(review_key) or false
     if not has_data and review_key then
-      has_data =
-        review_repository.has_cached_review(provider_snapshot.provider, provider_snapshot.opts, ctx.vcs_info.branch)
+      has_data = review_repository.has_cached_review(provider_snapshot, ctx.vcs_info.branch)
     end
     local silent = not opts.progress and has_data
 

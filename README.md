@@ -85,6 +85,16 @@ require("parley").setup({
 
 If no matching PR is found, Parley stays silent and inactive.
 
+Discussion positions are mapped from the review revision to your working files,
+including unsaved buffer edits, using Git or Arc as appropriate. Local edits
+refresh positions without fetching the review again, and separate checkouts keep
+independent positions. If revision content is unavailable, Parley shows stale
+approximations and reports the reason.
+
+New comments require a clean file with no unsaved edits and a local HEAD matching
+the review revision. These checks run again when you submit; a failed check keeps
+your draft. Other Arcanum API limitations still apply.
+
 ## Telescope
 
 When `telescope = true` (the default) and Telescope is installed, Parley loads two extensions:
@@ -186,6 +196,33 @@ Full reference documentation is available inside Neovim:
 ```vim
 :help parley.nvim
 ```
+
+## Development checks
+
+Run `make test`, `make format`, `make format-check`, and `make lint` before
+submitting changes. Architecture tests discover every production Lua file under
+`lua/` and `plugin/`. Add each new file to exactly one layer's `modules` list in
+[policy.json](policy.json); remove the assignment when deleting a file. Tests and
+build scripts are outside that production inventory.
+
+All concrete provider code belongs under `lua/parley/providers/` in the
+`providers` layer. Shared code must delegate through contracts and registration.
+The only permitted shared import into that directory is setup's import of
+`parley.providers`. Provider code may use its declared shared infrastructure
+layers. Layer dependencies must remain acyclic; external API capabilities remain
+explicit, including the narrow `ui_notify` capability for provider notifications.
+
+Use literal, dotted module names with `require("module")`, `require "module"`,
+or `pcall(require, "module")`. Computed imports, untracked loader aliases, and
+source-file loaders fail the checker. The existing health `M._require` seam is
+tracked specifically, and its protected calls must also use literal names.
+Missing modules in Parley's namespaces fail even if loaded through `pcall`.
+
+Checker utilities and regression fixtures live under `tests/support/` and
+`tests/parley/policy_checker_spec.lua`. These are structural checks for supported
+Lua import forms, not a sandbox or a semantic proof: copied provider algorithms,
+command tables, and arbitrary runtime indirection still require review and
+provider-independent behavior tests.
 
 ## Roadmap
 

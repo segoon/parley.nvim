@@ -419,7 +419,9 @@ local function setup_review_stubs(ctx, views, discussions)
     end,
   }
   package.loaded["parley.repositories.review"] = {
-    _views = views,
+    get = function(bufnr)
+      return { all_mappings = views[bufnr] and views[bufnr].mappings or {} }
+    end,
   }
   package.loaded["parley.services.read"] = {
     list_discussions = function(_bufnr, _opts)

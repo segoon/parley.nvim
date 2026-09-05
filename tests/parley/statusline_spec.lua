@@ -36,7 +36,7 @@ describe("parley.statusline", function()
     read_service.get_buffer_state = function(_bufnr)
       return {
         pr = SAMPLE_PR,
-        provider = { _cache_provider = "github" },
+        provider_display_name = "GitHub",
         discussions = {},
         summary = { unresolved_count = 3 },
       }
@@ -49,7 +49,7 @@ describe("parley.statusline", function()
     read_service.get_buffer_state = function(_bufnr)
       return {
         pr = SAMPLE_PR,
-        provider = { _cache_provider = "github" },
+        provider_display_name = "GitHub",
         discussions = {},
         summary = { unresolved_count = 1 },
       }
@@ -62,12 +62,32 @@ describe("parley.statusline", function()
     read_service.get_buffer_state = function(_bufnr)
       return {
         pr = SAMPLE_PR,
-        provider = { _cache_provider = "github" },
+        provider_display_name = "GitHub",
         discussions = {},
         summary = { unresolved_count = 0 },
       }
     end
 
     assert.equals("GitHub PR #42 · approved · 0 unresolved", statusline.component(7))
+  end)
+  it("uses public state metadata for arbitrary providers", function()
+    for _, name in ipairs({ "Arcanum", "Custom Host" }) do
+      read_service.get_buffer_state = function()
+        return {
+          pr = SAMPLE_PR,
+          provider_display_name = name,
+          provider = { _cache_provider = "github" },
+          discussions = {},
+        }
+      end
+      assert.equals(name .. " PR #42 · approved · 0 unresolved", statusline.component(7))
+    end
+  end)
+
+  it("does not infer branding from URLs or private fields", function()
+    read_service.get_buffer_state = function()
+      return { pr = SAMPLE_PR, provider = { _cache_provider = "github" }, discussions = {} }
+    end
+    assert.equals("PR #42 · approved · 0 unresolved", statusline.component(7))
   end)
 end)

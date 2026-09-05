@@ -41,6 +41,8 @@ describe("parley setup", function()
   local saved_telescope
 
   before_each(function()
+    require("parley.vcs").reset_adapters()
+    require("parley.vcs").reset_detectors()
     saved_cache_setup = cache.setup
     saved_read_refresh_async = read_service.refresh_async
     saved_registry_reset = registry.reset
@@ -53,6 +55,8 @@ describe("parley setup", function()
   end)
 
   after_each(function()
+    require("parley.vcs").reset_adapters()
+    require("parley.vcs").reset_detectors()
     cache.setup = saved_cache_setup
     read_service.refresh_async = saved_read_refresh_async
     registry.reset = saved_registry_reset
@@ -63,6 +67,52 @@ describe("parley setup", function()
     package.loaded["parley.providers.github.provider"] = saved_gh
     package.loaded["telescope"] = saved_telescope
     pcall(vim.api.nvim_del_user_command, "Parley")
+  end)
+
+  it("resets and registers VCS adapters on repeated setup", function()
+    local vcs = require("parley.vcs")
+    local adapters = require("parley.vcs.adapters")
+    cache.setup = function() end
+    signs.setup_highlights = function() end
+    progress_popup.setup = function() end
+    read_service.refresh_async = function() end
+    parley.setup({ telescope = false })
+    vcs.register_adapter("temporary", require("parley.providers.vcs.git"))
+    parley.setup({ telescope = false })
+    assert.is_nil(adapters.get({ vcs = "temporary", root = "/checkout" }))
+    assert.is_not_nil(adapters.get({ vcs = "git", root = "/checkout" }))
+    assert.is_not_nil(adapters.get({ vcs = "arc", root = "/checkout" }))
+    assert.equals(2, #vcs.registered_detectors())
+  end)
+
+  it("snapshots provider settings across repeated setup", function()
+    local specs = {}
+    cache.setup = function() end
+    signs.setup_highlights = function() end
+    progress_popup.setup = function() end
+    read_service.refresh_async = function() end
+    registry.register = function(spec)
+      specs[#specs + 1] = spec
+    end
+    local opts = { telescope = false, providers = { arcanum = { host = "first.example", retry_count = 0 } } }
+    parley.setup(opts)
+    local factory = specs[2].factory
+    local auth = {
+      read_token = function()
+        return "token"
+      end,
+    }
+    local p = factory({ _auth = auth })
+    opts.providers.arcanum.host = "mutated.example"
+    parley.config.providers.arcanum.host = "mutated.example"
+    assert.equals("first.example", p:cache_identity().host)
+    assert.equals("first.example", factory({ _auth = auth }):cache_identity().host)
+    assert.equals(0, require("parley.providers.arcanum.transport").transport_config(p).retry_count)
+    parley.setup({ telescope = false, providers = { arcanum = { host = "second.example" } } })
+    assert.equals("second.example", specs[4].factory({ _auth = auth }):cache_identity().host)
+    assert.equals("first.example", p:cache_identity().host)
+    parley.setup({ telescope = false })
+    assert.equals("arcanum.yandex.net", specs[6].factory({ _auth = auth }):cache_identity().host)
   end)
 
   it("wires :Parley refresh to a progress-enabled refresh", function()

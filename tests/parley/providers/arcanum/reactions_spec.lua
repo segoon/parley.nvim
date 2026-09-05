@@ -1,0 +1,10 @@
+local reactions = require("parley.providers.arcanum.reactions")
+
+describe("Arcanum reaction metadata", function()
+  it("preserves raw codes and explains unavailable mutation", function()
+    assert.same({ label = "raw-code" }, reactions.presentation(nil, "raw-code"))
+    local choices, reason = reactions.choices()
+    assert.same({}, choices)
+    assert.is_truthy(reason:find("not implemented in Parley", 1, true))
+  end)
+end)

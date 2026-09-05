@@ -17,7 +17,7 @@
 ---   • _http_run / _http_start: injectable transport seams.
 ---   • _auth: injectable auth module.
 ---   • _sleep / _defer: injectable timing seams.
----   • _get_config: injectable config seam.
+---   • config: explicit configuration snapshot.
 
 local dbg = require("parley.debug")
 local mapping = require("parley.providers.arcanum.mapping")
@@ -42,7 +42,7 @@ local PR_DETAIL_FIELDS = "id,summary,status,url,author,vcs"
 --- @field _auth         table
 --- @field _sleep        fun(timeout_ms: integer): nil
 --- @field _defer        fun(callback: fun(), timeout_ms: integer): uv_timer_t|nil
---- @field _get_config   fun(): parley.Config|nil
+--- @field _config parley.ArcanumProviderConfig
 --- @field _viewer_login string|nil
 --- @field _cache_provider string
 
@@ -51,8 +51,12 @@ local PR_DETAIL_FIELDS = "id,summary,status,url,author,vcs"
 -- ---------------------------------------------------------------------------
 
 --- @type parley.arcanum.Provider
-local ArcanumProvider = {}
+local ArcanumProvider = { display_name = require("parley.providers.arcanum.metadata").display_name }
 ArcanumProvider.__index = ArcanumProvider
+ArcanumProvider.validate_comment_target = require("parley.providers.comment_target").validate
+ArcanumProvider.cache_identity = require("parley.providers.arcanum.cache_identity").get
+ArcanumProvider.reaction_choices = require("parley.providers.arcanum.reactions").choices
+ArcanumProvider.reaction_presentation = require("parley.providers.arcanum.reactions").presentation
 
 -- ---------------------------------------------------------------------------
 -- Constructor
@@ -61,7 +65,7 @@ ArcanumProvider.__index = ArcanumProvider
 --- Create a new Arcanum provider.
 ---
 --- Required opts: branch (the current arc remote branch id), login (the arc user login).
---- Optional opts: host, _auth, _http_run, _http_start, _sleep, _defer, _get_config.
+--- Optional opts: host, _auth, _http_run, _http_start, _sleep, _defer, config.
 ---
 --- @param opts {
 ---   branch?:       string,
@@ -70,22 +74,21 @@ ArcanumProvider.__index = ArcanumProvider
 ---   _auth?:        table,
 ---   _sleep?:       fun(timeout_ms: integer): nil,
 ---   _defer?:       fun(callback: fun(), timeout_ms: integer): uv_timer_t|nil,
----   _get_config?:  fun(): parley.Config|nil,
+---   config?: parley.ArcanumProviderConfig,
 --- }
 --- @return parley.arcanum.Provider
 function M.new(opts)
   opts = opts or {}
+  local config = require("parley.providers.arcanum.config").resolve(opts.config)
 
   local await = require("parley.runtime.await")
 
   local self = setmetatable({
-    _host = opts.host or "arcanum.yandex.net",
+    _host = opts.host or config.host,
     _auth = opts._auth or require("parley.providers.arcanum.auth"),
     _sleep = opts._sleep or await.sleep,
     _defer = opts._defer or vim.defer_fn,
-    _get_config = opts._get_config or function()
-      return require("parley").config
-    end,
+    _config = config,
     _viewer_login = opts.login or nil,
     _cache_provider = "arcanum",
     -- Detected from vcs_info at detect() time
@@ -231,8 +234,12 @@ function ArcanumProvider:detect_pr(_repo_root, branch)
   -- Fetch the active diff to get diff_id and diff_set_xid for anchoring
   local diff_id = nil
   local diff_set_xid = nil
-  local ok_diff, diff_data =
-    pcall(transport.http_run, self, "GET", "/v1/pull-requests/" .. tostring(pr_id) .. "/active-diff")
+  local ok_diff, diff_data = pcall(
+    transport.http_run,
+    self,
+    "GET",
+    "/v1/pull-requests/" .. tostring(pr_id) .. "/active-diff?fields=id,commit_ids(head)"
+  )
   if ok_diff and diff_data then
     diff_id = diff_data.id
     -- The active diff's xid is its GSID field in v1 — but the changelist
@@ -360,8 +367,8 @@ end
 --- @param file     string
 --- @param anchor   parley.Anchor
 --- @param body     parley.Body
---- @param callback fun(result: { ok: boolean, comment?: parley.Comment, err?: string, cancelled?: boolean }): nil
---- @return { cancel: fun(): nil }
+--- @param callback parley.WriteCallback
+--- @return parley.CancelHandle
 function ArcanumProvider:begin_post_top_level_comment(review, file, anchor, body, callback)
   ensure_token(self)
 
@@ -435,8 +442,8 @@ end
 --- @param _discussion    parley.Discussion
 --- @param parent_comment parley.Comment
 --- @param body           parley.Body
---- @param callback fun(result: { ok: boolean, comment?: parley.Comment, err?: string, cancelled?: boolean }): nil
---- @return { cancel: fun(): nil }
+--- @param callback parley.WriteCallback
+--- @return parley.CancelHandle
 function ArcanumProvider:begin_reply(_review, _discussion, parent_comment, body, callback)
   ensure_token(self)
 

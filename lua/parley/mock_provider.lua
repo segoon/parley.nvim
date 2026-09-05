@@ -90,6 +90,7 @@ end
 ---
 --- @param opts {
 ---   token?: string,
+---   cache_identity?: parley.CacheIdentity,
 ---   pr?: parley.PR,
 ---   discussions?: parley.Discussion[],
 ---   head_sha?: string,
@@ -108,6 +109,7 @@ function M.new(opts)
   --- @field discussions parley.Discussion[]
 
   local mock = {
+    display_name = "Mock",
     --- @type parley.MockState
     state = {
       token = opts.token or "",
@@ -128,6 +130,23 @@ function M.new(opts)
     --- Monotonically increasing id counter.
     _id_counter = 0,
   }
+
+  --- @param self parley.Provider
+  --- @param review parley.DetectedReview
+  --- @param target parley.CommentTarget
+  --- @return parley.CommentTargetResult
+  function mock:validate_comment_target(review, target)
+    table.insert(self.calls.validate_comment_target, { review = review, target = target })
+    if self._errors.validate_comment_target then
+      error(self._errors.validate_comment_target)
+    end
+    return { ok = true }
+  end
+
+  --- @return parley.CacheIdentity
+  function mock.cache_identity()
+    return deep_copy(opts.cache_identity or { provider = "mock", host = "test", repository = "repo", account = "test" })
+  end
 
   -- Initialise an empty list for every required method name.
   for _, name in ipairs(provider.METHOD_NAMES) do
@@ -257,8 +276,8 @@ function M.new(opts)
   ---@param file string
   ---@param anchor parley.Anchor
   ---@param body parley.Body
-  ---@param callback fun(result: { ok: boolean, comment?: parley.Comment, err?: string, cancelled?: boolean }): nil
-  ---@return { cancel: fun(): nil }
+  ---@param callback parley.WriteCallback
+  ---@return parley.CancelHandle
   function mock:begin_post_top_level_comment(review, file, anchor, body, callback)
     local cancelled = false
     vim.schedule(function()
@@ -334,8 +353,8 @@ function M.new(opts)
   ---@param discussion parley.Discussion
   ---@param parent_comment parley.Comment
   ---@param body parley.Body
-  ---@param callback fun(result: { ok: boolean, comment?: parley.Comment, err?: string, cancelled?: boolean }): nil
-  ---@return { cancel: fun(): nil }
+  ---@param callback parley.WriteCallback
+  ---@return parley.CancelHandle
   function mock:begin_reply(review, discussion, parent_comment, body, callback)
     local cancelled = false
     vim.schedule(function()

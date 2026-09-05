@@ -24,10 +24,6 @@ local M = {}
 -- Constants
 -- ---------------------------------------------------------------------------
 
-local DEFAULT_TIMEOUT_MS = 10000
-local DEFAULT_RETRY_COUNT = 2
-local DEFAULT_RETRY_BASE_DELAY_MS = 250
-local DEFAULT_RETRY_MAX_DELAY_MS = 2000
 local RESPONSE_BODY_LOG_LIMIT = 2000
 
 local RETRYABLE_HTTP_STATUSES = { 429, 500, 502, 503, 504 }
@@ -53,14 +49,7 @@ local RETRYABLE_ERROR_PATTERNS = {
 --- @param self parley.arcanum.Provider
 --- @return { timeout_ms: integer, retry_count: integer, retry_base_delay_ms: integer, retry_max_delay_ms: integer }
 function M.transport_config(self)
-  local config = self._get_config and self._get_config() or nil
-  local arc = config and config.providers and config.providers.arcanum or {}
-  return {
-    timeout_ms = arc.timeout_ms or DEFAULT_TIMEOUT_MS,
-    retry_count = arc.retry_count or DEFAULT_RETRY_COUNT,
-    retry_base_delay_ms = arc.retry_base_delay_ms or DEFAULT_RETRY_BASE_DELAY_MS,
-    retry_max_delay_ms = arc.retry_max_delay_ms or DEFAULT_RETRY_MAX_DELAY_MS,
-  }
+  return self._config
 end
 
 --- @param attempt integer

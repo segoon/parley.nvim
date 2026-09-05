@@ -10,6 +10,7 @@
 
 **Layout:**
 - `lua/parley/` — all plugin logic (modules go here)
+- `lua/parley/providers/` - provider-specific code/data lives only here
 - `plugin/parley.lua` — entry point, load guard only; no logic
 - `tests/parley/` — mirrors `lua/parley/` structure
 

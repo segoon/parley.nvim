@@ -276,7 +276,15 @@ describe("parley.discussion_window", function()
     local bufnr = scratch(10)
     vim.api.nvim_win_set_cursor(0, { 3, 0 })
 
+    require("parley.repositories.provider").store(bufnr, {
+      cache_identity = function()
+        return nil
+      end,
+      reaction_choices = require("parley.providers.github.reactions").choices,
+      reaction_presentation = require("parley.providers.github.reactions").presentation,
+    }, {})
     review_repository._seed(bufnr, {
+      review = { pr = { id = "r" }, head_sha = "rev" },
       status = "ready",
       stale = false,
       discussions = {
@@ -591,7 +599,15 @@ describe("parley.discussion_window", function()
     vim.api.nvim_win_set_cursor(0, { 3, 0 })
     local calls = {}
 
+    require("parley.repositories.provider").store(bufnr, {
+      cache_identity = function()
+        return nil
+      end,
+      reaction_choices = require("parley.providers.github.reactions").choices,
+      reaction_presentation = require("parley.providers.github.reactions").presentation,
+    }, {})
     review_repository._seed(bufnr, {
+      review = { pr = { id = "r" }, head_sha = "rev" },
       status = "ready",
       stale = false,
       discussions = {

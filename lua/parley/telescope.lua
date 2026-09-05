@@ -39,7 +39,7 @@ end
 --- @return table
 local function make_entry(state, discussion)
   local location = entries.location(discussion, state.vcs_info.root, state.all_mappings)
-  local display = string.format("%s:%d [%s] %s", discussion.file, location.line, location.status, location.preview)
+  local display = string.format("%s:%s %s", discussion.file, tostring(location.line or "—"), location.text)
   return {
     value = {
       discussion = discussion,
@@ -57,7 +57,7 @@ local function open_selection(entry)
   local discussion = value and value.discussion or nil
   local path = value and value.path or nil
   local line = value and value.line or nil
-  if not discussion or not path then
+  if not discussion or not path or discussion.file == "" or not discussion.line or discussion.line < 1 then
     return
   end
 

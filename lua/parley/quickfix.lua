@@ -44,7 +44,8 @@ function M.open(bufnr)
       local location = entries.location(discussion, root, mappings)
       items[#items + 1] = {
         filename = location.path,
-        lnum = location.line,
+        lnum = location.line or 0,
+        valid = location.line == nil and 0 or nil,
         col = 1,
         text = location.text,
       }

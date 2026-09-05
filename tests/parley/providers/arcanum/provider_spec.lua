@@ -110,18 +110,7 @@ local function make_provider(responses)
       cb()
       return nil
     end,
-    _get_config = function()
-      return {
-        providers = {
-          arcanum = {
-            timeout_ms = 5000,
-            retry_count = 0,
-            retry_base_delay_ms = 250,
-            retry_max_delay_ms = 2000,
-          },
-        },
-      }
-    end,
+    config = { timeout_ms = 5000, retry_count = 0, retry_base_delay_ms = 250, retry_max_delay_ms = 2000 },
   })
 
   -- Override transport.http_run on the provider
@@ -159,9 +148,6 @@ describe("parley.providers.arcanum.provider — interface", function()
       _sleep = function(_ms) end,
       _defer = function(cb, _ms)
         cb()
-        return nil
-      end,
-      _get_config = function()
         return nil
       end,
     })
@@ -241,9 +227,6 @@ describe("parley.providers.arcanum.provider — auth", function()
         cb()
         return nil
       end,
-      _get_config = function()
-        return nil
-      end,
     })
 
     assert.equals("my-token", p:auth())
@@ -262,9 +245,6 @@ describe("parley.providers.arcanum.provider — auth", function()
       _sleep = function() end,
       _defer = function(cb, _)
         cb()
-        return nil
-      end,
-      _get_config = function()
         return nil
       end,
     })
@@ -669,9 +649,6 @@ describe("parley.providers.arcanum.provider — stubs raise errors", function()
       _sleep = function() end,
       _defer = function(cb, _)
         cb()
-        return nil
-      end,
-      _get_config = function()
         return nil
       end,
     })

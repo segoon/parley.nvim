@@ -1,3 +1,4 @@
+local optional_methods = { "begin_reply", "begin_post_top_level_comment", "reaction_choices", "reaction_presentation" }
 --- Tests for parley.registry — provider registry.
 --- Run via: make test
 
@@ -57,6 +58,19 @@ describe("parley.registry resolve", function()
     registry.reset()
   end)
 
+  it("validates optional health callbacks", function()
+    local spec = make_spec("Custom", nil, valid_factory)
+    spec.health = "invalid"
+    assert.has_error(function()
+      registry.register(spec)
+    end)
+    spec.health = function()
+      return {}
+    end
+    registry.register(spec)
+    assert.equals(spec.health, registry.registered()[1].health)
+  end)
+
   it("returns nil when no specs are registered", function()
     assert.is_nil(registry.resolve(SAMPLE_VCS))
   end)
@@ -75,6 +89,20 @@ describe("parley.registry resolve", function()
   -- -------------------------------------------------------------------------
   -- resolve — successful match
   -- -------------------------------------------------------------------------
+
+  it("rejects malformed optional methods from factories", function()
+    for _, name in ipairs(optional_methods) do
+      registry.reset()
+      registry.register(make_spec("InvalidOptional", {}, function()
+        local p = mock_provider.new({})
+        p[name] = true
+        return p
+      end))
+      local ok, err = pcall(registry.resolve, SAMPLE_VCS)
+      assert.is_false(ok)
+      assert.is_truthy(tostring(err):find("InvalidOptional", 1, true))
+    end
+  end)
 
   it("returns a valid provider when detect returns an opts table", function()
     registry.register(make_spec("Match", { token = "x" }, valid_factory))
@@ -99,6 +127,29 @@ describe("parley.registry resolve", function()
     registry.register(spec)
     registry.resolve(SAMPLE_VCS)
     assert.same(opts_from_detect, received_opts)
+  end)
+
+  it("rejects providers without target validation", function()
+    registry.register(make_spec("MissingValidation", {}, function()
+      local p = mock_provider.new({})
+      p.validate_comment_target = nil
+      return p
+    end))
+    assert.has_error(function()
+      registry.resolve(SAMPLE_VCS)
+    end)
+  end)
+
+  it("rejects provider instances without display metadata", function()
+    registry.register(make_spec("MissingName", {}, function()
+      local p = mock_provider.new({})
+      p.display_name = nil
+      return p
+    end))
+    local ok, err = pcall(registry.resolve, SAMPLE_VCS)
+    assert.is_false(ok)
+    assert.is_truthy(tostring(err):find("MissingName", 1, true))
+    assert.is_truthy(tostring(err):find("display_name", 1, true))
   end)
 
   it("detect receives the exact vcs_info passed to resolve", function()

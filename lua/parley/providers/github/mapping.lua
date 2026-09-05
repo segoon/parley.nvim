@@ -14,7 +14,7 @@ local M = {}
 
 --- Map REST reactions object keys → internal reaction type strings.
 --- @type string[]
-M.REST_REACTION_KEYS = { "+1", "-1", "laugh", "hooray", "confused", "heart", "rocket", "eyes" }
+M.REST_REACTION_KEYS = require("parley.providers.github.reactions").keys()
 
 --- Map GitHub review states → parley.ReviewStatus values.
 --- @type table<string, string>
