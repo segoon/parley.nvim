@@ -29,7 +29,7 @@ without leaving Neovim.
 
 Parley is intentionally narrow: it focuses on line-level code review inside
 the editing flow. For full GitHub clients (issues, PR metadata, repo
-browsing), see |octo.nvim| or |gh.nvim|.
+browsing), see octo.nvim or gh.nvim.
 
 Current state: ~
 
@@ -49,7 +49,8 @@ GitHub provider: ~
 
 Arcanum provider: ~
   - arc (Arcadia VCS CLI)
-  - Network access to arcanum.yandex.net
+  - curl
+  - HTTPS access to the configured API host (default arcanum.yandex.net)
 
 Optional: ~
 
@@ -82,8 +83,11 @@ With lazy.nvim: >lua
 Quick start: ~
 
   1. Install the plugin and call `setup()`.
-  2. Authenticate GitHub CLI: `gh auth login`.
-  3. Open a file in a git repo whose current branch has an open PR.
+  2. Configure GitHub credentials with `gh auth login` or a supported token
+     environment variable; for Arcanum, configure an OAuth token
+     (|parley-provider-arcanum|).
+  3. Open a regular file in a Git or Arc repo whose branch has an open PR.
+     Arcanum requires a remote branch.
   4. Run `:Parley refresh` or re-enter the buffer.
   5. Navigate with `]c` / `[c` / `]C` / `[C` (|parley-keymaps|).
   6. Toggle the discussion window with `:Parley discussion toggle`.
@@ -98,6 +102,23 @@ All Parley commands support tab completion.
 :Parley refresh                                      *:Parley-refresh*
     Force a re-fetch of PR discussions for the current buffer. Shows a
     progress popup while the request is in flight.
+
+:Parley discussion resolve                          *:Parley-discussion-resolve*
+    Resolve the selected open issue. With no selected thread, choose a discussion
+    at the source cursor using the existing line picker.
+
+:Parley discussion reopen                            *:Parley-discussion-reopen*
+    Reopen the selected resolved issue, or choose one at the source cursor.
+    Both commands work for general and unavailable-location threads opened with
+    `:Parley discussion list`. They preserve the selected thread and composer text.
+    Dropped, non-issue, unknown, incomplete, and cyclic threads cannot transition.
+    No default keybindings are assigned. Unsupported providers explain why.
+
+:Parley discussion list                              *:Parley-discussion-list*
+    List every discussion in the active review using the built-in picker.
+    General, whole-file, old-side, historical, and unavailable anchors open in
+    a discussion float attached to the source buffer without jumping to a line.
+    Replies and your own comment edits/deletions remain available in that float.
 
 :Parley discussion open                              *:Parley-discussion-open*
     Open the discussion window for the current line.
@@ -117,9 +138,17 @@ All Parley commands support tab completion.
 :Parley discussion reply                             *:Parley-discussion-reply*
     Reply to the selected or current comment thread.
 
+:Parley review actions                                *:Parley-review-actions*
+    Open the provider's explicit review-action picker. Arcanum offers Ship,
+    Sticky ship, Unship, Block merge, and Unblock merge. Confirm the PR, loaded
+    revision, and your current verdict before submitting. Escape cancels.
+    Sticky ship approves future diffs until withdrawn. No review message is sent.
+    Withdrawals require your corresponding current verdict. No default keymap.
+
 :Parley comment react                                *:Parley-comment-react*
-    Open the reaction picker for the selected comment. Toggles: adds
-    the reaction if absent, removes it if present.
+    Open provider-specific choices for the selected comment. Add a reaction
+    if absent, or remove one you already added. Arcanum preserves the chosen
+    add/remove intent even if the local snapshot refreshes before submission.
 
 :Parley comment edit                                 *:Parley-comment-edit*
     Edit the selected comment. Only works on your own comments.
@@ -146,9 +175,10 @@ All Parley commands support tab completion.
     Mirror of `:Parley nav review-next`. Wraps around at the start.
 
 :Parley quickfix                                     *:Parley-quickfix*
-    Fill the quickfix list with all discussion locations from the active
-    review and open the quickfix window. Entries use review-wide anchor
-    mappings when available, with PR line numbers as fallback.
+    Fill and open the quickfix list with file-associated discussions from the
+    active review. Entries use review-wide mappings when available. Unavailable
+    positions remain invalid rows; general discussions are omitted. Use
+    `:Parley discussion list` to access every thread.
 
 ==============================================================================
 5. KEYMAPS                                           *parley-keymaps*
@@ -181,7 +211,7 @@ Draft/input window keymaps: ~
     `<C-s>`        i       Submit the draft
     `C`            n       Cancel the in-flight request
 
-Reaction picker keymaps: ~
+Reaction and review-action picker keymaps: ~
 
     Key        Action
     `q` / `<Esc>`  Cancel
@@ -203,8 +233,10 @@ Usage: >lua
     require("telescope").extensions.parley_discussions_file.parley_discussions_file()
 <
 
-Selecting an entry opens the file, refreshes Parley state, navigates to the
-discussed line, and opens the discussion window.
+Selecting a located entry opens the file, refreshes Parley state, navigates to
+the discussion, and opens its window. General, historical, old-side, and other
+unavailable-location entries open against the source buffer without a fabricated
+line jump. The review-wide picker includes these threads.
 
 If you do not use Telescope, disable the extension loading: >lua
     require("parley").setup({ telescope = false })
@@ -213,7 +245,7 @@ If you do not use Telescope, disable the extension loading: >lua
 ==============================================================================
 7. STATUSLINE                                        *parley-statusline*
 
-Parley exposes a statusline component via |parley.statusline()|.
+Parley exposes a statusline component via |parley.statusline(bufnr)|.
 Provider branding comes from public provider metadata: GitHub displays
 `GitHub PR #…`, Arcanum displays `Arcanum PR #…`, and custom providers supply their
 own name. Review state without a provider snapshot displays `PR #…`.
@@ -248,7 +280,7 @@ With the built-in statusline: >vim
 The full default configuration:
  >lua
     require('parley').setup({
-      refresh_interval = 300, -- 5 minutes
+      refresh_interval = 300, -- Seconds between background refresh rounds
       cache_dir = vim.fn.stdpath("cache") .. "/parley",
       debug = false,
       telescope = true,
@@ -289,7 +321,7 @@ The full default configuration:
 
 Options: ~
     refresh_interval  (`integer`)  Default: `300`
-        Auto-refresh interval in seconds (0 = disabled)
+        Seconds between visible-review polling rounds; 0 disables periodic refresh
 
     cache_dir  (`string`)  Default: `vim.fn.stdpath("cache") .. "/parley"`
         Directory for disk-cached API responses
@@ -370,6 +402,30 @@ keymaps ~                                             *parley-config-keymaps*
 <parley-configuration-end>
 
 Provider defaults are merged separately; see |parley-providers|.
+
+Periodic refresh: ~
+
+`refresh_interval` defaults to 300 seconds. Set it to 0 to disable polling; other
+values must be nonnegative whole seconds whose milliseconds fit a safe integer.
+Invalid settings are rejected before replacing the active setup/configuration.
+
+Each round refreshes already-loaded reviews visible in the current tab, including
+source files represented by discussion/input windows. Buffers sharing a review
+produce one refresh. Reviews with active reads or writes in any associated buffer
+are skipped. Hidden tabs/buffers and branches without active reviews are not polled.
+
+Polling pauses on FocusLost. The first round waits a full interval after setup or
+FocusGained; later rounds wait a full interval after the previous round completes.
+Reviews run sequentially, and missed rounds do not accumulate. Repeated setup
+replaces the timer; disabling polling and VimLeavePre close it. Already-started
+reads may finish, but obsolete callbacks cannot resume an old schedule.
+
+Timer refreshes do not display progress popups or error notifications. Existing
+snapshot, identity, and draft-preservation rules still apply. A failed active
+review can retry next round; failed preparation may clear obsolete state, requiring
+buffer entry or manual refresh to load it again. `:Parley refresh` retains explicit
+progress/error reporting. Buffer entry still discovers reviews, writes refresh
+remote state, and local edits update mappings separately.
 
 ==============================================================================
 9. HIGHLIGHTS                                        *parley-highlights*
@@ -469,7 +525,7 @@ Limitations: ~
 Arcanum                                              *parley-provider-arcanum*
 
 The built-in Arcanum provider supports Arc (Arcadia VCS) repositories via
-the Arcanum public REST API at arcanum.yandex.net.
+the Arcanum public and plugin REST APIs over HTTPS at arcanum.yandex.net.
 
 The provider is activated automatically when the current buffer belongs to an
 Arc repository (detected via `arc root`).
@@ -479,40 +535,151 @@ Authentication: ~
 OAuth tokens are resolved in the following order:
 
   1. Environment variable: `ARCANUM_TOKEN`
-  2. File: `~/.arc/token` (plain text, single line)
+  2. Environment variable: `ARC_OAUTH_TOKEN`
+  3. File named by `ARC_TOKEN_PATH`
+  4. File: `~/.arc/token` (plain text, single line)
+
+Values are trimmed; empty environment values are ignored. An explicitly selected
+ARC_TOKEN_PATH must be readable and nonempty. Failure does not silently switch to
+~/.arc/token. Diagnostics identify the source without printing the token.
 
 To obtain a token: https://a.yandex-team.ru/oauth/token
 
 User login detection: ~
 
-The current user login is derived from `arc config -l` output (user.email
-field). The login is used to filter PRs authored by the current user and to
-determine `is_own` on comments.
+The local Arc login comes from `arc info --json` and is diagnostic metadata only.
+Normal review loading verifies the OAuth account via `/v2/users/me?fields=name`
+before restoring cached discussions. Only this verified login determines comment
+ownership. A differing local Arc login does not override it. Failed verification
+fails review loading; Parley does not fall back to a guessed account or cached
+ownership. Credential changes invalidate the session and reject obsolete results.
+Direct provider mutations require a prepared session from review loading.
+
+PR detection follows prefix-search pages using offset and has_next until an exact
+remote branch match is found. Candidate details are fetched once per search;
+malformed or nonprogressing pages are errors. Without a remote branch, Parley stays
+inactive without authentication or PR HTTP requests.
+
+Inline comments: ~
+
+New line and range comments are published on the new side of the loaded review
+using the V2 diff API. Submission uses the loaded diff without checking whether
+Arcanum has since activated a newer diff. Refresh the review to use newer data.
+
+Missing diff/revision metadata, unavailable file entries, and failed lookups
+prevent submission; inline comments never fall back to general PR comments.
+The draft remains available after failure or cancellation. If a creation response
+is incomplete, check the review before retrying: the comment may have been sent.
+Cancellation after sending does not guarantee that the server discarded it.
+
+Discussion locations and issue states: ~
+
+Arcanum threads retain nested replies, including incomplete or cyclic ancestry.
+Only open issues contribute to the unresolved count; resolved, dropped, non-issue,
+and unknown states remain distinguishable. Only verified current new-side inline
+anchors receive buffer positions. Other anchors retain their side, paths, and
+revision metadata in the discussion list and float. Navigation skips unavailable
+positions; quickfix retains file-associated entries as invalid rows and omits
+general discussions. Discussion selection and composer text survive refreshes.
 
 Provider options: ~
+
+The configured host must be a hostname or bracketed IPv6 address, optionally with
+a port. Schemes, userinfo, paths, queries, fragments, and whitespace are rejected.
+An explicit constructor host overrides providers.arcanum.host; the effective host
+is used consistently by verification, discovery, reads, writes, and cache identity.
 
 Arcanum-specific options live under `providers.arcanum` in the setup call: >lua
     require("parley").setup({
       providers = {
         arcanum = {
-          timeout_ms = 10000,      -- HTTP request timeout in milliseconds
-          retry_count = 2,         -- Number of retries on transient errors
+          timeout_ms = 10000,      -- Queue + attempts + retry waits, milliseconds
+          retry_count = 2,         -- Maximum automatic retries for eligible requests
           retry_base_delay_ms = 250,
           retry_max_delay_ms = 2000,
+          request_interval_ms = 1000, -- Minimum spacing between request starts
+          idempotent_write_retries = false, -- Requires confirmed server support
           host = "arcanum.yandex.net",  -- API hostname (rarely changed)
         },
       },
     })
 <
 
+Each transport request has one `timeout_ms` budget covering queueing, HTTP
+attempts, and retry waits. Inline entry lookup and comment creation are separate
+requests. Expiration completes the request and terminates any active curl process.
+
+Requests sharing a host and OAuth token share a queue in this Neovim process.
+The default spacing is one second; retries use the same queue. Separate Neovim
+processes and other clients are not coordinated. A shared queue retains the
+slowest interval used during this process. A 429 response delays that queue;
+`Retry-After` seconds or a GMT HTTP-date takes precedence over shorter backoff.
+Long server-directed waits remain subject to the request's deadline.
+
+Reads, including PR search, retry transient failures up to `retry_count` times.
+Comment creation and replies always send one idempotency key per submission,
+reused across automatic retries with the same body. Their automatic retries are
+disabled unless `idempotent_write_retries = true`. Enable this only after confirming
+that your deployed Arcanum server supports `Idempotency-Key`; local server source
+alone does not establish deployment support. Edits, deletions, and unclassified
+mutations are not retried automatically. Conflicts and authentication failures
+are not retried.
+
+Manual resubmission uses a new key. After an uncertain write failure or
+cancellation, check the review before retrying. Drafts are preserved; terminating
+curl cannot roll back a change the server has already accepted.
+
 Limitations: ~
 
-  - `resolve` / `unresolve` are not supported by the Arcanum public API.
-  - `react` (reactions) are not supported by the Arcanum public API.
-  - `submit_review` (verdicts) is not supported by the Arcanum public API.
-  - Attempting any unsupported operation shows a "not supported" error.
+  - Reactions require GENERIC_WRITE. Ship/sticky ship/block merge require
+    REVIEW_REQUEST_SHIP; withdrawing approval or a block requires GENERIC_WRITE.
+    Ordinary tokens cannot query the admin-only authorities endpoint. Permissions
+    are enforced by the server; capability support does not verify token scopes.
+  - :Parley review actions rechecks the active diff after confirmation and aborts
+    on mismatch. The server cannot atomically pin the expected diff, so a diff
+    activated between the recheck and mutation can still receive the action.
+    Mutations are never automatically retried. Check uncertain outcomes before
+    retrying. Generic submit_review with a body remains unsupported.
+  - Review status uses plugin review data: any block means changes_requested;
+    zero remaining required approvals means approved; otherwise pending. A failed
+    or malformed status response means unknown and disables review actions while
+    discussions remain readable. Refresh to recover.
+  - Issue resolution/reopening uses the public comment PATCH API and requires
+    GENERIC_WRITE authorization. Capability support does not guarantee permission.
+    These PATCH requests are never retried automatically. After uncertain failures
+    or cancellation, Parley refreshes the review; check it before retrying.
 
 ------------------------------------------------------------------------------
+
+Provider action capabilities: ~                       *parley-provider-capabilities*
+
+Optional `provider:capabilities(review)` returns a table keyed by provider method:
+`post_top_level_comment`, `reply`, `edit`, `delete`, `react`, `resolve`, `unresolve`,
+`submit_review`, and `review_action`. Each value is `{ available = true }` or
+`{ available = false, reason = "Explanation" }`. This hook must be local-only and
+must not yield. It describes implemented actions, not token permissions.
+When the hook exists, missing or malformed action entries fail closed.
+Providers without it retain existing actions; resolve/reopen and review_action require explicit
+support. Reaction choices remain required for reaction mutation.
+
+Built-in action support (yes = implemented in Parley): ~
+
+  Action                    GitHub  Arcanum
+  post_top_level_comment    yes     yes
+  reply                     yes     yes
+  edit                      yes     yes
+  delete                    yes     yes
+  react                     yes     yes
+  resolve                   no      yes
+  unresolve                 no      yes
+  submit_review             yes     no
+  review_action             no      yes
+
+Capability checks run before composing, choosing reactions, confirming deletion,
+and submitting writes. Provider reasons explain unavailable actions. Commands
+remain discoverable in completion. Custom providers may implement cancellable
+`begin_resolve(review, discussion_id, callback)` and `begin_unresolve(...)` with
+the existing WriteResult/CancelHandle contract; coroutine methods remain supported.
 
 Provider configuration lifecycle: ~
 
@@ -572,8 +739,6 @@ the detected review's `head_sha`. Missing, empty, non-string, or leading-hyphen
 revisions return `nil, "review revision is unavailable"` before command execution.
 
 
-Provider-owned cache identity: ~
-
 Optional cancellable writes: ~
 
 Providers may implement either or both of these colon-call methods:
@@ -590,8 +755,13 @@ Starters must return promptly without yielding, returning a `parley.CancelHandle
 with a `cancel()` function (called without a self argument). Invoke the
 `parley.WriteCallback` exactly once on the Neovim main loop, either before returning
 or later. A `parley.WriteResult` contains `ok` (boolean), optional `comment`,
-optional `err` (string), and optional `cancelled` (boolean). A cancelled result must
-have `ok = false`. Successful callbacks need not return a comment object.
+optional `err` (string), and optional boolean `cancelled`, `uncertain`, and
+`refresh`. Set `refresh = true` for a known conflict requiring fresh remote state.
+Set `uncertain = true` when a failed write may have reached the server,
+with an `err` explaining that the user should check the review before retrying.
+This message remains visible in the composer after cancellation or failure.
+A cancelled result must have `ok = false`. Successful callbacks need not return
+a comment object.
 
 Cancellation requests completion through the callback; shared writes continue
 waiting until it arrives. It does not guarantee rollback of a remote mutation.
@@ -599,6 +769,21 @@ Shared execution tolerates immediate completion, ignores duplicate or stale
 callbacks, and turns startup failures or malformed pending handles/results into
 write failures while retaining drafts. Existing providers with valid hooks need
 no behavioral changes. Providers without these hooks retain coroutine fallbacks.
+
+Shared HTTP infrastructure: ~
+
+`require("parley.http").start(opts, callback)` returns a cancel handle immediately.
+Options are `url`, optional `method`, `headers`, serialized `body`, Bearer `token`,
+and `timeout_ms` (default 10000). Its callback completes once on the main loop.
+A result has `ok`, `sent`, and either `response` or `err`; failures may also carry
+`exit`, `cancelled`, or `timed_out`. Network success is distinct from HTTP success:
+`result.response.ok` indicates a 2xx status. Response fields are `status`,
+`headers`, and `body`. `http.request(opts)` awaits the same operation through
+Plenary and returns the response, raising on network failure. `http.get` and
+`http.post` retain their convenience interfaces. Provider-specific scheduling,
+retries, and response-envelope validation belong to the provider layer.
+
+Provider-owned cache identity: ~
 
 Every provider must implement `provider:cache_identity()`. It runs in a Plenary
 coroutine and returns { provider, host, repository, account }, with four nonempty
@@ -612,7 +797,7 @@ snapshots. Missing methods and malformed values are contract errors. Nil identit
 keeps live review operations available using isolated temporary state and skips
 all persistent review-cache reads, writes, and invalidation.
 
-Review cache keys use the reviews-v2 namespace and hashes of ordered identity
+Review cache keys use the reviews-v3 namespace and hashes of ordered identity
 fields and typed branch/PR identifiers. Provider, host, repository, and credential
 contexts are isolated. Token rotation causes a cold refresh. Checkout-specific
 local mappings remain separate even when remote cache identity is shared.
@@ -625,6 +810,14 @@ fetching discard those results and schedule a refresh with the current identity.
 opaque detection options. `registry.resolve(vcs_info)` retains its provider-only
 return value. Shared cache code consumes validated snapshot identity, not factory
 options or private provider fields.
+
+The optional `provider:prepare(vcs_info)` hook runs in a Plenary coroutine before
+provider identity is published or review caches are consulted. Preparation errors
+clear obsolete provider/review state. Providers without the hook retain their
+existing lifecycle. Arcanum verifies its API account here; its cache identity binds
+host, credential fingerprint, and verified viewer and excludes the local Arc login.
+The ownership cache version changes with this release, so earlier cached ownership
+is not reused. Tokens are neither stored in cache keys nor printed in diagnostics.
 
 The optional provider-spec `health(context)` callback runs in a plenary.async
 coroutine. It receives `vcs_info`, the `opts` returned by detection, and current
@@ -639,7 +832,7 @@ Provider-owned reactions: ~
 Providers may implement these optional, synchronous, local-only methods:
 
   reaction_choices(review, comment)
-      Returns an ordered list of { reaction, label, emoji? } and an optional
+      Returns an ordered list of { reaction, label, emoji?, remove_only? } and an optional
       unavailable-reason string. `reaction` is an opaque provider identifier.
       An empty list disables mutation and displays the reason when requested.
 
@@ -653,11 +846,34 @@ concrete catalogs and presentation logic under `lua/parley/providers/`.
 Missing methods preserve raw labels and make interactive mutations unavailable;
 there is no implicit GitHub catalog. Cached reaction data remains unchanged.
 
-GitHub retains its existing reaction choices and emoji. Arcanum reactions remain
-readable using their original codes; changing them is not implemented in Parley.
+GitHub retains its existing reaction choices and emoji. Arcanum offers thumbs up,
+thumbs down, and heart (:+1:, :-1:, :heart:). Other codes remain readable and can
+be removed if you added them. AI comments allow only one reaction per account;
+a conflict requires refreshing and explicitly removing your existing reaction.
+The public comment response does not identify AI comments reliably.
 The picker and direct reaction service reject choices that are not currently
 offered. Changing review/provider context while the picker is open requires
 reopening it before submitting.
+
+Optional cancellable action hooks: ~
+
+  begin_set_reaction(review, comment_id, code, present, callback)
+      Sets the captured desired state; present=true adds, false removes. Shared
+      UI revalidates comment availability. Without this hook, react() toggles.
+      remove_only choices cannot add reactions.
+
+  review_actions(review)
+      Local-only ordered { action, label, confirmation, reason? } choices.
+      A reason disables that choice. Requires explicit review_action capability.
+
+  begin_review_action(review, action, callback)
+      Executes a confirmed action. The shared UI verifies review identity after
+      selection and confirmation; providers validate their own remote context.
+
+Both begin hooks follow the WriteCallback/CancelHandle contract above, including
+exactly-once completion, cancellation and uncertain outcomes. A failed result may
+set refresh=true for known conflicts that require a fresh snapshot. Refresh preserves
+selected discussions and drafts. GitHub's submit_review contract is unchanged.
 
 Custom VCS implementations: ~
 
@@ -709,7 +925,8 @@ The health check verifies:
 
 GitHub diagnostics check Git/gh executables, branch, and credentials from the
 environment or hosts.yml. Keyring credentials are not checked. Arcanum diagnostics
-check Arc/curl executables, remote branch, login, and local token availability.
+check Arc/curl executables, remote branch, configured HTTPS host, local Arc login,
+and credential source/availability. They do not construct or prepare a provider.
 Missing executables for unrelated providers do not produce warnings.
 
 Credential availability does not verify server authentication. No API requests or
@@ -742,7 +959,7 @@ parley.setup(opts)                                       *parley.setup(opts)*
 
  >lua
     require("parley").setup({
-      refresh_interval = 120,
+      telescope = false,
     })
 <
 
