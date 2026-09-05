@@ -216,7 +216,8 @@ a.describe("provider changed-line eligibility with Git", function()
       { vcs = "git", root = "/repo" },
       "main",
       "f.lua",
-      { start_line = 5, end_line = nil }
+      { start_line = 5, end_line = nil },
+      "review-revision"
     )
 
     assert.is_true(result.ok)
@@ -231,7 +232,8 @@ a.describe("provider changed-line eligibility with Git", function()
       { vcs = "git", root = "/repo" },
       "main",
       "f.lua",
-      { start_line = 7, end_line = nil }
+      { start_line = 7, end_line = nil },
+      "review-revision"
     )
 
     assert.is_true(result.ok)
@@ -245,7 +247,8 @@ a.describe("provider changed-line eligibility with Git", function()
       { vcs = "git", root = "/repo" },
       "main",
       "f.lua",
-      { start_line = 11, end_line = 13 }
+      { start_line = 11, end_line = 13 },
+      "review-revision"
     )
 
     assert.is_true(result.ok)
@@ -261,7 +264,8 @@ a.describe("provider changed-line eligibility with Git", function()
       { vcs = "git", root = "/repo" },
       "main",
       "f.lua",
-      { start_line = 5, end_line = nil }
+      { start_line = 5, end_line = nil },
+      "review-revision"
     )
 
     assert.is_false(result.ok)
@@ -277,7 +281,8 @@ a.describe("provider changed-line eligibility with Git", function()
       { vcs = "git", root = "/repo" },
       "main",
       "f.lua",
-      { start_line = 20, end_line = nil }
+      { start_line = 20, end_line = nil },
+      "review-revision"
     )
 
     assert.is_false(result.ok)
@@ -292,7 +297,8 @@ a.describe("provider changed-line eligibility with Git", function()
       { vcs = "git", root = "/repo" },
       "main",
       "f.lua",
-      { start_line = 1, end_line = nil }
+      { start_line = 1, end_line = nil },
+      "review-revision"
     )
 
     assert.is_truthy(result.err:find("changed", 1, true))
@@ -308,7 +314,8 @@ a.describe("provider changed-line eligibility with Git", function()
       { vcs = "git", root = "/repo" },
       "main",
       "f.lua",
-      { start_line = 10, end_line = 15 }
+      { start_line = 10, end_line = 15 },
+      "review-revision"
     )
 
     assert.is_false(result.ok)
@@ -325,7 +332,8 @@ a.describe("provider changed-line eligibility with Git", function()
       { vcs = "git", root = "/repo" },
       "main",
       "unchanged.lua",
-      { start_line = 1, end_line = nil }
+      { start_line = 1, end_line = nil },
+      "review-revision"
     )
 
     assert.is_false(result.ok)
@@ -342,7 +350,8 @@ a.describe("provider changed-line eligibility with Git", function()
       { vcs = "git", root = "/repo" },
       "unknown-base",
       "f.lua",
-      { start_line = 5, end_line = nil }
+      { start_line = 5, end_line = nil },
+      "review-revision"
     )
 
     assert.is_false(result.ok)
@@ -350,7 +359,7 @@ a.describe("provider changed-line eligibility with Git", function()
 
   -- ── Command shape ─────────────────────────────────────────────────────────
 
-  a.it("runs git diff --unified=0 origin/<base_branch>...HEAD -- <rel_path>", function()
+  a.it("runs git diff --unified=0 origin/<base_branch>...review-revision -- <rel_path>", function()
     local mock = make_runner({ { code = 0, stdout = diff_hunk(5, 3), stderr = "" } })
     vcs._runner = mock.runner
 
@@ -358,14 +367,15 @@ a.describe("provider changed-line eligibility with Git", function()
       { vcs = "git", root = "/my/repo" },
       "main",
       "src/foo.lua",
-      { start_line = 5, end_line = nil }
+      { start_line = 5, end_line = nil },
+      "review-revision"
     )
 
     local cmd = mock.calls[1].cmd
     assert.equals("git", cmd[1])
     assert.equals("diff", cmd[2])
     assert.equals("--unified=0", cmd[5])
-    assert.equals("origin/main...HEAD", cmd[6])
+    assert.equals("origin/main...review-revision", cmd[6])
     assert.equals("--", cmd[7])
     assert.equals("src/foo.lua", cmd[8])
     assert.equals("/my/repo", mock.calls[1].cwd)

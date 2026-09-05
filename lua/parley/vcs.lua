@@ -196,7 +196,7 @@ end
 --- @param info parley.VcsInfo
 --- @param base_branch string
 --- @param rel_path string
---- @param head_sha? string
+--- @param head_sha string
 --- @return string|nil, string|nil
 function M.read_diff(info, base_branch, rel_path, head_sha)
   local adapter, err = adapters.get(info)
@@ -206,7 +206,10 @@ function M.read_diff(info, base_branch, rel_path, head_sha)
   if type(base_branch) ~= "string" or base_branch == "" or base_branch:sub(1, 1) == "-" then
     return nil, "review base is unavailable."
   end
-  local result = M._runner(adapter.diff(base_branch, head_sha or "HEAD", rel_path), info.root)
+  if type(head_sha) ~= "string" or head_sha == "" or head_sha:sub(1, 1) == "-" then
+    return nil, "review revision is unavailable"
+  end
+  local result = M._runner(adapter.diff(base_branch, head_sha, rel_path), info.root)
   if result.code ~= 0 then
     return nil, "failed to read review diff (" .. (result.stderr or "") .. ")"
   end

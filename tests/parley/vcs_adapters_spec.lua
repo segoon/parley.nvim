@@ -53,12 +53,44 @@ a.describe("VCS adapter registry", function()
     }, calls)
   end)
 
+  a.it("rejects invalid diff revisions before invoking the adapter", function()
+    local custom = adapter()
+    custom.diff = function()
+      error("must not construct a command")
+    end
+    vcs.register_adapter("custom", custom)
+    local info = { vcs = "custom", root = "/checkout" }
+    local text, err = vcs.read_diff(info, "base", "f")
+    assert.is_nil(text)
+    assert.equals("review revision is unavailable", err)
+    for _, revision in ipairs({ "", false, 42, {}, "-option" }) do
+      text, err = vcs.read_diff(info, "base", "f", revision)
+      assert.is_nil(text)
+      assert.equals("review revision is unavailable", err)
+    end
+    assert.equals(0, #calls)
+  end)
+
+  a.it("forwards an explicit opaque revision without a current-revision alias", function()
+    local custom = adapter()
+    custom.diff = function(base, revision, path)
+      assert.equals("change:opaque/123", revision)
+      return { "custom", "diff", base, revision, path }
+    end
+    vcs.register_adapter("custom", custom)
+    assert.equals(
+      "@@ -1 +1 @@\n",
+      vcs.read_diff({ vcs = "custom", root = "/checkout" }, "base", "f", "change:opaque/123")
+    )
+    assert.equals(1, #calls)
+  end)
+
   a.it("has no implicit built-ins and executes nothing for missing adapters", function()
     for _, name in ipairs({ "git", "arc", "unknown" }) do
       local info = { vcs = name, root = "/checkout" }
       assert.is_nil(vcs.read_file(info, "rev", "f"))
       assert.is_false(vcs.check_sync_state(info, "f", "rev").ok)
-      assert.is_nil(vcs.read_diff(info, "base", "f"))
+      assert.is_nil(vcs.read_diff(info, "base", "f", "rev"))
     end
     assert.equals(0, #calls)
   end)

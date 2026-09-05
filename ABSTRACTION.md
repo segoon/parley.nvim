@@ -39,46 +39,6 @@ clean-file protections are intentional shared concepts, not provider leaks.
 
 ## Remaining work
 
-### R1. Shared diff reads still supply a concrete revision alias
-
-**Status: open. Severity: 4/10. Category: residual VCS policy leak.**
-
-[`vcs.read_diff()`](lua/parley/vcs.lua#L201) passes `head_sha or "HEAD"` to the
-registered adapter. Its optional revision argument therefore adopts Git/Arc's
-current-revision spelling on behalf of every VCS. A custom adapter that uses a
-different revision syntax receives the wrong value unless it compensates for
-shared behavior. The failure is on omitted-revision calls; built-in eligibility
-normally supplies an explicit review revision.
-
-**Executed probe:** register a custom adapter whose `diff` function records its
-second argument, replace `vcs._runner` with an in-memory successful result, and
-call `read_diff(info, "base", "file")`. Output: `implicit revision=HEAD`. No VCS
-process was executed. The existing
-[custom-adapter test](tests/parley/vcs_adapters_spec.lua) passes `"rev"` explicitly,
-so its custom identifier does not test this default.
-
-**Recommendation:** require an explicit revision for shared review diff reads,
-reject absent/empty revisions before invoking adapters, and keep any
-current-checkout convenience inside provider-owned adapters. Audit direct callers
-and document the signature change. This keeps review operations tied to a known
-revision and removes shared knowledge of a revision alias.
-
-**Alternative:** preserve an optional revision and pass an explicit absence or
-semantic operation to the adapter, letting each adapter resolve its own current
-revision. This retains convenience but expands the adapter contract and allows
-mutable-checkout diffs; it needs separate semantics and tests.
-
-**Requirements/limits:** retain current built-in review behavior and error
-handling. Leading-hyphen rejection in shared revision/base validation also embeds
-CLI argument-safety assumptions; assess it alongside adapter input validation,
-but do not remove protections without safe command construction. No incompatible
-built-in revision was demonstrated by this audit.
-
-**Complexity/maintenance:** small implementation and caller migration; low ongoing
-cost for an explicit-revision contract, higher for dual current/immutable modes.
-**Regression coverage:** a custom adapter with no `HEAD` alias; missing revision;
-explicit opaque revision; unchanged built-in diff commands and failures.
-
 ### Integrated custom-provider regression
 
 **Status: recommended; not implemented as one integrated workflow.**
@@ -90,7 +50,7 @@ identity/revision/reaction values, display metadata, caching, reactions, and
 posting without private GitHub-style fields. Keep real subprocesses and network
 requests stubbed while using the actual shared orchestration.
 
-Implement R1 first, then this integration coverage. The command-oriented VCS
+All recorded concrete findings are addressed. Next: this integration coverage. The command-oriented VCS
 adapter is an explicit current contract; arbitrary non-CLI VCS support remains
 an extensibility consideration rather than a demonstrated regression.
 
@@ -108,6 +68,7 @@ an extensibility consideration rather than a demonstrated regression.
 | Construction validation | Repository resolution uses the validated registry before identity resolution. |
 | Architecture-policy coverage | Filesystem discovery covers all production modules; provider-layer and static-import checks reject boundary violations. |
 | R3: immediate write completion | One lifecycle registers operations before starting, completes once, handles failures, and binds cancellation to the original operation. |
+| R1: shared revision alias | Diff reads require an explicit valid review revision and forward it unchanged; missing revisions never invoke adapter commands. |
 | R2: optional execution contract | Cancellable hooks and callback/handle types are declared; all present optional methods must be functions. Coroutine fallbacks remain available. |
 
 R2 adds `begin_post_top_level_comment` and `begin_reply` to the declared optional
@@ -129,10 +90,9 @@ See [contract tests](tests/parley/provider_spec.lua),
 [lifecycle tests](tests/parley/services/write_operation_spec.lua), and
 [architecture checker tests](tests/parley/policy_checker_spec.lua).
 
-Validation for this change: **909 tests pass**, with clean formatting and lint
-checks.
+Validation for this change: **911 tests pass**, with clean formatting and lint checks.
 No live provider API requests are needed for this refactor. The original audit
-probes used injected dependencies; R1's omitted-revision result remains open.
+probes used injected dependencies; R1's omitted-revision default is now removed.
 Structural checks cover supported static imports, not copied algorithms or
 arbitrary runtime indirection. Passing them does not establish semantic provider
 independence; the integrated custom-provider scenario remains useful.

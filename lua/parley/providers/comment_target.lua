@@ -4,7 +4,7 @@ local M = {}
 --- @param base_branch string
 --- @param rel_path string
 --- @param anch parley.Anchor
---- @param head_sha? string
+--- @param head_sha string
 --- @return parley.CommentTargetResult
 function M.check(info, base_branch, rel_path, anch, head_sha)
   local diff, err = require("parley.vcs").read_diff(info, base_branch, rel_path, head_sha)

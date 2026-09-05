@@ -443,6 +443,10 @@ Existing custom providers must add this method; there is no implicit fallback.
 Internal integrations using `parley.vcs.check_anchor_in_diff` should migrate to
 the provider method. Generic diff reads use `parley.vcs.read_diff(vcs_info,
 base_branch, rel_path, head_sha)`, returning diff text or `nil, error`.
+The `head_sha` argument is required and forwarded unchanged to the VCS adapter;
+there is no implicit current-revision default. Callers that omitted it must pass
+the detected review's `head_sha`. Missing, empty, non-string, or leading-hyphen
+revisions return `nil, "review revision is unavailable"` before command execution.
 
 
 Provider-owned cache identity: ~
