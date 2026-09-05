@@ -60,6 +60,12 @@ local M = {}
 --- @field cancel fun(): nil Request cancellation; completion arrives through the callback.
 
 --- @class parley.Provider
+--- Local-only implemented actions, not token authorization.
+--- @field capabilities? fun(self: parley.Provider, review: parley.DetectedReview): parley.ProviderCapabilities
+--- @field begin_resolve? fun(self: parley.Provider, review: parley.DetectedReview,
+--- discussion_id: string, callback: parley.WriteCallback): parley.CancelHandle
+--- @field begin_unresolve? fun(self: parley.Provider, review: parley.DetectedReview,
+--- discussion_id: string, callback: parley.WriteCallback): parley.CancelHandle
 --- @field validate_comment_target fun(
 ---   self: parley.Provider, review: parley.DetectedReview, target: parley.CommentTarget
 --- ): parley.CommentTargetResult
@@ -160,6 +166,9 @@ M.METHOD_NAMES = {
 --- Optional methods are validated when present; absence preserves fallback behavior.
 --- @type string[]
 M.OPTIONAL_METHOD_NAMES = {
+  "capabilities",
+  "begin_resolve",
+  "begin_unresolve",
   "begin_post_top_level_comment",
   "begin_reply",
   "reaction_choices",

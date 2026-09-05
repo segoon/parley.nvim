@@ -133,7 +133,9 @@
         "lua/parley/discussion_window/render.lua",
         "lua/parley/model.lua",
         "lua/parley/provider.lua",
-        "lua/parley/registry.lua"
+        "lua/parley/registry.lua",
+        "lua/parley/capabilities.lua",
+        "lua/parley/commands.lua"
       ],
       "capabilities": [],
       "depends": []
@@ -246,7 +248,11 @@
         "lua/parley/ui_states/progress.lua",
         "lua/telescope/_extensions/parley_discussions.lua",
         "lua/telescope/_extensions/parley_discussions_file.lua",
-        "plugin/parley.lua"
+        "plugin/parley.lua",
+        "lua/parley/discussion_actions.lua",
+        "lua/parley/services/write_context.lua",
+        "lua/parley/services/comment_actions.lua",
+        "lua/parley/services/issue_actions.lua"
       ],
       "capabilities": [
         "ui_direct",
@@ -315,7 +321,10 @@
         "lua/parley/providers/init.lua",
         "lua/parley/providers/vcs.lua",
         "lua/parley/providers/vcs/arc.lua",
-        "lua/parley/providers/vcs/git.lua"
+        "lua/parley/providers/vcs/git.lua",
+        "lua/parley/providers/arcanum/capabilities.lua",
+        "lua/parley/providers/arcanum/resolution.lua",
+        "lua/parley/providers/github/capabilities.lua"
       ],
       "capabilities": [
         "buffer_inspect",

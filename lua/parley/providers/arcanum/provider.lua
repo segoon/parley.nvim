@@ -10,8 +10,8 @@
 ---   • Discussion fetching: GET /v1/public/review-requests/{pr_id}/comments.
 ---   • Anchored comment posting requires resolving entry_id from the active diff
 ---     changelist; these are cached in write_context after detect_pr.
----   • resolve / unresolve / react / submit_review are not supported by the
----     Arcanum public API and raise an error.
+---   • Issue resolution uses public comment PATCH; reactions and review submission
+---     are not implemented in this provider.
 ---
 --- Testability:
 ---   • transport.http_run / transport.http_start: injectable transport seams.
@@ -52,6 +52,7 @@ local PR_DETAIL_FIELDS = "id,summary,status,url,author,vcs"
 --- @type parley.arcanum.Provider
 local ArcanumProvider = { display_name = require("parley.providers.arcanum.metadata").display_name }
 ArcanumProvider.__index = ArcanumProvider
+ArcanumProvider.capabilities = require("parley.providers.arcanum.capabilities").get
 ArcanumProvider.validate_comment_target = require("parley.providers.comment_target").validate
 ArcanumProvider.cache_identity = require("parley.providers.arcanum.cache_identity").get
 ArcanumProvider.reaction_choices = require("parley.providers.arcanum.reactions").choices
@@ -334,30 +335,14 @@ function ArcanumProvider:begin_reply(_review, _discussion, parent_comment, body,
   )
 end
 
---- Resolve a discussion thread.
---- NOT IMPLEMENTED — Arcanum public API does not expose a resolve endpoint.
----
---- @param self          parley.arcanum.Provider
---- @param _review       parley.DetectedReview
---- @param _discussion_id string
-function ArcanumProvider:resolve(_review, _discussion_id)
-  local _ = self
-  error("parley.arcanum: resolve is not supported by the Arcanum public API", 0)
-end
-
---- Unresolve a discussion thread.
---- NOT IMPLEMENTED — Arcanum public API does not expose an unresolve endpoint.
----
---- @param self          parley.arcanum.Provider
---- @param _review       parley.DetectedReview
---- @param _discussion_id string
-function ArcanumProvider:unresolve(_review, _discussion_id)
-  local _ = self
-  error("parley.arcanum: unresolve is not supported by the Arcanum public API", 0)
-end
+local resolution = require("parley.providers.arcanum.resolution")
+ArcanumProvider.resolve = resolution.resolve
+ArcanumProvider.unresolve = resolution.unresolve
+ArcanumProvider.begin_resolve = resolution.begin_resolve
+ArcanumProvider.begin_unresolve = resolution.begin_unresolve
 
 --- Toggle a reaction on a comment.
---- NOT IMPLEMENTED — Arcanum public API does not expose a reaction mutation endpoint.
+--- NOT IMPLEMENTED — plugin reaction API integration is pending.
 ---
 --- @param self        parley.arcanum.Provider
 --- @param _review     parley.DetectedReview
@@ -365,7 +350,7 @@ end
 --- @param _reaction   string
 function ArcanumProvider:react(_review, _comment_id, _reaction)
   local _ = self
-  error("parley.arcanum: reactions are not supported by the Arcanum public API", 0)
+  error("parley.arcanum: reaction changes are not implemented in Parley", 0)
 end
 
 --- Edit an existing comment body.
@@ -399,7 +384,7 @@ function ArcanumProvider:delete(_review, comment_id)
 end
 
 --- Submit a PR-level review verdict.
---- NOT IMPLEMENTED — Arcanum public API does not expose a review verdict endpoint.
+--- NOT IMPLEMENTED — plugin review API integration is pending.
 ---
 --- @param self   parley.arcanum.Provider
 --- @param _review parley.DetectedReview
@@ -407,7 +392,7 @@ end
 --- @param _body  parley.Body
 function ArcanumProvider:submit_review(_review, _event, _body)
   local _ = self
-  error("parley.arcanum: submit_review is not supported by the Arcanum public API", 0)
+  error("parley.arcanum: review submission is not implemented in Parley", 0)
 end
 
 --- Return a short label for use in progress messages.

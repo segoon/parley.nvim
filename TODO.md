@@ -1,6 +1,7 @@
 features:
 - :Telescope discussions|issues|comments? vcs_issues? - preview
-- resolve/unresolve thread, unresolved count (GraphQL)
+- GitHub resolve/unresolve thread and resolved state (GraphQL)
+- Arcanum reactions and review submission (provider capability metadata is in place)
 
 features (2):
 - `X-RateLimit-*`, 429, 403 from gh

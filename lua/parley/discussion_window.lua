@@ -317,7 +317,7 @@ end
 
 --- Open the discussion window for the current line in `bufnr`.
 ---@param bufnr integer
----@param opts? { cursor_line?: integer }
+---@param opts? { cursor_line?: integer, on_select?: fun(discussion: parley.Discussion): boolean }
 ---@return boolean
 function M.open_current_line(bufnr, opts)
   opts = opts or {}
@@ -348,11 +348,18 @@ function M.open_current_line(bufnr, opts)
   end
 
   if #discussions == 1 then
+    if opts.on_select then
+      return opts.on_select(discussions[1])
+    end
     return open_discussions(bufnr, discussions, state.mappings or {}, source_winid, cursor_line)
   end
 
   M._select_discussion(discussions, source_winid, function(chosen)
     if not chosen then
+      return
+    end
+    if opts.on_select then
+      opts.on_select(chosen)
       return
     end
     open_discussions(bufnr, { chosen }, state.mappings or {}, source_winid, cursor_line)

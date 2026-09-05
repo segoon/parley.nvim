@@ -99,6 +99,17 @@ All Parley commands support tab completion.
     Force a re-fetch of PR discussions for the current buffer. Shows a
     progress popup while the request is in flight.
 
+:Parley discussion resolve                          *:Parley-discussion-resolve*
+    Resolve the selected open issue. With no selected thread, choose a discussion
+    at the source cursor using the existing line picker.
+
+:Parley discussion reopen                            *:Parley-discussion-reopen*
+    Reopen the selected resolved issue, or choose one at the source cursor.
+    Both commands work for general and unavailable-location threads opened with
+    `:Parley discussion list`. They preserve the selected thread and composer text.
+    Dropped, non-issue, unknown, incomplete, and cyclic threads cannot transition.
+    No default keybindings are assigned. Unsupported providers explain why.
+
 :Parley discussion list                              *:Parley-discussion-list*
     List every discussion in the active review using the built-in picker.
     General, whole-file, old-side, historical, and unavailable anchors open in
@@ -436,12 +447,43 @@ curl cannot roll back a change the server has already accepted.
 
 Limitations: ~
 
-  - `resolve` / `unresolve` are not supported by the Arcanum public API.
-  - `react` (reactions) are not supported by the Arcanum public API.
-  - `submit_review` (verdicts) is not supported by the Arcanum public API.
-  - Attempting any unsupported operation shows a "not supported" error.
+  - Reaction changes and review submission are not implemented in Parley.
+    Arcanum exposes APIs for these; their integration remains planned.
+  - Issue resolution/reopening uses the public comment PATCH API and requires
+    GENERIC_WRITE authorization. Capability support does not guarantee permission.
+    These PATCH requests are never retried automatically. After uncertain failures
+    or cancellation, Parley refreshes the review; check it before retrying.
 
 ------------------------------------------------------------------------------
+
+Provider action capabilities: ~                       *parley-provider-capabilities*
+
+Optional `provider:capabilities(review)` returns a table keyed by provider method:
+`post_top_level_comment`, `reply`, `edit`, `delete`, `react`, `resolve`, `unresolve`,
+and `submit_review`. Each value is `{ available = true }` or
+`{ available = false, reason = "Explanation" }`. This hook must be local-only and
+must not yield. It describes implemented actions, not token permissions.
+When the hook exists, missing or malformed action entries fail closed.
+Providers without it retain existing actions; resolve/reopen require explicit
+support. Reaction choices remain required for reaction mutation.
+
+Built-in action support (yes = implemented in Parley): ~
+
+  Action                    GitHub  Arcanum
+  post_top_level_comment    yes     yes
+  reply                     yes     yes
+  edit                      yes     yes
+  delete                    yes     yes
+  react                     yes     no
+  resolve                   no      yes
+  unresolve                 no      yes
+  submit_review             yes     no
+
+Capability checks run before composing, choosing reactions, confirming deletion,
+and submitting writes. Provider reasons explain unavailable actions. Commands
+remain discoverable in completion. Custom providers may implement cancellable
+`begin_resolve(review, discussion_id, callback)` and `begin_unresolve(...)` with
+the existing WriteResult/CancelHandle contract; coroutine methods remain supported.
 
 Provider configuration lifecycle: ~
 

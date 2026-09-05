@@ -1,5 +1,4 @@
 --- parley.providers.github.provider — GitHub provider implementation.
----
 --- Implements parley.Provider against the GitHub REST API via the `gh` CLI.
 --- All network calls are made by shelling out to `gh api …`, which handles
 --- authentication (env vars, hosts.yml, keyring, SSO) and rate-limiting
@@ -78,6 +77,7 @@ end
 --- @type parley.github.Provider
 local GitHubProvider = { display_name = require("parley.providers.github.metadata").display_name }
 GitHubProvider.__index = GitHubProvider
+GitHubProvider.capabilities = require("parley.providers.github.capabilities").get
 GitHubProvider.validate_comment_target = require("parley.providers.comment_target").validate
 GitHubProvider.cache_identity = require("parley.providers.github.cache_identity").get
 GitHubProvider.reaction_choices = require("parley.providers.github.reactions").choices

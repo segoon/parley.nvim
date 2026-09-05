@@ -74,6 +74,30 @@ describe("Arcanum reliable transport", function()
     })
   end
 
+  it("does not retry resolution PATCH even with idempotent create retries enabled", function()
+    p._config.idempotent_write_retries = true
+    p:begin_resolve({}, "42", function(r)
+      results[#results + 1] = r
+    end)
+    assert.equals("PATCH", calls[1].opts.method)
+    respond(1, 503)
+    clock.advance(5000)
+    assert.equals(1, #calls)
+    assert.equals(1, #results)
+    assert.is_false(results[1].ok)
+    assert.is_true(results[1].uncertain)
+  end)
+  it("cancels resolution HTTP and ignores a late successful response", function()
+    local h = p:begin_unresolve({}, "42", function(r)
+      results[#results + 1] = r
+    end)
+    h.cancel()
+    respond(1, 200)
+    assert.is_true(calls[1].cancelled)
+    assert.equals(1, #results)
+    assert.is_true(results[1].cancelled)
+    assert.is_true(results[1].uncertain)
+  end)
   it("paces reads and retries across provider instances", function()
     start()
     p = provider.new({ _auth = {

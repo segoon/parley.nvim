@@ -88,10 +88,13 @@ A Neovim plugin written in Lua that:
 
 ### 4.5 Resolving a thread
 
-1. From the discussion window, user triggers a keymap to resolve/unresolve the
-   currently selected thread.
-2. Plugin sends the resolve request to the provider, updates the visual state in the
-   window and the gutter sign.
+1. User runs `:Parley discussion resolve` or `:Parley discussion reopen` for the
+   selected Arcanum issue, or chooses a thread at the source cursor.
+2. Plugin checks provider capability and open/resolved state, updates the root
+   issue, then refreshes the view and unresolved count without discarding drafts.
+3. General and unavailable-location threads support the same actions. Unsupported
+   providers and incomplete threads explain why the action cannot proceed.
+   GitHub resolution remains planned; no default resolution keymaps are assigned.
 
 ### 4.6 Reacting to a comment
 

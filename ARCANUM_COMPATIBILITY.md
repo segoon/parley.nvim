@@ -50,8 +50,29 @@ Validation for item 4 (2026-09-05): **973 tests passed, 0 failures/errors**.
 unlocated selection, real float refresh with draft preservation, and quickfix
 location safety. Validation used mocked providers; live API behavior is unverified.
 
+Issue-action backlog item **5 is implemented**: Arcanum root issue PATCH writes,
+resolve/reopen commands, and explicit provider capability metadata. Only complete
+open/resolved threads may transition. Shared guards prevent unsupported composers,
+reaction choices, deletion confirmation, and submissions; legacy custom providers
+retain existing actions while resolution requires explicit support. Selected
+threads and drafts survive issue refreshes. PATCH mutations are not retried.
+
+Validation for item 5 (2026-09-05): **1,000 tests passed, 0 failures/errors**.
+`make format`, `make format-check`, and `make lint` passed (170 Lua files,
+0 lint warnings/errors). Tests cover capability declarations and legacy fallback,
+blocked interaction/submission, command selection and stale contexts, exact PATCH
+bodies, callback/coroutine parity, credentials and permission failures, no automatic
+PATCH retries, cancellation, uncertain outcomes, and real float/draft preservation.
+Command and support documentation are checked against their shared declarations.
+No live API mutations were used; generated help remains untouched.
+
+Implementation difficulty: invalid root-ID validation inside the coroutine adapter
+caused Plenary to terminate one test process without reporting failed assertions.
+Moving validation before the adapter fixed the timeout; process exit status and
+signals were checked alongside test totals. The regression remains covered.
+
 The findings below describe the research baseline. The next unfinished item is
-**5: implement resolve/reopen and provider capabilities**; live deployment compatibility remains
+**6: complete detection/configuration/health**; live deployment compatibility remains
 unverified. Queue coordination is process-local, and keys are not persisted
 across manual resubmissions or Neovim restarts.
 
@@ -294,7 +315,7 @@ Comment IDs may be negative; preserving them as strings is appropriate.
 4. **Preserve discussion semantics. — Implemented.** Two-pass tree grouping, old/new side,
    historical revision, general/file comments, dropped/non-issue state. Test
    grandchildren, arbitrary ordering, missing parents, renames and deleted files.
-5. **Implement resolve/reopen and provider capabilities.** Hide or explain unavailable
+5. **Implement resolve/reopen and provider capabilities. — Implemented.** Hide or explain unavailable
    actions before users compose or choose them. Keep capabilities and command/help
    documentation in one source of truth.
 6. **Complete detection/configuration/health.** Paginate prefix search until exact

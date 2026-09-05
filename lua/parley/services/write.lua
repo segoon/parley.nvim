@@ -46,28 +46,24 @@ M._check_sync_state = vcs.check_sync_state
 
 M._next_progress_id = 0
 
+local write_contexts = require("parley.services.write_context")
+local resolve_write_context = write_contexts.get
+
 --- @param bufnr integer
---- @return { provider: parley.Provider, review: parley.DetectedReview, rel_path: string }|nil, string|nil
-local function resolve_write_context(bufnr)
-  local review_snapshot = review_repository.get(bufnr)
-  local provider_snapshot = provider_repository.get(bufnr)
-  local context_snapshot = context_repository.get(bufnr)
-  if not review_snapshot or not review_snapshot.review then
-    return nil, "No Parley review is active for this buffer"
+--- @param action parley.ProviderAction
+--- @param expected? table
+--- @param instance? parley.ComposerHandle
+--- @return boolean
+local function allowed(bufnr, action, expected, instance)
+  local reason = write_contexts.reason(bufnr, action, expected)
+  if reason then
+    if instance then
+      instance.set_idle(reason .. " Draft preserved.")
+    end
+    M._notify(reason, vim.log.levels.INFO)
+    return false
   end
-  if not provider_snapshot or provider_snapshot.provider == nil then
-    return nil, "Parley provider context is not ready for this buffer"
-  end
-  if not context_snapshot or type(context_snapshot.rel_path) ~= "string" or context_snapshot.rel_path == "" then
-    return nil, "Parley file context is not ready for this buffer"
-  end
-  return {
-    provider = provider_snapshot.provider,
-    review = review_snapshot.review,
-    rel_path = context_snapshot.rel_path,
-    vcs_info = vim.deepcopy(context_snapshot.vcs_info),
-  },
-    nil
+  return true
 end
 
 --- @param line integer|nil
@@ -148,6 +144,10 @@ local function validate_submission(bufnr, expected, anch)
   if not vim.api.nvim_buf_is_valid(bufnr) then
     return "Source buffer is no longer available"
   end
+  local reason = write_contexts.reason(bufnr, "post_top_level_comment", expected)
+  if reason then
+    return reason
+  end
   local tick = vim.api.nvim_buf_get_changedtick(bufnr)
   local current = M._refresh_context(bufnr)
   if
@@ -210,6 +210,9 @@ function M.open_new_comment_input(bufnr, opts)
     notify_context_error(err)
     return false
   end
+  if not allowed(bufnr, "post_top_level_comment", write_context) then
+    return false
+  end
   local anchor = resolve_anchor(opts.line, opts.range, opts.line1, opts.line2)
   local target_line = anchor.start_line
   if vim.bo[bufnr].modified then
@@ -255,6 +258,9 @@ function M.open_new_comment_input(bufnr, opts)
       notify_context_error("Cannot comment: source buffer changed during validation. Retry after saving.")
       return
     end
+    if not allowed(bufnr, "post_top_level_comment", write_context) then
+      return
+    end
     composer_ui_state.set(bufnr, {
       mode = "new",
       visible = true,
@@ -278,6 +284,9 @@ function M.open_new_comment_input(bufnr, opts)
             local message = tostring(validation_err)
             instance.set_idle(message .. " Draft preserved.")
             M._notify(message, vim.log.levels.WARN)
+            return
+          end
+          if not allowed(bufnr, "post_top_level_comment", write_context, instance) then
             return
           end
           local body = model.new_body({ text = text, format = "markdown" })
@@ -352,6 +361,9 @@ function M.open_reply_input(bufnr, discussion, parent_comment)
     notify_context_error(err)
     return false
   end
+  if not allowed(bufnr, "reply", write_context) then
+    return false
+  end
   local review_snapshot = review_repository.get(bufnr)
   local target_line = review_snapshot
       and review_snapshot.mappings
@@ -371,6 +383,9 @@ function M.open_reply_input(bufnr, discussion, parent_comment)
     parent_comment_id = parent_comment.id,
     status = "Drafting reply. Press <C-s> to send, or <Esc>s in normal mode. q closes.",
     on_submit = function(instance, text)
+      if not allowed(bufnr, "reply", write_context, instance) then
+        return false
+      end
       local body = model.new_body({ text = text, format = "markdown" })
       return operations.run_submit(
         bufnr,
@@ -429,6 +444,9 @@ function M.open_edit_input(bufnr, discussion, comment)
     notify_context_error(err)
     return false
   end
+  if not allowed(bufnr, "edit", write_context) then
+    return false
+  end
   local review_snapshot = review_repository.get(bufnr)
   local target_line = review_snapshot
       and review_snapshot.mappings
@@ -449,6 +467,9 @@ function M.open_edit_input(bufnr, discussion, comment)
     initial_text = comment.body.text,
     status = "Editing comment. Press <C-s> to save, or <Esc>s in normal mode. q closes.",
     on_submit = function(instance, text)
+      if not allowed(bufnr, "edit", write_context, instance) then
+        return false
+      end
       local body = model.new_body({ text = text, format = "markdown" })
       return operations.run_submit(
         bufnr,
@@ -489,105 +510,7 @@ function M.open_edit_input(bufnr, discussion, comment)
   })
 end
 
---- Toggle a reaction on an existing comment and refresh the discussion.
---- @param bufnr integer
---- @param cursor_line integer|nil
---- @param comment parley.Comment|nil
---- @param reaction string
---- @param expected? table Captured picker context
---- @return boolean
-function M.react_comment(bufnr, cursor_line, comment, reaction, expected)
-  if not comment then
-    M._notify("Open a Parley discussion before reacting", vim.log.levels.INFO)
-    return false
-  end
-  local write_context, err = resolve_write_context(bufnr)
-  if not write_context then
-    notify_context_error(err)
-    return false
-  end
-  local reaction_error = require("parley.reactions").validate(bufnr, comment, reaction, expected)
-  if reaction_error then
-    M._notify(reaction_error, vim.log.levels.INFO)
-    return false
-  end
-  return operations.run_action(bufnr, cursor_line, function(callback)
-    local cancelled = false
-    async.run(function()
-      local ok, result = pcall(function()
-        write_context.provider:react(write_context.review, comment.id, reaction)
-      end)
-      vim.schedule(function()
-        if cancelled then
-          callback({ ok = false, cancelled = true })
-        elseif ok then
-          callback({ ok = true })
-        else
-          callback({ ok = false, err = tostring(result) })
-        end
-      end)
-    end)
-    return {
-      cancel = function()
-        cancelled = true
-      end,
-    }
-  end, {
-    running = "Updating reaction",
-    refreshing = "Refreshing discussion",
-    success = "Reaction updated",
-    failed = "Reaction failed",
-    cancelled = "Reaction cancelled",
-  })
-end
-
---- Delete an existing comment and refresh the discussion.
---- @param bufnr integer
---- @param cursor_line integer|nil
---- @param comment parley.Comment|nil
---- @return boolean
-function M.delete_comment(bufnr, cursor_line, comment)
-  if not comment then
-    M._notify("Open a Parley discussion before deleting", vim.log.levels.INFO)
-    return false
-  end
-  if not M._confirm_delete("Delete this comment permanently? This cannot be undone.") then
-    return false
-  end
-
-  local write_context, err = resolve_write_context(bufnr)
-  if not write_context then
-    notify_context_error(err)
-    return false
-  end
-  return operations.run_action(bufnr, cursor_line, function(callback)
-    local cancelled = false
-    async.run(function()
-      local ok, result = pcall(function()
-        write_context.provider:delete(write_context.review, comment.id)
-      end)
-      vim.schedule(function()
-        if cancelled then
-          callback({ ok = false, cancelled = true })
-        elseif ok then
-          callback({ ok = true })
-        else
-          callback({ ok = false, err = tostring(result) })
-        end
-      end)
-    end)
-    return {
-      cancel = function()
-        cancelled = true
-      end,
-    }
-  end, {
-    running = "Deleting comment",
-    refreshing = "Refreshing discussion",
-    success = "Comment deleted",
-    failed = "Delete failed",
-    cancelled = "Delete cancelled",
-  })
-end
+require("parley.services.comment_actions")(M, operations, resolve_write_context, notify_context_error, allowed)
+require("parley.services.issue_actions")(M, operations)
 
 return M

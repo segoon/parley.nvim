@@ -167,7 +167,15 @@ return function(M)
   --- ): parley.CancelHandle
   --- @param progress_texts { running: string, refreshing: string, success: string, failed: string, cancelled: string }
   --- @return boolean
-  local function run_action(bufnr, cursor_line, starter, progress_texts)
+  --- @param opts? { preserve_selection?: boolean }
+  local function run_action(bufnr, cursor_line, starter, progress_texts, opts)
+    opts = opts or {}
+    local function refresh_selected()
+      if opts.preserve_selection and vim.api.nvim_buf_is_valid(bufnr) then
+        local window = require("parley.discussion_window")
+        window.refresh_snapshot(bufnr, review_repository.get(bufnr))
+      end
+    end
     if M._operations[bufnr] ~= nil then
       M._notify("Parley request already in progress for this buffer", vim.log.levels.WARN)
       return false
@@ -180,20 +188,25 @@ return function(M)
           M._notify(result.err or "Check the review before retrying.", vim.log.levels.WARN)
         end
         finish_progress(progress, bufnr, "cancelled", progress_texts.cancelled)
-        refresh_after_write(bufnr, function() end)
+        refresh_after_write(bufnr, refresh_selected)
         return
       end
 
       if not result.ok then
         finish_progress(progress, bufnr, "failed", progress_texts.failed)
         M._notify(result.err or "parley: request failed", vim.log.levels.WARN)
+        if result.uncertain then
+          refresh_after_write(bufnr, refresh_selected)
+        end
         return
       end
 
       update_progress(progress, bufnr, "running", progress_texts.refreshing)
       refresh_after_write(bufnr, function()
         finish_progress(progress, bufnr, "success", progress_texts.success)
-        if vim.api.nvim_buf_is_valid(bufnr) then
+        if opts.preserve_selection then
+          refresh_selected()
+        elseif vim.api.nvim_buf_is_valid(bufnr) then
           local discussion_window = require("parley.discussion_window")
           pcall(discussion_window.open_current_line, bufnr, { cursor_line = cursor_line })
         end

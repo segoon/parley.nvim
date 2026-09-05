@@ -1,6 +1,7 @@
 --- Generic reaction presentation, availability, and picker context guards.
 local providers = require("parley.repositories.provider")
 local reviews = require("parley.repositories.review")
+local capabilities = require("parley.capabilities")
 local M = {}
 
 --- @param bufnr integer
@@ -45,6 +46,10 @@ end
 --- @param comment parley.Comment
 --- @return table[], string|nil
 function M.items(provider, review, comment)
+  local capability_reason = capabilities.reason(provider, review, "react")
+  if capability_reason then
+    return {}, capability_reason
+  end
   local reason = "Reaction changes are unavailable for this provider"
   if not provider or not provider.reaction_choices then
     return {}, reason

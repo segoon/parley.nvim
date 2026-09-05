@@ -101,6 +101,13 @@ and historical threads open in the discussion float without a guessed line;
 replying and editing/deleting your own comments remain available. Only open
 issues contribute to the unresolved count.
 
+Use `:Parley discussion resolve` or `:Parley discussion reopen` to change an
+Arcanum issue between open and resolved. These commands use the selected thread
+or offer the threads at the source cursor. They preserve drafts and refresh the
+issue state. Dropped, non-issue, unknown, and incomplete threads cannot transition.
+GitHub resolution remains unavailable. Unsupported provider actions explain why
+before you compose or choose them; see `:help parley-provider-capabilities`.
+
 ## Telescope
 
 When `telescope = true` (the default) and Telescope is installed, Parley loads two extensions:
@@ -239,4 +246,4 @@ provider-independent behavior tests.
 
 - `diffview.nvim` integration
 - real thread resolved state for GitHub via GraphQL
-- PR-level review actions (resolve / unresolve)
+- GitHub thread resolution/reopening and Arcanum reactions/review submission

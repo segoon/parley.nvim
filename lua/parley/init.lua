@@ -101,14 +101,8 @@ M._notify = function(msg, level)
   vim.notify(msg, level)
 end
 
---- @type table<string, string[]>
-local PARLEY_GROUPS = {
-  discussion = { "open", "close", "toggle", "new", "reply", "list" },
-  comment = { "react", "edit", "delete" },
-  nav = { "buf-next", "buf-prev", "review-next", "review-prev" },
-}
-
-local PARLEY_TOP_LEVEL = { "discussion", "comment", "nav", "quickfix", "refresh" }
+local commands = require("parley.commands")
+local PARLEY_GROUPS, PARLEY_TOP_LEVEL = commands.groups, commands.top_level
 
 --- @param items string[]
 --- @param prefix string
@@ -182,6 +176,10 @@ function M._dispatch_parley(fargs, bufnr, cmd_opts)
     local discussion_window = require("parley.discussion_window")
     if action == nil or action == "" then
       error("parley: expected a discussion action", 0)
+    end
+    if commands.issue_actions[action] then
+      require("parley.discussion_actions").run(bufnr, commands.issue_actions[action])
+      return
     end
     if action == "list" then
       require("parley.discussion_picker").open(bufnr)
