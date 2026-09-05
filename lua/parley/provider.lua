@@ -24,8 +24,9 @@ local M = {}
 --- The abstract provider interface.
 ---
 --- All methods are called as `provider:method(...)` (colon syntax).
---- Async providers must wrap blocking calls in `plenary.async.run`; callers
---- always invoke methods from within a plenary async context.
+--- Yielding operation methods run in a Plenary async context. Optional begin_*
+--- starters run without yielding; their callbacks run on the main loop, inline
+--- or later. Local presentation hooks do not yield.
 ---
 --- @class parley.Anchor
 --- @field start_line integer
@@ -47,6 +48,15 @@ local M = {}
 --- @field rel_path string
 --- @field anchor parley.Anchor
 --- @alias parley.CommentTargetResult {ok: true}|{ok: false, err: string}
+
+--- @class parley.WriteResult
+--- @field ok boolean
+--- @field comment? parley.Comment
+--- @field err? string
+--- @field cancelled? boolean Must not be true when ok is true.
+--- @alias parley.WriteCallback fun(result: parley.WriteResult): nil
+--- @class parley.CancelHandle
+--- @field cancel fun(): nil Request cancellation; completion arrives through the callback.
 
 --- @class parley.Provider
 --- @field validate_comment_target fun(
@@ -106,6 +116,17 @@ local M = {}
 --- e.g. "github.com" or "github.mycompany.com".
 --- @field progress_label fun(self: parley.Provider): string
 
+--- Optional cancellable operations. Return promptly without yielding and invoke
+--- the callback exactly once on the main loop, including after cancellation.
+--- @field begin_post_top_level_comment? fun(
+---   self: parley.Provider, review: parley.DetectedReview, file: string, anchor: parley.Anchor,
+---   body: parley.Body, callback: parley.WriteCallback
+--- ): parley.CancelHandle
+--- @field begin_reply? fun(
+---   self: parley.Provider, review: parley.DetectedReview, discussion: parley.Discussion,
+---   parent_comment: parley.Comment, body: parley.Body, callback: parley.WriteCallback
+--- ): parley.CancelHandle
+
 --- Optional local-only metadata; missing choices means mutation is unavailable.
 --- @field reaction_choices? fun(self: parley.Provider, review: parley.DetectedReview,
 --- comment: parley.Comment): parley.ReactionChoice[], string|nil
@@ -135,6 +156,15 @@ M.METHOD_NAMES = {
   "progress_label",
 }
 
+--- Optional methods are validated when present; absence preserves fallback behavior.
+--- @type string[]
+M.OPTIONAL_METHOD_NAMES = {
+  "begin_post_top_level_comment",
+  "begin_reply",
+  "reaction_choices",
+  "reaction_presentation",
+}
+
 -- ---------------------------------------------------------------------------
 -- Interface validation
 -- ---------------------------------------------------------------------------
@@ -145,6 +175,7 @@ M.METHOD_NAMES = {
 ---   • `p` is a non-nil table.
 ---   • Every name in METHOD_NAMES is present and is a function.
 ---   • display_name is a nonblank string.
+---   • Every present optional method is a function.
 ---
 --- @param p any
 --- @return boolean
@@ -157,6 +188,11 @@ function M.validate(p)
   end
   for _, name in ipairs(M.METHOD_NAMES) do
     if type(p[name]) ~= "function" then
+      return false
+    end
+  end
+  for _, name in ipairs(M.OPTIONAL_METHOD_NAMES) do
+    if p[name] ~= nil and type(p[name]) ~= "function" then
       return false
     end
   end

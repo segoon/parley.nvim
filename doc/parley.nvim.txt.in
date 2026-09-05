@@ -419,7 +419,7 @@ After calling `setup()`, you can register additional providers: >lua
     })
 <
 
-The provider must implement all methods defined in `parley.Provider` and expose
+The provider must implement all required methods in `parley.Provider` and expose
 `display_name`, a nonblank string such as `"MyProvider"`. This metadata is required
 on every instance returned by the factory; the registration spec's `name` does
 not substitute for it. Existing custom providers must add this field to satisfy
@@ -446,6 +446,32 @@ base_branch, rel_path, head_sha)`, returning diff text or `nil, error`.
 
 
 Provider-owned cache identity: ~
+
+Optional cancellable writes: ~
+
+Providers may implement either or both of these colon-call methods:
+
+  - `begin_post_top_level_comment(review, file, anchor, body, callback)`
+  - `begin_reply(review, discussion, parent_comment, body, callback)`
+
+When absent, shared writes call the corresponding required coroutine method.
+When present, these methods must be functions. The same optional-method validation
+applies to `reaction_choices` and `reaction_presentation`; omit unavailable hooks
+with `nil`, not `false` or another placeholder value.
+
+Starters must return promptly without yielding, returning a `parley.CancelHandle`
+with a `cancel()` function (called without a self argument). Invoke the
+`parley.WriteCallback` exactly once on the Neovim main loop, either before returning
+or later. A `parley.WriteResult` contains `ok` (boolean), optional `comment`,
+optional `err` (string), and optional `cancelled` (boolean). A cancelled result must
+have `ok = false`. Successful callbacks need not return a comment object.
+
+Cancellation requests completion through the callback; shared writes continue
+waiting until it arrives. It does not guarantee rollback of a remote mutation.
+Shared execution tolerates immediate completion, ignores duplicate or stale
+callbacks, and turns startup failures or malformed pending handles/results into
+write failures while retaining drafts. Existing providers with valid hooks need
+no behavioral changes. Providers without these hooks retain coroutine fallbacks.
 
 Every provider must implement `provider:cache_identity()`. It runs in a Plenary
 coroutine and returns { provider, host, repository, account }, with four nonempty

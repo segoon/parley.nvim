@@ -292,8 +292,8 @@ end
 --- @param file string
 --- @param anchor parley.Anchor
 --- @param body parley.Body
---- @param callback fun(result: { ok: boolean, comment?: parley.Comment, err?: string, cancelled?: boolean }): nil
---- @return { cancel: fun(): nil }
+--- @param callback parley.WriteCallback
+--- @return parley.CancelHandle
 function GitHubProvider:begin_post_top_level_comment(review, file, anchor, body, callback)
   local write_context = review.write_context
   dbg.trace(
@@ -355,8 +355,8 @@ end
 --- @param discussion parley.Discussion
 --- @param parent_comment parley.Comment
 --- @param body parley.Body
---- @param callback fun(result: { ok: boolean, comment?: parley.Comment, err?: string, cancelled?: boolean }): nil
---- @return { cancel: fun(): nil }
+--- @param callback parley.WriteCallback
+--- @return parley.CancelHandle
 function GitHubProvider:begin_reply(review, discussion, parent_comment, body, callback)
   local write_context = review.write_context
   local url = repo_path(self) .. "/pulls/" .. write_context.number .. "/comments"

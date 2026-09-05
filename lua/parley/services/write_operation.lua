@@ -96,8 +96,8 @@ return function(M)
   --- Register before calling provider code: completion may happen inline.
   --- @param bufnr integer
   --- @param operation table
-  --- @param starter fun(callback: fun(result: table)): table
-  --- @param on_complete fun(result: table)
+  --- @param starter fun(callback: parley.WriteCallback): parley.CancelHandle
+  --- @param on_complete parley.WriteCallback
   local function start_operation(bufnr, operation, starter, on_complete)
     local completed, cancel_requested, cancel_sent = false, false, false
     local request
@@ -162,8 +162,8 @@ return function(M)
   --- @param bufnr integer
   --- @param cursor_line integer|nil
   --- @param starter fun(
-  ---   callback: fun(result: { ok: boolean, err?: string, cancelled?: boolean }): nil
-  --- ): { cancel: fun(): nil }
+  ---   callback: parley.WriteCallback
+  --- ): parley.CancelHandle
   --- @param progress_texts { running: string, refreshing: string, success: string, failed: string, cancelled: string }
   --- @return boolean
   local function run_action(bufnr, cursor_line, starter, progress_texts)
@@ -202,8 +202,8 @@ return function(M)
   --- @param bufnr integer
   --- @param instance table
   --- @param starter fun(
-  ---   callback: fun(result: { ok: boolean, comment?: parley.Comment, err?: string, cancelled?: boolean }): nil
-  --- ): { cancel: fun(): nil }
+  ---   callback: parley.WriteCallback
+  --- ): parley.CancelHandle
   --- @param status_text string
   --- @param progress_texts { running: string, refreshing: string, success: string, failed: string, cancelled: string }
   --- @param success_opts? { cursor_line?: integer }

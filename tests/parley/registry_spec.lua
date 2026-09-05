@@ -1,3 +1,4 @@
+local optional_methods = { "begin_reply", "begin_post_top_level_comment", "reaction_choices", "reaction_presentation" }
 --- Tests for parley.registry — provider registry.
 --- Run via: make test
 
@@ -88,6 +89,20 @@ describe("parley.registry resolve", function()
   -- -------------------------------------------------------------------------
   -- resolve — successful match
   -- -------------------------------------------------------------------------
+
+  it("rejects malformed optional methods from factories", function()
+    for _, name in ipairs(optional_methods) do
+      registry.reset()
+      registry.register(make_spec("InvalidOptional", {}, function()
+        local p = mock_provider.new({})
+        p[name] = true
+        return p
+      end))
+      local ok, err = pcall(registry.resolve, SAMPLE_VCS)
+      assert.is_false(ok)
+      assert.is_truthy(tostring(err):find("InvalidOptional", 1, true))
+    end
+  end)
 
   it("returns a valid provider when detect returns an opts table", function()
     registry.register(make_spec("Match", { token = "x" }, valid_factory))

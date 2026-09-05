@@ -1,3 +1,4 @@
+local optional_methods = { "begin_reply", "begin_post_top_level_comment", "reaction_choices", "reaction_presentation" }
 --- Tests for parley.provider (interface contract) and parley.mock_provider.
 --- Run via: make test
 
@@ -73,6 +74,20 @@ end
 -- ---------------------------------------------------------------------------
 
 describe("parley.provider.validate", function()
+  for _, name in ipairs(optional_methods) do
+    it("validates optional method " .. name, function()
+      local p = mock_provider.new({})
+      p[name] = nil
+      assert.is_true(provider.validate(p))
+      p[name] = function() end
+      assert.is_true(provider.validate(p))
+      for _, value in ipairs({ false, true, 42, "method", {} }) do
+        p[name] = value
+        assert.is_false(provider.validate(p))
+      end
+    end)
+  end
+
   it("requires a nonblank display name", function()
     local p = mock_provider.new({})
     for _, value in ipairs({ false, 42, {}, "", " \t\n" }) do

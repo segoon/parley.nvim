@@ -147,65 +147,75 @@ describe("parley.services.write", function()
     })
   end
 
-  it("posts a top-level comment with a normalized range and forces a refresh", function()
-    local provider = mock_provider.new({ pr = SAMPLE_PR })
-    local refresh_calls = {}
-    local invalidate_calls = {}
-    local opened
-    context_repository._entries[1] = {
-      kind = "regular",
-      bufnr = 1,
-      path = "/repo/src/foo.lua",
-      vcs_info = { vcs = "git", root = "/repo", branch = "feature", remote_url = "git@github.com:owner/repo.git" },
-      rel_path = "src/foo.lua",
-      status = "ready",
-    }
-    provider_repository._entries[1] = {
-      status = "ready",
-      provider = provider,
-      opts = { repository = "owner/repo", host = "github.com" },
-    }
-    review_repository._seed(1, {
-      status = "ready",
-      stale = false,
-      review = SAMPLE_REVIEW,
-      discussions = {},
-      mappings = {},
-      pr = SAMPLE_PR,
-      head_sha = "deadbeef",
-    })
+  for _, cancellable in ipairs({ true, false }) do
+    it(
+      "posts a top-level comment with a normalized range and forces a refresh (cancellable="
+        .. tostring(cancellable)
+        .. ")",
+      function()
+        local provider = mock_provider.new({ pr = SAMPLE_PR })
+        local refresh_calls = {}
+        local invalidate_calls = {}
+        if not cancellable then
+          provider.begin_post_top_level_comment = nil
+        end
+        local opened
+        context_repository._entries[1] = {
+          kind = "regular",
+          bufnr = 1,
+          path = "/repo/src/foo.lua",
+          vcs_info = { vcs = "git", root = "/repo", branch = "feature", remote_url = "git@github.com:owner/repo.git" },
+          rel_path = "src/foo.lua",
+          status = "ready",
+        }
+        provider_repository._entries[1] = {
+          status = "ready",
+          provider = provider,
+          opts = { repository = "owner/repo", host = "github.com" },
+        }
+        review_repository._seed(1, {
+          status = "ready",
+          stale = false,
+          review = SAMPLE_REVIEW,
+          discussions = {},
+          mappings = {},
+          pr = SAMPLE_PR,
+          head_sha = "deadbeef",
+        })
 
-    package.loaded["parley.discussion_window"] = {
-      show_new_comment_input = function(_bufnr, opts)
-        opened = { opts = opts, instance = fake_instance(99) }
-        return opened.instance
-      end,
-      open_current_line = function() end,
-    }
-    review_repository.invalidate = function(bufnr, opts)
-      invalidate_calls[#invalidate_calls + 1] = { bufnr = bufnr, opts = opts }
-    end
-    review_repository.refresh = function(bufnr, opts)
-      refresh_calls[#refresh_calls + 1] = { bufnr = bufnr, opts = opts }
-    end
+        package.loaded["parley.discussion_window"] = {
+          show_new_comment_input = function(_bufnr, opts)
+            opened = { opts = opts, instance = fake_instance(99) }
+            return opened.instance
+          end,
+          open_current_line = function() end,
+        }
+        review_repository.invalidate = function(bufnr, opts)
+          invalidate_calls[#invalidate_calls + 1] = { bufnr = bufnr, opts = opts }
+        end
+        review_repository.refresh = function(bufnr, opts)
+          refresh_calls[#refresh_calls + 1] = { bufnr = bufnr, opts = opts }
+        end
 
-    write_service.open_new_comment_input(1, { range = 2, line1 = 8, line2 = 5 })
-    opened.opts.on_submit(opened.instance, "range draft")
+        write_service.open_new_comment_input(1, { range = 2, line1 = 8, line2 = 5 })
+        opened.opts.on_submit(opened.instance, "range draft")
 
-    assert.is_true(vim.wait(500, function()
-      return #provider.calls.post_top_level_comment == 1 and #refresh_calls == 1
-    end))
+        assert.is_true(vim.wait(500, function()
+          return #provider.calls.post_top_level_comment == 1 and #refresh_calls == 1
+        end))
 
-    assert.same({ start_line = 5, end_line = 8 }, provider.calls.post_top_level_comment[1].anchor)
-    assert.same({ bufnr = 1, opts = { preserve_snapshot = true } }, invalidate_calls[1])
-    assert.same({ bufnr = 1, opts = { force = true } }, refresh_calls[1])
-    assert.is_true(opened.instance.closed)
-    assert.equals(0, #notify_calls)
-    local progress_entries = progress_ui_state.list()
-    assert.equals(1, #progress_entries)
-    assert.equals("success", progress_entries[1].state)
-    assert.equals("Comment sent", progress_entries[1].message)
-  end)
+        assert.same({ start_line = 5, end_line = 8 }, provider.calls.post_top_level_comment[1].anchor)
+        assert.same({ bufnr = 1, opts = { preserve_snapshot = true } }, invalidate_calls[1])
+        assert.same({ bufnr = 1, opts = { force = true } }, refresh_calls[1])
+        assert.is_true(opened.instance.closed)
+        assert.equals(0, #notify_calls)
+        local progress_entries = progress_ui_state.list()
+        assert.equals(1, #progress_entries)
+        assert.equals("success", progress_entries[1].state)
+        assert.equals("Comment sent", progress_entries[1].message)
+      end
+    )
+  end
 
   it("closes the composer before starting the success refresh", function()
     local provider = mock_provider.new({ pr = SAMPLE_PR })
@@ -260,80 +270,85 @@ describe("parley.services.write", function()
     assert.is_true(opened.instance.closed)
   end)
 
-  it("passes the explicit parent_comment_id to reply", function()
-    local root = model.new_comment({
-      id = "c1",
-      author = "alice",
-      body = model.new_body({ text = "root", format = "markdown" }),
-      created_at = "2024-01-01T00:00:00Z",
-      updated_at = "2024-01-01T00:00:00Z",
-    })
-    local parent = model.new_comment({
-      id = "c2",
-      author = "bob",
-      body = model.new_body({ text = "parent", format = "markdown" }),
-      created_at = "2024-01-01T00:00:01Z",
-      updated_at = "2024-01-01T00:00:01Z",
-      parent_comment_id = "c1",
-    })
-    local provider = mock_provider.new({
-      pr = SAMPLE_PR,
-      discussions = {
-        model.new_discussion({
-          id = "d1",
-          file = "src/foo.lua",
-          line = 10,
-          comments = { root, parent },
-        }),
-      },
-    })
-    local opened
-    context_repository._entries[1] = {
-      kind = "regular",
-      bufnr = 1,
-      path = "/repo/src/foo.lua",
-      vcs_info = { vcs = "git", root = "/repo", branch = "feature", remote_url = "git@github.com:owner/repo.git" },
-      rel_path = "src/foo.lua",
-      status = "ready",
-    }
-    provider_repository._entries[1] = {
-      status = "ready",
-      provider = provider,
-      opts = { repository = "owner/repo", host = "github.com" },
-    }
-    review_repository._seed(1, {
-      status = "ready",
-      stale = false,
-      review = SAMPLE_REVIEW,
-      discussions = {},
-      mappings = {},
-      pr = SAMPLE_PR,
-      head_sha = "deadbeef",
-    })
+  for _, cancellable in ipairs({ true, false }) do
+    it("passes the explicit parent_comment_id to reply (cancellable=" .. tostring(cancellable) .. ")", function()
+      local root = model.new_comment({
+        id = "c1",
+        author = "alice",
+        body = model.new_body({ text = "root", format = "markdown" }),
+        created_at = "2024-01-01T00:00:00Z",
+        updated_at = "2024-01-01T00:00:00Z",
+      })
+      local parent = model.new_comment({
+        id = "c2",
+        author = "bob",
+        body = model.new_body({ text = "parent", format = "markdown" }),
+        created_at = "2024-01-01T00:00:01Z",
+        updated_at = "2024-01-01T00:00:01Z",
+        parent_comment_id = "c1",
+      })
+      local provider = mock_provider.new({
+        pr = SAMPLE_PR,
+        discussions = {
+          model.new_discussion({
+            id = "d1",
+            file = "src/foo.lua",
+            line = 10,
+            comments = { root, parent },
+          }),
+        },
+      })
+      if not cancellable then
+        provider.begin_reply = nil
+      end
+      local opened
+      context_repository._entries[1] = {
+        kind = "regular",
+        bufnr = 1,
+        path = "/repo/src/foo.lua",
+        vcs_info = { vcs = "git", root = "/repo", branch = "feature", remote_url = "git@github.com:owner/repo.git" },
+        rel_path = "src/foo.lua",
+        status = "ready",
+      }
+      provider_repository._entries[1] = {
+        status = "ready",
+        provider = provider,
+        opts = { repository = "owner/repo", host = "github.com" },
+      }
+      review_repository._seed(1, {
+        status = "ready",
+        stale = false,
+        review = SAMPLE_REVIEW,
+        discussions = {},
+        mappings = {},
+        pr = SAMPLE_PR,
+        head_sha = "deadbeef",
+      })
 
-    package.loaded["parley.discussion_window"] = {
-      show_reply_input = function(_bufnr, opts)
-        opened = { opts = opts, instance = fake_instance(100) }
-        return opened.instance
-      end,
-      open_current_line = function() end,
-    }
-    review_repository.invalidate = function(_bufnr) end
-    review_repository.refresh = function(_bufnr, _opts) end
+      package.loaded["parley.discussion_window"] = {
+        show_reply_input = function(_bufnr, opts)
+          opened = { opts = opts, instance = fake_instance(100) }
+          return opened.instance
+        end,
+        open_current_line = function() end,
+      }
+      review_repository.invalidate = function(_bufnr) end
+      review_repository.refresh = function(_bufnr, _opts) end
 
-    write_service.open_reply_input(1, provider.state.discussions[1], provider.state.discussions[1].comments[2])
-    opened.opts.on_submit(opened.instance, "reply draft")
+      write_service.open_reply_input(1, provider.state.discussions[1], provider.state.discussions[1].comments[2])
+      opened.opts.on_submit(opened.instance, "reply draft")
 
-    assert.is_true(vim.wait(500, function()
-      return #provider.calls.reply == 1
-    end))
+      assert.is_true(vim.wait(500, function()
+        return #provider.calls.reply == 1 and progress_ui_state.list()[1].state == "success"
+      end))
 
-    assert.equals("c2", provider.calls.reply[1].parent_comment.id)
-    local progress_entries = progress_ui_state.list()
-    assert.equals(1, #progress_entries)
-    assert.equals("success", progress_entries[1].state)
-    assert.equals("Reply sent", progress_entries[1].message)
-  end)
+      assert.equals("c2", provider.calls.reply[1].parent_comment.id)
+      local progress_entries = progress_ui_state.list()
+      assert.equals(1, #progress_entries)
+      assert.equals("success", progress_entries[1].state)
+      assert.equals("Reply sent", progress_entries[1].message)
+    end)
+  end
 
   it("does not require VCS detection when opening reply input", function()
     local provider = mock_provider.new({ pr = SAMPLE_PR })
