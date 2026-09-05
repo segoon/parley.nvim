@@ -170,6 +170,13 @@ across diffview.nvim version changes.
 
 ### 5.4 Authentication
 
+Arcanum resolves explicit token values and paths before its default token file.
+Before loading a review or restoring its cache, it verifies the OAuth account;
+only that account determines comment ownership. Verification failure stops loading.
+Local Arc login remains diagnostic metadata. Health checks make no HTTP requests.
+Arcanum discovery follows prefix-search pages until it finds the exact remote
+branch, and stays inactive when no remote branch is configured.
+
 - Secrets are read from standard credential files used by existing CLI tools
   (e.g., `~/.config/gh/hosts.yml` for GitHub, similar conventions for other
   providers).

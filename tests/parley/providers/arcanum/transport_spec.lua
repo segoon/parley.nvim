@@ -33,6 +33,7 @@ describe("Arcanum reliable transport", function()
         timeout_ms = 5000,
       },
     })
+    dofile("tests/support/arcanum_session.lua")(p)
     http.start = function(opts, callback)
       local call = { opts = opts, callback = callback, at = clock.time, cancelled = false }
       calls[#calls + 1] = call
@@ -98,6 +99,27 @@ describe("Arcanum reliable transport", function()
     assert.is_true(results[1].cancelled)
     assert.is_true(results[1].uncertain)
   end)
+  it("does not send queued requests after the credential changes", function()
+    start()
+    start()
+    p._auth.read_token = function()
+      return "rotated"
+    end
+    clock.advance(1000)
+    assert.equals(1, #calls)
+    assert.is_false(results[1].ok)
+    assert.is_false(results[1].sent)
+  end)
+  it("rejects an old response even after the same provider is prepared for new credentials", function()
+    start()
+    p._auth.read_token = function()
+      return "rotated"
+    end
+    dofile("tests/support/arcanum_session.lua")(p, "new-user")
+    respond(1, 200)
+    assert.is_false(results[1].ok)
+    assert.is_nil(results[1].data)
+  end)
   it("paces reads and retries across provider instances", function()
     start()
     p = provider.new({ _auth = {
@@ -119,6 +141,7 @@ describe("Arcanum reliable transport", function()
   end)
 
   it("isolates credentials and hosts and uses the slower shared interval", function()
+    p._verified_token = nil -- Exercise transport queue scoping independently of account verification.
     start()
     p._config.request_interval_ms = 2000
     start()
@@ -326,7 +349,7 @@ describe("Arcanum reliable transport", function()
       } },
       { host = "custom.example.test" }
     )
-    p._token = "token"
+    dofile("tests/support/arcanum_session.lua")(p)
     p:begin_reply({}, {}, { id = "-123" }, { text = "reply" }, function(r)
       results[#results + 1] = r
     end)

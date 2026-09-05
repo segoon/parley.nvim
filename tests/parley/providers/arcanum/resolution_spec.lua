@@ -10,6 +10,7 @@ describe("Arcanum issue resolution", function()
         return "test-token"
       end,
     } })
+    dofile("tests/support/arcanum_session.lua")(p)
     saved = transport.http_start
     calls, cancelled = {}, 0
     result = { ok = true, data = { id = 42 } }
@@ -71,7 +72,7 @@ describe("Arcanum issue resolution", function()
       received = r
     end)
     assert.is_false(received.ok)
-    assert.matches("No token", received.err)
+    assert.matches("credentials changed", received.err)
     assert.same({}, calls)
     h.cancel()
   end)

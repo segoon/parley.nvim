@@ -108,6 +108,8 @@ local function make_provider(responses)
     config = { timeout_ms = 5000, retry_count = 0, retry_base_delay_ms = 250, retry_max_delay_ms = 2000 },
   })
 
+  dofile("tests/support/arcanum_session.lua")(p)
+
   -- Override transport.http_run on the provider
   transport.http_run = mock_http_run
 
@@ -280,7 +282,9 @@ async_tests.describe("parley.providers.arcanum.provider — detect_pr", function
     p:detect_pr("/arc", "users/segoon/feature/chaotic-const")
 
     assert.same({
-      limit = 1,
+      limit = 100,
+      offset = 0,
+      desc_order = true,
       filter = {
         user_branch_prefix = "users/segoon/feature/chaotic-const",
         state = { published = true },

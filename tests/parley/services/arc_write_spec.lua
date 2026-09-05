@@ -104,6 +104,7 @@ describe("Arc new-comment validation", function()
         end,
       },
     })
+    dofile("tests/support/arcanum_session.lua")(p)
     providers._entries[buf].provider = p
     local snapshot = reviews.get(buf)
     snapshot.review.write_context.diff_id = 42

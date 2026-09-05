@@ -32,10 +32,11 @@ describe("Arcanum local diagnostics", function()
       return nil
     end
     local entries = diagnostics.check({ vcs_info = {}, opts = {} })
-    assert.equals(5, #entries)
-    assert.equals("error", entries[1].level)
+    assert.equals(6, #entries)
+    assert.equals("ok", entries[1].level)
     assert.equals("error", entries[2].level)
-    for i = 3, 5 do
+    assert.equals("error", entries[3].level)
+    for i = 4, 6 do
       assert.equals("warn", entries[i].level)
     end
   end)

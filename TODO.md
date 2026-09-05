@@ -21,3 +21,7 @@ documentation:
 tests:
 - tests isolation (pending callbacks, subscriptions)
 - dependency restrictions: source directory
+
+Completed Arcanum compatibility:
+- exact branch discovery across pages, alternate Arc credentials, verified API ownership
+- configured-host propagation and local-only health diagnostics

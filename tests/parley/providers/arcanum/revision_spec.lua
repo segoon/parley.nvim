@@ -7,8 +7,11 @@ a.describe("Arcanum shared review revision", function()
     local original = transport.http_run
     local requested = false
     transport.http_run = function(_, _, path)
+      if path == "/v2/users/me?fields=name" then
+        return { name = "api-user" }
+      end
       if path:find("cursor", 1, true) then
-        return { pull_requests = { { id = 1 } } }
+        return { pull_requests = { { id = 1 } }, has_next = false }
       end
       if path:find("active-diff", 1, true) then
         requested = path == "/v1/pull-requests/1/active-diff?fields=id,commit_ids(head)"
@@ -32,8 +35,11 @@ a.describe("Arcanum shared review revision", function()
     local original = transport.http_run
     local active
     transport.http_run = function(_, _, path)
+      if path == "/v2/users/me?fields=name" then
+        return { name = "api-user" }
+      end
       if path:find("cursor", 1, true) then
-        return { pull_requests = { { id = 1 } } }
+        return { pull_requests = { { id = 1 } }, has_next = false }
       end
       if path:find("active-diff", 1, true) then
         return active

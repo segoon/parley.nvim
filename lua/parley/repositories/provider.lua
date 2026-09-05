@@ -45,6 +45,9 @@ local function resolve_provider(ctx)
 
   local provider, opts = registry.resolve_with_opts(ctx.vcs_info)
   if provider then
+    if provider.prepare then
+      provider:prepare(ctx.vcs_info)
+    end
     return identity.snapshot(provider, opts)
   end
   return nil
@@ -61,7 +64,17 @@ end
 
 function M.refresh(bufnr)
   local ctx = context_repository.get(bufnr) or context_repository.refresh(bufnr)
-  local snapshot = resolve_provider(ctx)
+  local ok, snapshot = pcall(function()
+    local resolved = resolve_provider(ctx)
+    if not vim.deep_equal(context_repository.get(bufnr), ctx) then
+      error("Repository context changed during provider preparation; refresh the review", 0)
+    end
+    return resolved
+  end)
+  if not ok then
+    publish(bufnr, nil)
+    error(snapshot, 0)
+  end
   publish(bufnr, snapshot)
   return clone(snapshot)
 end
@@ -81,7 +94,17 @@ end
 --- @param provider parley.Provider
 --- @param opts table
 function M.store(bufnr, provider, opts)
-  publish(bufnr, identity.snapshot(provider, opts))
+  local ok, snapshot = pcall(function()
+    if provider.prepare then
+      provider:prepare((context_repository.get(bufnr) or {}).vcs_info)
+    end
+    return identity.snapshot(provider, opts)
+  end)
+  if not ok then
+    publish(bufnr, nil)
+    error(snapshot, 0)
+  end
+  publish(bufnr, snapshot)
 end
 
 function M.subscribe(bufnr, cb)

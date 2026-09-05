@@ -50,6 +50,7 @@ end
 --- @return parley.CancelHandle
 function M.http_start(self, method, path, body, callback, opts)
   local created = scheduler._now()
+  local verified_token, host = self._verified_token, self._host
   local done, sent, uncertain, in_flight = false, false, false, false
   method = method:upper()
   local active, queued, deadline_timer
@@ -61,6 +62,18 @@ function M.http_start(self, method, path, body, callback, opts)
   local function finish(result)
     if done then
       return
+    end
+    if
+      verified_token
+      and (
+        self._verified_token ~= verified_token
+        or self._host ~= host
+        or not require("parley.providers.arcanum.session").current(self)
+      )
+    then
+      result.ok, result.data = false, nil
+      result.err = "Arcanum credentials changed; refresh the review"
+      uncertain = mutation and sent
     end
     done = true
     dbg.trace(
@@ -156,6 +169,17 @@ function M.http_start(self, method, path, body, callback, opts)
         began = true
         queued = nil
         if done then
+          return
+        end
+        if
+          verified_token
+          and (
+            self._verified_token ~= verified_token
+            or self._host ~= host
+            or not require("parley.providers.arcanum.session").current(self)
+          )
+        then
+          finish({ ok = false, err = "Arcanum credentials changed before sending; refresh the review" })
           return
         end
         local remaining = deadline - scheduler._now()

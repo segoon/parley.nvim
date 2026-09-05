@@ -37,6 +37,7 @@ describe("Arcanum inline submission", function()
         end,
       },
     })
+    dofile("tests/support/arcanum_session.lua")(p)
     transport.http_start = function(_, method, path, body, callback)
       local call = { method = method, path = path, body = body, cancelled = false }
       calls[#calls + 1] = call

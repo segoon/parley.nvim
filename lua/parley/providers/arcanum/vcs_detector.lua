@@ -1,7 +1,7 @@
 --- parley.providers.arcanum.vcs_detector — Arc VCS detection.
 ---
 --- Detects whether a buffer path lives inside an Arc (Arcadia VCS) repository
---- and extracts repo root, remote branch id, and the authenticated user login.
+--- and extracts repo root, remote branch id, and the local Arc user login.
 ---
 --- Arc commands used:
 ---   • arc root        — prints absolute repo root
@@ -50,7 +50,7 @@ end
 
 --- Decode the JSON object returned by `arc info --json`.
 --- @param json_output string
---- @return string|nil
+--- @return table|nil
 local function decode_info(json_output)
   if type(json_output) ~= "string" or json_output == "" then
     return nil
@@ -112,7 +112,7 @@ function M.detect(path)
     vcs = "arc",
     root = root,
     branch = branch,
-    -- remote_url carries the login for use in detect_pr filtering;
+    -- remote_url carries the local login for diagnostics;
     -- format: "arc://<login>" (not a real URL, just an internal convention)
     remote_url = login and ("arc://" .. login) or nil,
   }

@@ -39,6 +39,11 @@ function M.resolve(opts)
     type(config.idempotent_write_retries) == "boolean",
     "providers.arcanum.idempotent_write_retries must be boolean"
   )
+  assert(
+    require("parley.providers.arcanum.host").valid(config.host),
+    "providers.arcanum.host must be a hostname or bracketed IPv6 address with an optional port"
+  )
+  config.host = config.host:lower()
   return config
 end
 return M

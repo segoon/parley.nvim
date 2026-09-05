@@ -324,7 +324,10 @@
         "lua/parley/providers/vcs/git.lua",
         "lua/parley/providers/arcanum/capabilities.lua",
         "lua/parley/providers/arcanum/resolution.lua",
-        "lua/parley/providers/github/capabilities.lua"
+        "lua/parley/providers/github/capabilities.lua",
+        "lua/parley/providers/arcanum/session.lua",
+        "lua/parley/providers/arcanum/discovery.lua",
+        "lua/parley/providers/arcanum/host.lua"
       ],
       "capabilities": [
         "buffer_inspect",

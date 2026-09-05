@@ -324,7 +324,12 @@ function M.refresh(bufnr, opts)
     return nil
   end
 
-  local provider_snapshot = provider_repository.refresh(bufnr)
+  local prepared, provider_snapshot = pcall(provider_repository.refresh, bufnr)
+  if not prepared then
+    publish_to_bufnr(bufnr, nil)
+    M.detach(bufnr, true)
+    error(provider_snapshot, 0)
+  end
   if not provider_snapshot then
     publish_to_bufnr(bufnr, nil)
     M.detach(bufnr, true)

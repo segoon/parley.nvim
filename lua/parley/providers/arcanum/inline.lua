@@ -134,7 +134,7 @@ function M.start(self, review, file, anchor, body, callback)
       finish({ ok = false, err = err })
       return
     end
-    local ok, auth_err = pcall(self.auth, self)
+    local ok, auth_err = pcall(require("parley.providers.arcanum.session").require_verified, self)
     if not ok then
       finish({ ok = false, err = tostring(auth_err) })
       return

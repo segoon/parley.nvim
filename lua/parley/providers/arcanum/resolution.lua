@@ -13,7 +13,7 @@ end
 --- @return parley.CancelHandle
 local function begin(provider, id, state, callback)
   validate_id(id)
-  local ok, err = pcall(provider.auth, provider)
+  local ok, err = pcall(require("parley.providers.arcanum.session").require_verified, provider)
   if not ok then
     callback({ ok = false, err = tostring(err) })
     return { cancel = function() end }

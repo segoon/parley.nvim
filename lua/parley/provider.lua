@@ -60,6 +60,8 @@ local M = {}
 --- @field cancel fun(): nil Request cancellation; completion arrives through the callback.
 
 --- @class parley.Provider
+--- Async initialization before publishing cache identity.
+--- @field prepare? fun(self: parley.Provider, info?: parley.VcsInfo)
 --- Local-only implemented actions, not token authorization.
 --- @field capabilities? fun(self: parley.Provider, review: parley.DetectedReview): parley.ProviderCapabilities
 --- @field begin_resolve? fun(self: parley.Provider, review: parley.DetectedReview,
@@ -166,6 +168,7 @@ M.METHOD_NAMES = {
 --- Optional methods are validated when present; absence preserves fallback behavior.
 --- @type string[]
 M.OPTIONAL_METHOD_NAMES = {
+  "prepare",
   "capabilities",
   "begin_resolve",
   "begin_unresolve",

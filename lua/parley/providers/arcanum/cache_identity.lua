@@ -1,18 +1,16 @@
---- Arcanum owns credential and Arc-login scope; no server lookup is needed.
+--- Cache identity uses only a verified API account bound to the current credential.
 local M = {}
 --- @param self parley.arcanum.Provider
 --- @return parley.CacheIdentity|nil
 function M.get(self)
-  local reader = self._auth.read_token_async or self._auth.read_token
-  local ok, token = pcall(reader)
-  if not ok or not token or token == "" then
+  if not require("parley.providers.arcanum.session").current(self) then
     return nil
   end
   return {
     provider = "arcanum",
     host = self._host,
     repository = "arcanum",
-    account = vim.fn.sha256(vim.json.encode({ token, self._viewer_login or "" })),
+    account = vim.fn.sha256(vim.json.encode({ "verified-viewer-v2", self._token, self._viewer_login })),
   }
 end
 return M

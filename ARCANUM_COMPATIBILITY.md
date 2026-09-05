@@ -71,8 +71,28 @@ caused Plenary to terminate one test process without reporting failed assertions
 Moving validation before the adapter fixed the timeout; process exit status and
 signals were checked alongside test totals. The regression remains covered.
 
+Detection/authentication backlog item **6 is implemented**: paginated exact-branch
+search, alternate Arc credential sources, verified API ownership before cache
+restoration, credential-bound requests and versioned ownership cache identity,
+validated configured hosts, and local-only diagnostics. Explicit unreadable token
+paths and failed viewer verification stop loading rather than changing accounts.
+The local Arc login is diagnostic metadata and never supplies comment ownership.
+
+Validation for item 6 (2026-09-05): **1,024 tests passed, 0 failures/errors**.
+`make format`, `make format-check`, and `make lint` passed (180 Lua files,
+0 lint warnings/errors). Tests cover paginated exact matches, duplicate and malformed
+pages, absent upstream, credential precedence, invalid explicit paths, verified
+ownership, viewer failure, changed credentials and obsolete responses, cache isolation,
+preparation failure before cache restoration, configured-host read/write workflows,
+and local diagnostics. HTTP was mocked; no live API mutations were performed.
+
+Implementation difficulty: the endpoint named cursor uses numeric offset/has_next,
+and the old help incorrectly described local-login detection and ownership. Exact
+server DTOs and the current-user handler resolved those discrepancies; regression
+tests cover both pagination and verified ownership. Generated help was not edited.
+
 The findings below describe the research baseline. The next unfinished item is
-**6: complete detection/configuration/health**; live deployment compatibility remains
+**7: add reactions and review actions deliberately**; live deployment compatibility remains
 unverified. Queue coordination is process-local, and keys are not persisted
 across manual resubmissions or Neovim restarts.
 
@@ -318,7 +338,7 @@ Comment IDs may be negative; preserving them as strings is appropriate.
 5. **Implement resolve/reopen and provider capabilities. — Implemented.** Hide or explain unavailable
    actions before users compose or choose them. Keep capabilities and command/help
    documentation in one source of truth.
-6. **Complete detection/configuration/health.** Paginate prefix search until exact
+6. **Complete detection/configuration/health. — Implemented.** Paginate prefix search until exact
    match; test competing prefix branches, absent upstream, alternate token sources,
    authenticated-viewer mismatch, host propagation and multiple checkouts.
 7. **Add reactions and review actions deliberately.** Validate token scopes and

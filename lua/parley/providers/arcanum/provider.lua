@@ -24,7 +24,7 @@ local mapping = require("parley.providers.arcanum.mapping")
 local transport = require("parley.providers.arcanum.transport")
 
 local M = {}
-local PR_DETAIL_FIELDS = "id,summary,status,url,author,vcs"
+local session = require("parley.providers.arcanum.session")
 
 -- ---------------------------------------------------------------------------
 -- Type annotations
@@ -42,7 +42,10 @@ local PR_DETAIL_FIELDS = "id,summary,status,url,author,vcs"
 --- @field _token        string|nil
 --- @field _auth         table
 --- @field _config parley.ArcanumProviderConfig
---- @field _viewer_login string|nil
+--- @field _viewer_login string|nil Verified API account
+--- @field _arc_login string|nil Local Arc account, never used for ownership
+--- @field _verified_host string|nil
+--- @field _verified_token string|nil
 --- @field _cache_provider string
 
 -- ---------------------------------------------------------------------------
@@ -52,6 +55,7 @@ local PR_DETAIL_FIELDS = "id,summary,status,url,author,vcs"
 --- @type parley.arcanum.Provider
 local ArcanumProvider = { display_name = require("parley.providers.arcanum.metadata").display_name }
 ArcanumProvider.__index = ArcanumProvider
+ArcanumProvider.prepare = session.prepare
 ArcanumProvider.capabilities = require("parley.providers.arcanum.capabilities").get
 ArcanumProvider.validate_comment_target = require("parley.providers.comment_target").validate
 ArcanumProvider.cache_identity = require("parley.providers.arcanum.cache_identity").get
@@ -77,13 +81,15 @@ ArcanumProvider.reaction_presentation = require("parley.providers.arcanum.reacti
 --- @return parley.arcanum.Provider
 function M.new(opts)
   opts = opts or {}
-  local config = require("parley.providers.arcanum.config").resolve(opts.config)
+  local config = require("parley.providers.arcanum.config").resolve(
+    vim.tbl_extend("force", opts.config or {}, opts.host and { host = opts.host } or {})
+  )
 
   local self = setmetatable({
-    _host = opts.host or config.host,
+    _host = config.host,
     _auth = opts._auth or require("parley.providers.arcanum.auth"),
     _config = config,
-    _viewer_login = opts.login or nil,
+    _arc_login = opts.login or nil,
     _cache_provider = "arcanum",
     -- Detected from vcs_info at detect() time
     _branch = opts.branch or nil,
@@ -154,57 +160,16 @@ end
 --- @param branch      string  Arc remote branch id (e.g. "users/login/feature")
 --- @return parley.DetectedReview|nil
 function ArcanumProvider:detect_pr(_repo_root, branch)
-  ensure_token(self)
-
   local search_branch = branch or self._branch or ""
   if search_branch == "" then
-    dbg.trace("arcanum.provider", "detect_pr: no branch, skipping")
     return nil
   end
-
-  dbg.trace("arcanum.provider", "detect_pr: searching for branch=" .. search_branch)
-
-  -- Search for open PRs with this branch
-  local search_body = {
-    limit = 1,
-    filter = {
-      user_branch_prefix = search_branch,
-      state = { published = true },
-    },
-  }
-
-  local data = transport.http_run(self, "POST", "/v1/pull-requests/cursor", search_body, { retry_policy = "read" })
-  if not data or not data.pull_requests or #data.pull_requests == 0 then
-    dbg.trace("arcanum.provider", "detect_pr: no PR found for branch=" .. search_branch)
-    return nil
-  end
-
-  -- Cursor search returns minimal PR objects, so fetch full PR details before
-  -- matching by branch or mapping fields.
-  local raw_pr = nil
-  for _, pr in ipairs(data.pull_requests) do
-    local pr_id = pr.id
-    if pr_id then
-      local full_pr =
-        transport.http_run(self, "GET", "/v1/pull-requests/" .. tostring(pr_id) .. "?fields=" .. PR_DETAIL_FIELDS)
-      local vcs = full_pr and full_pr.vcs or {}
-      if vcs.from_branch == search_branch then
-        raw_pr = full_pr
-        break
-      end
-      dbg.trace(
-        "arcanum.provider",
-        "detect_pr: candidate pr_id=" .. tostring(pr_id) .. " from_branch=" .. tostring(vcs.from_branch)
-      )
-    else
-      dbg.trace("arcanum.provider", "detect_pr: candidate without id from cursor response")
-    end
-  end
-
+  session.prepare(self)
+  local raw_pr = require("parley.providers.arcanum.discovery").find(self, search_branch)
   if not raw_pr then
-    dbg.trace("arcanum.provider", "detect_pr: no exact branch match for=" .. search_branch)
     return nil
   end
+  session.require_verified(self)
 
   local pr = mapping.map_pr(raw_pr)
   local pr_id = raw_pr.id
@@ -262,7 +227,7 @@ end
 --- @param review parley.DetectedReview
 --- @return parley.Discussion[]
 function ArcanumProvider:fetch_discussions(review)
-  ensure_token(self)
+  session.prepare(self)
 
   local pr_id = review.write_context and review.write_context.pr_id or tonumber(review.pr.id)
   if not pr_id then
@@ -274,6 +239,7 @@ function ArcanumProvider:fetch_discussions(review)
     return {}
   end
 
+  session.require_verified(self)
   local viewer = self._viewer_login or ""
   dbg.trace("arcanum.provider", "fetch_discussions: viewer=" .. vim.inspect(viewer) .. " #comments=" .. tostring(#data))
 
@@ -294,7 +260,7 @@ ArcanumProvider.begin_post_top_level_comment = require("parley.providers.arcanum
 --- @param body           parley.Body
 --- @return parley.Comment
 function ArcanumProvider:reply(_review, _discussion, parent_comment, body)
-  ensure_token(self)
+  session.require_verified(self)
 
   local data = transport.http_run(
     self,
@@ -316,7 +282,7 @@ end
 --- @param callback parley.WriteCallback
 --- @return parley.CancelHandle
 function ArcanumProvider:begin_reply(_review, _discussion, parent_comment, body, callback)
-  ensure_token(self)
+  session.require_verified(self)
 
   return transport.http_start(
     self,
@@ -361,7 +327,7 @@ end
 --- @param body        parley.Body
 --- @return parley.Comment
 function ArcanumProvider:edit(_review, comment_id, body)
-  ensure_token(self)
+  session.require_verified(self)
 
   local data =
     transport.http_run(self, "PATCH", "/v1/public/review-requests-comments/" .. comment_id, { content = body.text })
@@ -379,7 +345,7 @@ end
 --- @param _review     parley.DetectedReview
 --- @param comment_id  string
 function ArcanumProvider:delete(_review, comment_id)
-  ensure_token(self)
+  session.require_verified(self)
   transport.http_run(self, "DELETE", "/v1/public/review-requests-comments/" .. comment_id)
 end
 

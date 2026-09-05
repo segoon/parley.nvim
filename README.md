@@ -108,6 +108,16 @@ issue state. Dropped, non-issue, unknown, and incomplete threads cannot transiti
 GitHub resolution remains unavailable. Unsupported provider actions explain why
 before you compose or choose them; see `:help parley-provider-capabilities`.
 
+Arcanum credentials are read from `ARCANUM_TOKEN`, then `ARC_OAUTH_TOKEN`, then
+`ARC_TOKEN_PATH`, then `~/.arc/token`. An unreadable or empty explicit token file
+is an error. Review loading verifies the token's API account before showing cached
+discussions; failed verification stops loading, and the local Arc login is never
+used to guess ownership. Credential changes require a refreshed session.
+
+Discovery searches successive prefix-result pages for the exact remote branch.
+Without a remote branch, Parley remains inactive. Configure a hostname with an
+optional port under `providers.arcanum.host`; do not include a URL scheme or path.
+
 ## Telescope
 
 When `telescope = true` (the default) and Telescope is installed, Parley loads two extensions:
@@ -199,13 +209,14 @@ Run:
 This checks:
 
 - Neovim version
-- `git` and `gh` availability
-- `arc` availability
+- provider-specific tools (`git`/`gh` or `arc`/`curl`)
 - `plenary.async`
 - cache directory setup
 - optional integrations
 - whether the current buffer is in a supported repository
-- whether GitHub authentication can be resolved
+- local credential availability and, for Arcanum, the token source and configured host
+
+Health checks remain local-only and do not verify credentials with the server.
 
 ## Documentation
 

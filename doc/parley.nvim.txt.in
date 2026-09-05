@@ -338,6 +338,11 @@ Tokens are resolved in the following order:
 
 Run `gh auth login` to set up authentication.
 
+The configured host must be a hostname or bracketed IPv6 address, optionally with
+a port. Schemes, userinfo, paths, queries, fragments, and whitespace are rejected.
+An explicit constructor host overrides providers.arcanum.host; the effective host
+is used consistently by verification, discovery, reads, writes, and cache identity.
+
 Provider options: ~
 
 GitHub-specific options live under `providers.github` in the setup call. Defaults: >lua
@@ -373,15 +378,30 @@ Authentication: ~
 OAuth tokens are resolved in the following order:
 
   1. Environment variable: `ARCANUM_TOKEN`
-  2. File: `~/.arc/token` (plain text, single line)
+  2. Environment variable: `ARC_OAUTH_TOKEN`
+  3. File named by `ARC_TOKEN_PATH`
+  4. File: `~/.arc/token` (plain text, single line)
+
+Values are trimmed; empty environment values are ignored. An explicitly selected
+ARC_TOKEN_PATH must be readable and nonempty. Failure does not silently switch to
+~/.arc/token. Diagnostics identify the source without printing the token.
 
 To obtain a token: https://a.yandex-team.ru/oauth/token
 
 User login detection: ~
 
-The current user login is derived from `arc config -l` output (user.email
-field). The login is used to filter PRs authored by the current user and to
-determine `is_own` on comments.
+The local Arc login comes from `arc info --json` and is diagnostic metadata only.
+Normal review loading verifies the OAuth account via `/v2/users/me?fields=name`
+before restoring cached discussions. Only this verified login determines comment
+ownership. A differing local Arc login does not override it. Failed verification
+fails review loading; Parley does not fall back to a guessed account or cached
+ownership. Credential changes invalidate the session and reject obsolete results.
+Direct provider mutations require a prepared session from review loading.
+
+PR detection follows prefix-search pages using offset and has_next until an exact
+remote branch match is found. Candidate details are fetched once per search;
+malformed or nonprogressing pages are errors. Without a remote branch, Parley stays
+inactive without authentication or PR HTTP requests.
 
 Inline comments: ~
 
@@ -614,6 +634,14 @@ opaque detection options. `registry.resolve(vcs_info)` retains its provider-only
 return value. Shared cache code consumes validated snapshot identity, not factory
 options or private provider fields.
 
+The optional `provider:prepare(vcs_info)` hook runs in a Plenary coroutine before
+provider identity is published or review caches are consulted. Preparation errors
+clear obsolete provider/review state. Providers without the hook retain their
+existing lifecycle. Arcanum verifies its API account here; its cache identity binds
+host, credential fingerprint, and verified viewer and excludes the local Arc login.
+The ownership cache version changes with this release, so earlier cached ownership
+is not reused. Tokens are neither stored in cache keys nor printed in diagnostics.
+
 The optional provider-spec `health(context)` callback runs in a plenary.async
 coroutine. It receives `vcs_info`, the `opts` returned by detection, and current
 `config`. Return a list of `{ level, message }` entries, where level is `ok`,
@@ -697,7 +725,8 @@ The health check verifies:
 
 GitHub diagnostics check Git/gh executables, branch, and credentials from the
 environment or hosts.yml. Keyring credentials are not checked. Arcanum diagnostics
-check Arc/curl executables, remote branch, login, and local token availability.
+check Arc/curl executables, remote branch, configured HTTPS host, local Arc login,
+and credential source/availability. They do not construct or prepare a provider.
 Missing executables for unrelated providers do not produce warnings.
 
 Credential availability does not verify server authentication. No API requests or
