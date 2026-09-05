@@ -93,6 +93,72 @@ return function(M)
     end, progress_timeout(state))
   end
 
+  --- Register before calling provider code: completion may happen inline.
+  --- @param bufnr integer
+  --- @param operation table
+  --- @param starter fun(callback: fun(result: table)): table
+  --- @param on_complete fun(result: table)
+  local function start_operation(bufnr, operation, starter, on_complete)
+    local completed, cancel_requested, cancel_sent = false, false, false
+    local request
+    --- @return boolean
+    local function active()
+      return not completed and M._operations[bufnr] == operation
+    end
+    --- @param result any
+    local function complete(result)
+      if not active() then
+        return
+      end
+      if
+        type(result) ~= "table"
+        or type(result.ok) ~= "boolean"
+        or (result.cancelled ~= nil and type(result.cancelled) ~= "boolean")
+        or (result.err ~= nil and type(result.err) ~= "string")
+        or (result.ok and result.cancelled)
+      then
+        result = { ok = false, err = "parley: provider returned an invalid write result" }
+      end
+      completed = true
+      M._operations[bufnr] = nil
+      on_complete(result)
+    end
+    --- Forward cancellation at most once, and only to this active request.
+    local function cancel()
+      if not active() or cancel_sent then
+        return
+      end
+      cancel_requested = true
+      if not request then
+        return
+      end
+      cancel_sent = true
+      local ok, err = pcall(request.cancel)
+      if not ok then
+        complete({ ok = false, err = "parley: cancellation failed: " .. tostring(err) })
+      end
+    end
+    operation.cancel = cancel
+    M._operations[bufnr] = operation
+    if operation.input then
+      operation.input.set_cancel(cancel)
+    end
+    local ok, result = pcall(starter, complete)
+    if not active() then
+      return
+    end
+    if not ok then
+      complete({ ok = false, err = "parley: could not start request: " .. tostring(result) })
+    elseif type(result) ~= "table" or type(result.cancel) ~= "function" then
+      complete({ ok = false, err = "parley: provider returned an invalid cancellation handle" })
+    else
+      request = result
+      if cancel_requested then
+        cancel()
+      end
+    end
+  end
+
   --- @param bufnr integer
   --- @param cursor_line integer|nil
   --- @param starter fun(
@@ -106,15 +172,8 @@ return function(M)
       return false
     end
 
-    local operation
     local progress = start_progress(bufnr, progress_texts.running)
-    local request = starter(function(result)
-      if M._operations[bufnr] ~= operation then
-        return
-      end
-
-      M._operations[bufnr] = nil
-
+    start_operation(bufnr, { progress = progress }, starter, function(result)
       if result.cancelled then
         finish_progress(progress, bufnr, "cancelled", progress_texts.cancelled)
         refresh_after_write(bufnr, function() end)
@@ -137,11 +196,6 @@ return function(M)
       end)
     end)
 
-    operation = {
-      cancel = request.cancel,
-      progress = progress,
-    }
-    M._operations[bufnr] = operation
     return true
   end
 
@@ -160,18 +214,11 @@ return function(M)
       return false
     end
 
-    local operation
     local progress = start_progress(bufnr, progress_texts.running)
     composer_ui_state.patch(bufnr, { submit_state = "submitting", error = nil })
     instance.set_submitting(status_text)
 
-    local request = starter(function(result)
-      if M._operations[bufnr] ~= operation then
-        return
-      end
-
-      M._operations[bufnr] = nil
-
+    start_operation(bufnr, { progress = progress, input = instance }, starter, function(result)
       if result.cancelled then
         composer_ui_state.patch(bufnr, { submit_state = "idle" })
         instance.set_idle("Request cancelled. Draft preserved.")
@@ -201,18 +248,6 @@ return function(M)
       end)
     end)
 
-    operation = {
-      cancel = request.cancel,
-      input = instance,
-      progress = progress,
-    }
-    M._operations[bufnr] = operation
-    instance.set_cancel(function()
-      local active = M._operations[bufnr]
-      if active ~= nil then
-        active.cancel()
-      end
-    end)
     return true
   end
 

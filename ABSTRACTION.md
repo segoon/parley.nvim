@@ -140,7 +140,16 @@ execution through the registry and write service.
 
 ### R3. Immediate completion leaves a completed write registered as active
 
-**Status: open. Severity: 7/10. Category: operation-lifecycle bug at the provider boundary.**
+**Status: addressed.** Both write paths now share a lifecycle helper that
+registers identity before starting, completes exactly once, and never reinstates
+finished operations. Startup exceptions and malformed results/handles follow the
+failure path, preserving drafts. Cancellation belongs to the original operation,
+is forwarded at most once, and waits for callback completion. Regression tests
+cover inline/deferred completion, retries, stale callbacks/cancellation, malformed
+values, exceptions, and GitHub's stubbed missing-executable path. The description
+and probe outputs below record the original finding.
+
+**Original severity: 7/10. Category: operation-lifecycle bug at the provider boundary.**
 
 Both [`run_action`](lua/parley/services/write_operation.lua#L110) and
 [`run_submit`](lua/parley/services/write_operation.lua#L164) invoke `starter(...)`
@@ -223,10 +232,10 @@ current contract; lack of support for arbitrary non-CLI VCS implementations is
 an extensibility limitation, not a demonstrated regression. This audit did not
 establish another concrete shared GitHub/Arcanum implementation beyond R1.
 
-**Recommended next implementation order:** R3 (retry-blocking lifecycle defect),
-R2 (make the execution contract explicit), R1 (remove the remaining revision alias),
-then the integrated custom-provider regression. Keep these as separate reviewable
-changes. Historical findings below retain their original numbering and evidence.
+**Current implementation order:** R3 is now addressed. Next: R2 (make the
+execution contract explicit), R1 (remove the remaining revision alias), then the
+integrated custom-provider regression. Keep these as separate reviewable changes.
+Historical findings below retain their original numbering and evidence.
 
 
 ## Concrete leaks
