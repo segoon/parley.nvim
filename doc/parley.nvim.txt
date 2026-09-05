@@ -214,6 +214,9 @@ If you do not use Telescope, disable the extension loading: >lua
 7. STATUSLINE                                        *parley-statusline*
 
 Parley exposes a statusline component via |parley.statusline()|.
+Provider branding comes from public provider metadata: GitHub displays
+`GitHub PR #…`, Arcanum displays `Arcanum PR #…`, and custom providers supply their
+own name. Review state without a provider snapshot displays `PR #…`.
 
 When the current buffer has an active PR, it returns a string like: >
     GitHub PR #42 . approved . 3 unresolved
@@ -280,21 +283,7 @@ The full default configuration:
         review_next = "]C",
         review_prev = "[C",
       },
-      providers = {
-        github = {
-          timeout_ms = 5000,
-          retry_count = 2,
-          retry_base_delay_ms = 250,
-          retry_max_delay_ms = 2000,
-        },
-        arcanum = {
-          timeout_ms = 10000,
-          retry_count = 2,
-          retry_base_delay_ms = 250,
-          retry_max_delay_ms = 2000,
-          host = "arcanum.yandex.net",
-        },
-      },
+      providers = {},
     })
 <
 
@@ -380,6 +369,8 @@ keymaps ~                                             *parley-config-keymaps*
 
 <parley-configuration-end>
 
+Provider defaults are merged separately; see |parley-providers|.
+
 ==============================================================================
 9. HIGHLIGHTS                                        *parley-highlights*
 
@@ -419,6 +410,24 @@ Example override: >lua
 
 Parley uses a provider abstraction to support multiple hosting platforms.
 
+Local revision reads and new-comment validation use the detected VCS (Git or
+Arc). Mapping compares review-head content with a loaded buffer's text, including
+unsaved edits, or with the working-tree file when no buffer is loaded. Edits
+refresh positions after a short debounce without an API request. Separate
+checkouts have independent mappings even when they share the same review.
+
+If content cannot be read, existing locations remain visible as stale
+approximations with a warning. Deleted lines have no precise local position;
+quickfix entries are marked unavailable rather than targeting the original line.
+
+New comments require local HEAD to match the review revision, a clean file, and
+no unsaved changes. Every selected line must belong to the review's changed
+new-side lines. Validation runs before composition and again before sending.
+Failures preserve the draft; Parley never bypasses a failed VCS check.
+
+Internal VCS helpers take a VcsInfo table rather than a root string. Shared
+workflows use DetectedReview.head_sha; write_context remains provider-private.
+
 GitHub                                               *parley-provider-github*
 
 The built-in GitHub provider uses the `gh` CLI for API calls and supports
@@ -437,8 +446,18 @@ Run `gh auth login` to set up authentication.
 
 Provider options: ~
 
-GitHub-specific options live under `providers.github` in the setup call.
-See |parley-configuration|.
+GitHub-specific options live under `providers.github` in the setup call. Defaults: >lua
+    require("parley").setup({
+      providers = {
+        github = {
+          timeout_ms = 5000,
+          retry_count = 2,
+          retry_base_delay_ms = 250,
+          retry_max_delay_ms = 2000,
+        },
+      },
+    })
+<
 
 Limitations: ~
 
@@ -495,6 +514,19 @@ Limitations: ~
 
 ------------------------------------------------------------------------------
 
+Provider configuration lifecycle: ~
+
+Built-in defaults and registration are owned by `parley.providers`. Each `setup()`
+binds a copy of the merged provider settings to its registered factories. Existing
+instances keep their settings when options or `require("parley").config` change.
+Call `setup()` again to apply changed settings to subsequently created instances.
+
+Direct built-in constructors accept `config = { ... }` with provider-specific
+options and copy it over that provider's defaults. Omitting `config` uses those
+defaults. Arcanum's explicit constructor `host` overrides `config.host`; both
+request URLs and cache identity use the selected host. `retry_count = 0` disables
+retries.
+
 Custom providers: ~
 
 After calling `setup()`, you can register additional providers: >lua
@@ -503,21 +535,162 @@ After calling `setup()`, you can register additional providers: >lua
       name = "MyProvider",
       detect = function(vcs_info) ... end,
       factory = function(opts) ... end,
+      health = function(context)
+        -- Optional: local-only diagnostics; never construct a provider here.
+        return { { level = "info", message = "Local diagnostics complete" } }
+      end,
     })
 <
 
-The provider must implement all methods defined in `parley.Provider`.
+The provider must implement all required methods in `parley.Provider` and expose
+`display_name`, a nonblank string such as `"MyProvider"`. This metadata is required
+on every instance returned by the factory; the registration spec's `name` does
+not substitute for it. Existing custom providers must add this field to satisfy
+provider validation. The statusline uses this name without inferring a provider
+from review URLs or private cache fields.
 See `lua/parley/provider.lua` for the full interface.
 
-Custom VCS detectors: ~
+Every provider must implement `validate_comment_target(review, target)`. The
+`target` contains `vcs_info`, `rel_path` (repository-relative), and `anchor`
+(`start_line`, optional `end_line`). Return `{ ok = true }` to accept or
+`{ ok = false, err = "Reason shown to the user" }` to reject; the reason must be
+nonblank. This method runs in a Plenary async context and must not post comments.
+It runs before opening the composer and again before submission. Errors and
+malformed results block the operation; submission failures preserve the draft.
 
-To support a custom VCS, register a detector via `parley.vcs`: >lua
+GitHub and Arcanum require every selected line to belong to the review diff.
+Custom providers choose their own eligibility policy, but unsaved-buffer,
+checkout-state, and context-race checks remain mandatory shared protections.
+Existing custom providers must add this method; there is no implicit fallback.
+
+Internal integrations using `parley.vcs.check_anchor_in_diff` should migrate to
+the provider method. Generic diff reads use `parley.vcs.read_diff(vcs_info,
+base_branch, rel_path, head_sha)`, returning diff text or `nil, error`.
+The `head_sha` argument is required and forwarded unchanged to the VCS adapter;
+there is no implicit current-revision default. Callers that omitted it must pass
+the detected review's `head_sha`. Missing, empty, non-string, or leading-hyphen
+revisions return `nil, "review revision is unavailable"` before command execution.
+
+
+Provider-owned cache identity: ~
+
+Optional cancellable writes: ~
+
+Providers may implement either or both of these colon-call methods:
+
+  - `begin_post_top_level_comment(review, file, anchor, body, callback)`
+  - `begin_reply(review, discussion, parent_comment, body, callback)`
+
+When absent, shared writes call the corresponding required coroutine method.
+When present, these methods must be functions. The same optional-method validation
+applies to `reaction_choices` and `reaction_presentation`; omit unavailable hooks
+with `nil`, not `false` or another placeholder value.
+
+Starters must return promptly without yielding, returning a `parley.CancelHandle`
+with a `cancel()` function (called without a self argument). Invoke the
+`parley.WriteCallback` exactly once on the Neovim main loop, either before returning
+or later. A `parley.WriteResult` contains `ok` (boolean), optional `comment`,
+optional `err` (string), and optional `cancelled` (boolean). A cancelled result must
+have `ok = false`. Successful callbacks need not return a comment object.
+
+Cancellation requests completion through the callback; shared writes continue
+waiting until it arrives. It does not guarantee rollback of a remote mutation.
+Shared execution tolerates immediate completion, ignores duplicate or stale
+callbacks, and turns startup failures or malformed pending handles/results into
+write failures while retaining drafts. Existing providers with valid hooks need
+no behavioral changes. Providers without these hooks retain coroutine fallbacks.
+
+Every provider must implement `provider:cache_identity()`. It runs in a Plenary
+coroutine and returns { provider, host, repository, account }, with four nonempty
+strings, or nil when stable local credential identity is unavailable. `account`
+must be a non-secret fingerprint; never return credentials or include them in
+errors. Identity derivation belongs under `lua/parley/providers/` and must not
+make network requests.
+
+Parley validates provider construction and identity before publishing provider
+snapshots. Missing methods and malformed values are contract errors. Nil identity
+keeps live review operations available using isolated temporary state and skips
+all persistent review-cache reads, writes, and invalidation.
+
+Review cache keys use the reviews-v2 namespace and hashes of ordered identity
+fields and typed branch/PR identifiers. Provider, host, repository, and credential
+contexts are isolated. Token rotation causes a cold refresh. Checkout-specific
+local mappings remain separate even when remote cache identity is shared.
+
+Legacy review-cache entries are left untouched and never used as a fallback.
+The first refresh after this change fetches fresh data. Identity changes during
+fetching discard those results and schedule a refresh with the current identity.
+
+`registry.resolve_with_opts(vcs_info)` returns the validated provider and its
+opaque detection options. `registry.resolve(vcs_info)` retains its provider-only
+return value. Shared cache code consumes validated snapshot identity, not factory
+options or private provider fields.
+
+The optional provider-spec `health(context)` callback runs in a plenary.async
+coroutine. It receives `vcs_info`, the `opts` returned by detection, and current
+`config`. Return a list of `{ level, message }` entries, where level is `ok`,
+`info`, `warn`, or `error`. Keep diagnostics local: no API requests, provider
+construction, or credentials in messages. A missing callback is informational.
+Concrete diagnostic implementations belong under `lua/parley/providers/`.
+
+
+Provider-owned reactions: ~
+
+Providers may implement these optional, synchronous, local-only methods:
+
+  reaction_choices(review, comment)
+      Returns an ordered list of { reaction, label, emoji? } and an optional
+      unavailable-reason string. `reaction` is an opaque provider identifier.
+      An empty list disables mutation and displays the reason when requested.
+
+  reaction_presentation(reaction_type)
+      Returns { label, emoji? } for an existing reaction identifier. Shared UI
+      adds counts and viewer state. Unknown identifiers should retain their
+      original value as the label.
+
+These methods use the usual provider:method(...) calling convention. Define
+concrete catalogs and presentation logic under `lua/parley/providers/`.
+Missing methods preserve raw labels and make interactive mutations unavailable;
+there is no implicit GitHub catalog. Cached reaction data remains unchanged.
+
+GitHub retains its existing reaction choices and emoji. Arcanum reactions remain
+readable using their original codes; changing them is not implemented in Parley.
+The picker and direct reaction service reject choices that are not currently
+offered. Changing review/provider context while the picker is open requires
+reopening it before submitting.
+
+Custom VCS implementations: ~
+
+After `setup()`, register both a detector and an adapter via `parley.vcs`.
+Concrete VCS modules belong under `lua/parley/providers/`; a module can be
+reused by multiple hosting providers. For example: >lua
     local vcs = require("parley.vcs")
-    vcs.register_detector("my-vcs", function(path)
-      -- Return a parley.VcsInfo table if path is inside your VCS, else nil.
-      -- This function runs in a plenary.async coroutine.
-    end)
+    local custom = require("parley.providers.my_vcs")
+    vcs.register_detector("my-vcs", custom.detect)
+    vcs.register_adapter("my-vcs", custom.adapter)
 <
+The detector runs in a plenary.async coroutine and returns a `parley.VcsInfo`
+with `vcs = "my-vcs"`, or nil when the path is not supported.
+
+The adapter must provide these functions (called without a `self` argument):
+
+  head()                  Command argument array to read the current revision
+  show(revision, path)    Command argument array to read immutable file contents
+  status(path)            Command argument array to inspect file status
+  dirty(output)           Parse status stdout: true if dirty, false if clean,
+                          or nil plus an error string if parsing fails
+  diff(base, head, path)  Command argument array producing a zero-context
+                          unified review diff, with the review head on new side
+
+Commands run asynchronously in the repository root. Adapter registration rejects
+empty names, duplicate names, and missing/non-function methods. Adapter names
+must match `VcsInfo.vcs`; unknown names fail without executing commands.
+
+`vcs.reset_adapters()` removes adapters without changing detectors.
+`vcs.reset_detectors()` removes detectors without changing adapters.
+Every `setup()` resets both and registers built-ins, checking Arc before Git.
+Re-register custom implementations after each setup. Direct revision/validation
+calls before setup require explicit adapter registration.
 
 ==============================================================================
 11. HEALTH CHECK                                     *parley-health*
@@ -528,15 +701,25 @@ Run: >vim
 
 The health check verifies:
 
-  - Neovim version (>= 0.10)
-  - `git` and `gh` executables
-  - `plenary.async` availability
-  - Configuration state (whether `setup()` was called, cache directory)
+  - Neovim version (>= 0.10) and `plenary.async` availability
+  - Configuration state and cache-directory accessibility
   - Optional integrations (telescope.nvim, render-markdown.nvim)
-  - Current buffer context (git repo, branch, remote, provider match, auth)
+  - The source file's repository using registered VCS detectors
+  - Local diagnostics supplied by the matching provider
 
-Note: PR detection is not probed during checkhealth because it requires a
-live API call.
+GitHub diagnostics check Git/gh executables, branch, and credentials from the
+environment or hosts.yml. Keyring credentials are not checked. Arcanum diagnostics
+check Arc/curl executables, remote branch, login, and local token availability.
+Missing executables for unrelated providers do not produce warnings.
+
+Credential availability does not verify server authentication. No API requests or
+PR detection are performed. Tokens are never included in built-in diagnostics.
+
+When :checkhealth opens its report buffer, Parley uses the regular alternate
+buffer as the source file. If unavailable, repository diagnostics are skipped.
+Repository checks also require setup() and Plenary; checks time out after ten
+seconds, and late results are discarded. Providers without diagnostic callbacks
+and repositories without matching providers are reported informationally.
 
 ==============================================================================
 12. LUA API                                          *parley-api*
