@@ -6,10 +6,228 @@ Required boundary: all provider-specific code and data belong under
 `lua/parley/providers/`. Shared code delegates provider-specific behavior through
 explicit contracts, registration, or dependency injection.
 
-This audit inspected implementation, call sites, configuration, and tests. It did
-not execute provider operations or verify live API behavior. Findings describe
-the implementation after the shared Arc workflow fix; that fix adds Arc behavior
-but does not fully satisfy the directory boundary.
+The original 2026-09-04 audit inspected implementation, call sites, configuration,
+and tests without executing provider operations or verifying live API behavior.
+Its findings describe the implementation after the shared Arc workflow fix.
+The current re-audit and its separately identified probes follow below.
+
+## Re-audit: 2026-09-05
+
+Baseline: `b92f78c` (`test: enforce complete provider abstraction boundaries`).
+This pass inventories all **77 production Lua files**: 50 shared files and 27
+files under `lua/parley/providers/`. It inspects shared import relationships and
+traces the provider/VCS construction, configuration, cache, health, presentation,
+and write-operation contracts. It is a targeted boundary audit, not an exhaustive
+functional review of every provider API or UI path.
+
+The earlier six concrete findings and the recorded construction, eligibility,
+and architecture-policy findings remain addressed in their original scope.
+However, two residual contract issues and one additional operation-lifecycle bug
+remain. The first is a concrete VCS convention in shared code; the latter two
+are shared/provider contract defects, not misplaced GitHub implementations.
+
+### Current responsibility and dependency overview
+
+| Area | Shared responsibility | Provider-owned responsibility / interface |
+| --- | --- | --- |
+| Setup | Merge options, reset registries, wire plugin services | Catalog defaults, descriptors, factories, initialization |
+| Detection | Buffer/context lifecycle and ordered dispatch | Registered VCS detectors and hosting-provider detection |
+| Identity/cache | Validate identity, scope cache entries, coordinate review snapshots | Resolve identity and fetch normalized reviews/discussions |
+| Local content | Dispatch revision reads and maintain local projections | Registered VCS command adapters and status interpretation |
+| Writes | Local safety, composer state, progress, draft preservation | Target eligibility, mutations, optional cancellable starters |
+| Presentation | Render supplied metadata and normalized models | Display name, reaction choices/presentation, progress label |
+| Health | Select the active provider and report diagnostic entries | Provider-specific tool and credential diagnostics |
+
+```mermaid
+flowchart TD
+    Setup[Shared setup] --> Catalog[Provider catalog]
+    Catalog --> Concrete[Provider implementations and VCS adapters]
+    Catalog --> Registry[Shared registries]
+    Repos[Context and provider repositories] --> Registry
+    Reads[Read services and review repository] --> Repos
+    UI[Statusline and discussion UI] --> Reads
+    Writes[Write service and operation lifecycle] --> Repos
+    Writes --> VCS[Shared VCS dispatcher]
+    Reads -. injected methods .-> Concrete
+    Writes -. injected methods .-> Concrete
+    VCS -. registered command contracts .-> Concrete
+    Health[Shared health] --> Registry
+    Health -. registered diagnostic hooks .-> Concrete
+```
+
+Solid arrows represent direct module dependencies, collapsed by responsibility;
+dashed arrows represent runtime delegation. Shared setup's catalog import is the
+only shared import into `providers/`. Shared modules otherwise consume registered
+instances, normalized models, and public metadata. The graph does not imply that
+the existing application layer is free of internal module cycles.
+
+### R1. Shared diff reads still supply a concrete revision alias
+
+**Status: open. Severity: 4/10. Category: residual VCS policy leak.**
+
+[`vcs.read_diff()`](lua/parley/vcs.lua#L201) passes `head_sha or "HEAD"` to the
+registered adapter. Its optional revision argument therefore adopts Git/Arc's
+current-revision spelling on behalf of every VCS. A custom adapter that uses a
+different revision syntax receives the wrong value unless it compensates for
+shared behavior. The failure is on omitted-revision calls; built-in eligibility
+normally supplies an explicit review revision.
+
+**Executed probe:** register a custom adapter whose `diff` function records its
+second argument, replace `vcs._runner` with an in-memory successful result, and
+call `read_diff(info, "base", "file")`. Output: `implicit revision=HEAD`. No VCS
+process was executed. The existing
+[custom-adapter test](tests/parley/vcs_adapters_spec.lua) passes `"rev"` explicitly,
+so its custom identifier does not test this default.
+
+**Recommendation:** require an explicit revision for shared review diff reads,
+reject absent/empty revisions before invoking adapters, and keep any
+current-checkout convenience inside provider-owned adapters. Audit direct callers
+and document the signature change. This keeps review operations tied to a known
+revision and removes shared knowledge of a revision alias.
+
+**Alternative:** preserve an optional revision and pass an explicit absence or
+semantic operation to the adapter, letting each adapter resolve its own current
+revision. This retains convenience but expands the adapter contract and allows
+mutable-checkout diffs; it needs separate semantics and tests.
+
+**Requirements/limits:** retain current built-in review behavior and error
+handling. Leading-hyphen rejection in shared revision/base validation also embeds
+CLI argument-safety assumptions; assess it alongside adapter input validation,
+but do not remove protections without safe command construction. No incompatible
+built-in revision was demonstrated by this audit.
+
+**Complexity/maintenance:** small implementation and caller migration; low ongoing
+cost for an explicit-revision contract, higher for dual current/immutable modes.
+**Regression coverage:** a custom adapter with no `HEAD` alias; missing revision;
+explicit opaque revision; unchanged built-in diff commands and failures.
+
+### R2. Optional cancellable methods are outside the provider contract
+
+**Status: open. Severity: 5/10. Category: incomplete public contract.**
+
+[Top-level submission](lua/parley/services/write.lua#L288) and
+[reply submission](lua/parley/services/write.lua#L379) select
+`begin_post_top_level_comment` and `begin_reply` by truthiness. Both built-ins
+implement these hooks, but [`parley.Provider`](lua/parley/provider.lua) neither
+declares their signatures nor validates their optional presence. Their result,
+callback timing, and cancellation contracts are consequently implicit in callers
+and concrete implementations.
+
+**Executed probe:** create a valid mock provider, set `begin_reply = true`, and
+call `provider.validate(p)`. Output: `invalid optional hook accepted=true`.
+Static tracing shows the write service subsequently attempts to call the boolean.
+This probe establishes acceptance of malformed metadata; it did not send a reply.
+
+**Recommendation:** declare both optional methods and common callback-result and
+cancellation-handle types, and reject non-function values when present during
+provider validation. Document scheduling, cancellation, error, and completion
+requirements. Keep providers without these methods on the existing coroutine
+fallback. Validate returned handles/results at the shared execution boundary;
+method-type validation alone cannot establish runtime correctness.
+
+**Alternative:** require a single cancellable execution interface for all writes.
+That removes fallback duplication but breaks more custom providers and requires
+adapting every mutation path. Explicit optional hooks are the smaller correction.
+
+**Requirements/limits:** preserve the existing fallback and draft lifecycle;
+do not treat a present method as proof of feature availability or successful
+execution. Address callback timing robustly as described in R3.
+
+**Complexity/maintenance:** small to medium; reusable result/handle definitions
+reduce future duplication. **Regression coverage:** absent hooks, valid hooks,
+non-function hooks, malformed returned handles/results, exceptions, and fallback
+execution through the registry and write service.
+
+### R3. Immediate completion leaves a completed write registered as active
+
+**Status: open. Severity: 7/10. Category: operation-lifecycle bug at the provider boundary.**
+
+Both [`run_action`](lua/parley/services/write_operation.lua#L110) and
+[`run_submit`](lua/parley/services/write_operation.lua#L164) invoke `starter(...)`
+before constructing and storing `operation`. If the starter calls its callback
+inline, both the captured operation and the active entry are still nil, so the
+callback's identity guard allows completion. When the starter returns, the caller
+stores the now-completed operation as active. A retry then reports that a request
+is already in progress.
+
+This is not merely a hypothetical custom-provider behavior:
+[`gh_start`](lua/parley/providers/github/transport.lua#L213) completes immediately
+when executable detection fails, and
+[`runtime.ui.dispatch`](lua/parley/runtime/ui.lua#L7) invokes callbacks immediately
+when already on the main loop. Provider-owned dispatch therefore does not imply
+that callbacks always run after a starter returns.
+
+**Executed probe:** instantiate the shared operation helper with in-memory
+notification/timer/config hooks. Supply a starter that immediately invokes
+`callback({ ok = false, err = "immediate failure" })`, then returns a no-op cancel
+handle. Run both operation paths. Outputs:
+
+```text
+submit active after completion=true
+action active after completion=true
+retry accepted=false
+```
+
+The failure path avoided review refresh and network/VCS calls. The built-in
+missing-executable route was traced statically, not exercised against a live
+provider. Existing provider transport and write tests do not establish this
+cross-boundary timing invariant.
+
+**Recommendation:** allocate and register operation identity before calling the
+starter; completion must transition that identity exactly once. Attach a returned
+handle only if the operation is still active, and never reinstate completed
+operations. Protect starter invocation and malformed handles so startup failures
+restore the composer/progress state and preserve drafts. Apply the same lifecycle
+to both helper paths.
+
+**Alternative:** require every provider to defer completion. This has lower local
+implementation cost but leaves correctness dependent on every provider and error
+path honoring an undocumented scheduling convention. Central lifecycle handling
+is more reliable and supports immediate local failures naturally.
+
+**Requirements/limits:** preserve stale-callback rejection, cancellation, draft
+retention, and success refresh behavior. Do not cancel or refresh an already
+completed operation merely because its handle arrives late.
+**Complexity/maintenance:** medium; one reusable lifecycle reduces duplicated
+state transitions. **Regression coverage:** inline failure and success, deferred
+completion, startup exceptions, invalid handles, duplicate callbacks, cancellation,
+and successful retry after immediate failure. Include a stubbed missing-executable
+integration case without launching external commands.
+
+### Current test evidence and remaining recommendation
+
+The previous implementation commit reported **867 passing tests**, with clean
+format and lint checks. That is a prior validation result; this research-only
+pass did not rerun the full suite. This pass executed the focused, injected probes
+above and inspected the current policy and relevant test sources. It made no live
+provider requests and did not modify production code or tests.
+
+The current architecture checker discovers production files, validates layer
+membership, and restricts shared imports into providers. Its lexer and regression
+fixtures cover supported static import forms. Those checks cannot detect R1's
+literal alias, R2's undocumented runtime protocol, or R3's completion ordering.
+They are structural evidence, not a semantic proof of provider independence.
+
+Current statusline/reaction tests exercise custom metadata; custom VCS tests check
+command dispatch; catalog/configuration tests cover snapshots and host forwarding;
+write tests cover custom eligibility and draft/context protections. These replace
+the earlier assumptions described in the historical test assessment below.
+However, they do not yet combine detection, identity/cache, presentation, reactions,
+and posting in one deliberately distinct provider/VCS workflow. Retain that
+integration-test recommendation as outstanding; it is not implemented here.
+
+Normalized review states, opaque string IDs/revisions, Markdown composition,
+shared clean-file checks, and provider names in documentation are not by themselves
+concrete provider leaks. The command-oriented VCS adapter interface is an explicit
+current contract; lack of support for arbitrary non-CLI VCS implementations is
+an extensibility limitation, not a demonstrated regression. This audit did not
+establish another concrete shared GitHub/Arcanum implementation beyond R1.
+
+**Recommended next implementation order:** R3 (retry-blocking lifecycle defect),
+R2 (make the execution contract explicit), R1 (remove the remaining revision alias),
+then the integrated custom-provider regression. Keep these as separate reviewable
+changes. Historical findings below retain their original numbering and evidence.
+
 
 ## Concrete leaks
 
@@ -293,13 +511,14 @@ flowchart TD
 This diagram describes runtime composition and delegation. Shared implementations
 should depend on contracts rather than importing concrete implementation modules.
 
-## Test quality and recommended coverage
+## Historical test assessment and original recommendations
 
 Existing Arc adapter and write-workflow tests check useful behavior, including
 command selection and shared revision handling. They do not enforce where the
 concrete implementations live.
 
-Some existing tests actively preserve provider assumptions:
+At the original audit date, these tests preserved provider assumptions (the
+current assessment above supersedes these observations):
 
 - [`health_spec.lua`](tests/parley/health_spec.lua) expects missing Git and `gh`
   to be universal runtime errors.
