@@ -95,6 +95,12 @@ New comments require a clean file with no unsaved edits and a local HEAD matchin
 the review revision. These checks run again when you submit; a failed check keeps
 your draft. Other Arcanum API limitations still apply.
 
+Use `:Parley discussion list` to browse every thread without Telescope. Arcanum
+nested replies and issue states are preserved. General, whole-file, old-side,
+and historical threads open in the discussion float without a guessed line;
+replying and editing/deleting your own comments remain available. Only open
+issues contribute to the unresolved count.
+
 ## Telescope
 
 When `telescope = true` (the default) and Telescope is installed, Parley loads two extensions:
@@ -167,7 +173,12 @@ require("parley").setup({
 See `:help parley-configuration` for the full reference with all defaults.
 
 Requests to GitHub are made through the standard `gh` CLI.
-Arcanum requests are make through `arc` CLI.
+Arcanum uses asynchronous HTTPS. Its default request budget is 10 seconds,
+including queueing and retry waits, with request starts spaced one second apart.
+Comment and reply retries are opt-in via
+`providers.arcanum.idempotent_write_retries = true`; enable this only after
+confirming the deployed server supports idempotency keys. After an uncertain
+write failure or cancellation, check the review before resubmitting your draft.
 See `:help parley-providers` for details.
 
 ## Health Check

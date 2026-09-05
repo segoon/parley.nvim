@@ -54,6 +54,7 @@ local M = {}
 --- @field comment? parley.Comment
 --- @field err? string
 --- @field cancelled? boolean Must not be true when ok is true.
+--- @field uncertain? boolean The server may have accepted the mutation; check the review before retrying.
 --- @alias parley.WriteCallback fun(result: parley.WriteResult): nil
 --- @class parley.CancelHandle
 --- @field cancel fun(): nil Request cancellation; completion arrives through the callback.

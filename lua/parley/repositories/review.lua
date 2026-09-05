@@ -59,7 +59,7 @@ end
 local function build_summary(discussions)
   local unresolved_count = 0
   for _, discussion in ipairs(discussions) do
-    if discussion.resolved ~= true then
+    if require("parley.model").is_open_issue(discussion) then
       unresolved_count = unresolved_count + 1
     end
   end

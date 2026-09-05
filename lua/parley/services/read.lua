@@ -23,6 +23,10 @@ end
 --- @param bufnr integer
 --- @param snapshot table|nil
 local function render_snapshot(bufnr, snapshot)
+  local window = package.loaded["parley.discussion_window"]
+  if window and window.refresh_snapshot then
+    window.refresh_snapshot(bufnr, snapshot)
+  end
   if not snapshot or not snapshot.discussions or #snapshot.discussions == 0 then
     signs.clear(bufnr)
     return

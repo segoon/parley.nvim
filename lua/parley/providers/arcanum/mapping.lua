@@ -3,7 +3,6 @@
 --- Converts raw Arcanum REST API objects (comments, PRs, reactions) into
 --- parley model types.  No I/O; all functions are pure.
 
-local dbg = require("parley.debug")
 local model = require("parley.model")
 
 local M = {}
@@ -41,7 +40,7 @@ M.PR_STATUS_MAP = {
 --- @param viewer    string   Authenticated user login
 --- @return parley.Reaction[]
 function M.map_reactions(reactions, viewer)
-  if not reactions or #reactions == 0 then
+  if type(reactions) ~= "table" or #reactions == 0 then
     return {}
   end
 
@@ -97,12 +96,14 @@ function M.map_comment(raw, viewer)
   end
 
   -- Author field: v1 uses raw.user.name, v2 (PublicCommentDto) uses raw.author.name
-  local author_obj = raw.user or raw.author or {}
+  local author_obj = type(raw.user) == "table" and raw.user or type(raw.author) == "table" and raw.author or {}
   local author = author_obj.name or ""
 
   local content = raw.content or ""
   local created_at = raw.created_at or ""
-  local updated_at = raw.updated_at or raw.edited_at or created_at
+  local updated_at = type(raw.updated_at) == "string" and raw.updated_at
+    or type(raw.edited_at) == "string" and raw.edited_at
+    or created_at
 
   local reactions = M.map_reactions(raw.reactions, viewer)
 
@@ -185,72 +186,12 @@ function M.extract_anchor_location(anchor)
   return path, line, end_line
 end
 
---- Group a flat list of Arcanum review comments into parley.Discussion[].
----
---- Grouping rules:
----   • A comment with reply_to_id == nil/0 is a root → new Discussion.
----   • A comment with reply_to_id belongs to the Discussion whose root
----     comment has that id.
----
---- @param comments  table[]  Raw Arcanum comment objects (ordered)
---- @param viewer    string   Authenticated viewer's login
+--- @param comments table[]
+--- @param viewer string
+--- @param review? parley.DetectedReview
 --- @return parley.Discussion[]
-function M.group_comments_into_discussions(comments, viewer)
-  --- @type table<string, parley.Discussion>
-  local by_root = {}
-  --- @type string[]  insertion-order list of root ids
-  local order = {}
-
-  for _, raw in ipairs(comments) do
-    local reply_to = raw.reply_to_id
-    local is_root = not reply_to or reply_to == vim.NIL or reply_to == 0
-
-    local comment = M.map_comment(raw, viewer)
-
-    if is_root then
-      local root_id = tostring(raw.id)
-
-      local path, line, end_line = M.extract_anchor_location(raw.anchor)
-
-      -- Skip comments without file anchor (PR-level general comments)
-      if not path or not line then
-        dbg.trace(
-          "arcanum.mapping",
-          "group_comments_into_discussions: skipping comment without file anchor id=" .. root_id
-        )
-        -- Still add as a discussion so it can be displayed; use placeholder location
-        path = path or ""
-        line = line or 0
-      end
-
-      -- resolved = issue_status is "resolved"
-      local resolved = (raw.issue_status == "resolved")
-
-      local disc = model.new_discussion({
-        id = root_id,
-        file = path,
-        line = line,
-        end_line = end_line,
-        resolved = resolved,
-        comments = { comment },
-      })
-      by_root[root_id] = disc
-      table.insert(order, root_id)
-    else
-      local root_id = tostring(reply_to)
-      local disc = by_root[root_id]
-      if disc then
-        table.insert(disc.comments, comment)
-      end
-      -- If root not yet seen, skip (shouldn't happen with server ordering).
-    end
-  end
-
-  local result = {}
-  for _, root_id in ipairs(order) do
-    table.insert(result, by_root[root_id])
-  end
-  return result
+function M.group_comments_into_discussions(comments, viewer, review)
+  return require("parley.providers.arcanum.discussions").group(comments, viewer, review, M.map_comment)
 end
 
 --- Map a minimal or full Arcanum PR object to a parley.PR.

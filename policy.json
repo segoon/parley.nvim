@@ -128,6 +128,8 @@
     "core": {
       "modules": [
         "lua/parley/discussion_entries.lua",
+        "lua/parley/discussion.lua",
+        "lua/parley/comment_tree.lua",
         "lua/parley/discussion_window/render.lua",
         "lua/parley/model.lua",
         "lua/parley/provider.lua",
@@ -215,6 +217,7 @@
       "modules": [
         "lua/parley/async_operation.lua",
         "lua/parley/discussion_window.lua",
+        "lua/parley/discussion_picker.lua",
         "lua/parley/discussion_window/input.lua",
         "lua/parley/discussion_window/new_comment.lua",
         "lua/parley/discussion_window/selection.lua",
@@ -282,14 +285,19 @@
     "providers": {
       "modules": [
         "lua/parley/providers/arcanum/auth.lua",
+        "lua/parley/providers/arcanum/anchors.lua",
+        "lua/parley/providers/arcanum/discussions.lua",
         "lua/parley/providers/arcanum/cache_identity.lua",
         "lua/parley/providers/arcanum/config.lua",
         "lua/parley/providers/arcanum/descriptor.lua",
         "lua/parley/providers/arcanum/diagnostics.lua",
+        "lua/parley/providers/arcanum/inline.lua",
         "lua/parley/providers/arcanum/mapping.lua",
         "lua/parley/providers/arcanum/metadata.lua",
         "lua/parley/providers/arcanum/provider.lua",
         "lua/parley/providers/arcanum/reactions.lua",
+        "lua/parley/providers/arcanum/response.lua",
+        "lua/parley/providers/arcanum/scheduler.lua",
         "lua/parley/providers/arcanum/transport.lua",
         "lua/parley/providers/arcanum/vcs_detector.lua",
         "lua/parley/providers/comment_target.lua",

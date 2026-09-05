@@ -5,6 +5,7 @@
 local content = require("parley.local_content")
 
 local M = {}
+local semantics = require("parley.discussion")
 
 -- ---------------------------------------------------------------------------
 -- Type annotations
@@ -195,9 +196,17 @@ end
 function M.map_discussions(info, revision, discussions)
   local by_file, mappings = {}, {}
   for _, disc in ipairs(discussions) do
-    if type(disc.file) == "string" and disc.file ~= "" and disc.line and disc.line > 0 then
+    if semantics.projectable(disc) then
       by_file[disc.file] = by_file[disc.file] or {}
       table.insert(by_file[disc.file], disc)
+    else
+      local a = semantics.anchor(disc)
+      mappings[disc.id] = {
+        confidence = 0,
+        stale = true,
+        unavailable_reason = a.unavailable_reason
+          or (a.kind == "file" and "Whole-file discussion" or "No line location"),
+      }
     end
   end
   for file, entries in pairs(by_file) do
@@ -208,7 +217,10 @@ function M.map_discussions(info, revision, discussions)
     local hunks = diff and M.parse_hunks(diff) or {}
     for _, disc in ipairs(entries) do
       local mapping = diff and M.remap_line(disc.line, hunks) or approximate(disc.line, err or "mapping unavailable")
-      if disc.end_line then
+      if not diff and disc.anchor then
+        mapping = { confidence = 0, stale = true, unavailable_reason = err or "Mapping unavailable" }
+      end
+      if disc.end_line and mapping.local_line then
         if diff then
           mapping.local_end_line = M.remap_line(disc.end_line, hunks).local_line
         else

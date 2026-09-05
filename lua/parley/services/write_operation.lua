@@ -114,6 +114,7 @@ return function(M)
         type(result) ~= "table"
         or type(result.ok) ~= "boolean"
         or (result.cancelled ~= nil and type(result.cancelled) ~= "boolean")
+        or (result.uncertain ~= nil and type(result.uncertain) ~= "boolean")
         or (result.err ~= nil and type(result.err) ~= "string")
         or (result.ok and result.cancelled)
       then
@@ -175,6 +176,9 @@ return function(M)
     local progress = start_progress(bufnr, progress_texts.running)
     start_operation(bufnr, { progress = progress }, starter, function(result)
       if result.cancelled then
+        if result.uncertain then
+          M._notify(result.err or "Check the review before retrying.", vim.log.levels.WARN)
+        end
         finish_progress(progress, bufnr, "cancelled", progress_texts.cancelled)
         refresh_after_write(bufnr, function() end)
         return
@@ -221,7 +225,10 @@ return function(M)
     start_operation(bufnr, { progress = progress, input = instance }, starter, function(result)
       if result.cancelled then
         composer_ui_state.patch(bufnr, { submit_state = "idle" })
-        instance.set_idle("Request cancelled. Draft preserved.")
+        instance.set_idle(
+          (result.uncertain and (result.err or "Check the review before retrying.") or "Request cancelled.")
+            .. " Draft preserved."
+        )
         finish_progress(progress, bufnr, "cancelled", progress_texts.cancelled)
         refresh_after_write(bufnr, function() end)
         return
@@ -229,7 +236,10 @@ return function(M)
 
       if not result.ok then
         composer_ui_state.patch(bufnr, { submit_state = "failed", error = result.err or "parley: request failed" })
-        instance.set_idle("Request failed. Fix the draft and retry.")
+        instance.set_idle(
+          (result.uncertain and (result.err or "Check the review before retrying.") or "Request failed.")
+            .. " Draft preserved."
+        )
         finish_progress(progress, bufnr, "failed", progress_texts.failed)
         M._notify(result.err or "parley: request failed", vim.log.levels.WARN)
         return
@@ -242,7 +252,11 @@ return function(M)
           finish_progress(progress, bufnr, "success", progress_texts.success)
           if vim.api.nvim_buf_is_valid(bufnr) then
             local discussion_window = require("parley.discussion_window")
-            pcall(discussion_window.open_current_line, bufnr, { cursor_line = success_opts.cursor_line })
+            if success_opts.discussion_id then
+              pcall(discussion_window.open_discussion, bufnr, success_opts.discussion_id)
+            else
+              pcall(discussion_window.open_current_line, bufnr, { cursor_line = success_opts.cursor_line })
+            end
           end
         end)
       end)

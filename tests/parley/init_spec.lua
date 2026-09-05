@@ -15,7 +15,7 @@ describe("parley command completion", function()
 
   it("returns discussion actions for the second argument", function()
     local items = parley._complete_parley("", ":Parley discussion ")
-    assert.same({ "open", "close", "toggle", "new", "reply" }, items)
+    assert.same({ "open", "close", "toggle", "new", "reply", "list" }, items)
   end)
 
   it("returns comment actions for the second argument", function()

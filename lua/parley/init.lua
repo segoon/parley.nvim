@@ -103,7 +103,7 @@ end
 
 --- @type table<string, string[]>
 local PARLEY_GROUPS = {
-  discussion = { "open", "close", "toggle", "new", "reply" },
+  discussion = { "open", "close", "toggle", "new", "reply", "list" },
   comment = { "react", "edit", "delete" },
   nav = { "buf-next", "buf-prev", "review-next", "review-prev" },
 }
@@ -182,6 +182,10 @@ function M._dispatch_parley(fargs, bufnr, cmd_opts)
     local discussion_window = require("parley.discussion_window")
     if action == nil or action == "" then
       error("parley: expected a discussion action", 0)
+    end
+    if action == "list" then
+      require("parley.discussion_picker").open(bufnr)
+      return
     end
     if action == "open" then
       discussion_window.open_current_line(bufnr)

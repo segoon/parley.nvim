@@ -409,7 +409,7 @@ function M.open_reply_input(bufnr, discussion, parent_comment)
           failed = "Reply failed",
           cancelled = "Reply cancelled",
         },
-        { cursor_line = target_line }
+        { cursor_line = target_line, discussion_id = discussion.id }
       )
     end,
   })
@@ -483,7 +483,7 @@ function M.open_edit_input(bufnr, discussion, comment)
           failed = "Edit failed",
           cancelled = "Edit cancelled",
         },
-        { cursor_line = target_line }
+        { cursor_line = target_line, discussion_id = discussion.id }
       )
     end,
   })

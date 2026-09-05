@@ -9,6 +9,7 @@
 --- this module.
 
 local M = {}
+local semantics = require("parley.discussion")
 
 -- ---------------------------------------------------------------------------
 -- Known-value sets (single source of truth for validation)
@@ -60,8 +61,11 @@ local KNOWN_REVIEW_STATUSES = {
 --- reconstruct trees using parent_comment_id where needed.
 --- @class parley.Discussion
 --- @field id       string             Provider-specific discussion ID
---- @field file     string             Repo-relative file path
---- @field line     integer            Start line (1-indexed, in PR diff space)
+--- @field anchor? parley.DiscussionAnchor Explicit remote anchor; legacy file/line providers remain supported.
+--- @field issue_state? parley.IssueState
+--- @field ancestry? string Missing-parent or cyclic ancestry diagnostic.
+--- @field file     string|nil             Repo-relative file path
+--- @field line     integer|nil            Start line (1-indexed, in PR diff space)
 --- @field end_line integer|nil        nil = single line
 --- @field resolved boolean
 --- @field comments parley.Comment[]
@@ -142,15 +146,38 @@ end
 --- @return parley.Discussion
 function M.new_discussion(opts)
   assert(type(opts.id) == "string", "discussion.id must be a string")
-  assert(type(opts.file) == "string", "discussion.file must be a string")
-  assert(type(opts.line) == "number", "discussion.line must be a number")
+  if opts.anchor == nil then
+    assert(type(opts.file) == "string", "discussion.file must be a string")
+    assert(type(opts.line) == "number", "discussion.line must be a number")
+  else
+    assert(type(opts.anchor) == "table", "discussion.anchor must be a table")
+    local kind = opts.anchor.kind
+    assert(kind == "inline" or kind == "file" or kind == "general" or kind == "unavailable", "invalid anchor kind")
+    if kind == "inline" then
+      assert(semantics.valid_path(opts.anchor.path) and semantics.valid_line(opts.anchor.line), "invalid inline anchor")
+    end
+  end
+  if opts.issue_state then
+    assert(
+      ({ open = true, resolved = true, dropped = true, not_issue = true, unknown = true })[opts.issue_state],
+      "invalid issue state"
+    )
+  end
   assert(type(opts.comments) == "table", "discussion.comments must be a table")
+  local file, line, end_line = opts.file, opts.line, opts.end_line
+  if opts.anchor then
+    file, line, end_line = opts.anchor.path, opts.anchor.line, opts.anchor.end_line
+  end
   return {
     id = opts.id,
-    file = opts.file,
-    line = opts.line,
-    end_line = opts.end_line or nil,
-    resolved = opts.resolved or false,
+    anchor = opts.anchor,
+    issue_state = opts.issue_state,
+    ancestry = opts.ancestry,
+    file = file,
+    line = line,
+    end_line = end_line,
+    resolved = opts.issue_state and opts.issue_state == "resolved"
+      or opts.issue_state == nil and (opts.resolved or false),
     comments = opts.comments,
   }
 end
@@ -191,8 +218,10 @@ end
 --- @param discussion parley.Discussion
 --- @return boolean
 function M.is_resolved(discussion)
-  return discussion.resolved
+  return semantics.issue_state(discussion) == "resolved"
 end
+
+M.is_open_issue = semantics.is_open_issue
 
 --- Return the first Comment in the Discussion, or nil if there are none.
 --- @param discussion parley.Discussion

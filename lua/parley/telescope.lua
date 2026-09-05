@@ -39,7 +39,7 @@ end
 --- @return table
 local function make_entry(state, discussion)
   local location = entries.location(discussion, state.vcs_info.root, state.all_mappings)
-  local display = string.format("%s:%s %s", discussion.file, tostring(location.line or "—"), location.text)
+  local display = entries.label(discussion, state.vcs_info.root, state.all_mappings)
   return {
     value = {
       discussion = discussion,
@@ -47,41 +47,8 @@ local function make_entry(state, discussion)
       line = location.line,
     },
     display = display,
-    ordinal = table.concat({ discussion.file, tostring(location.line), location.status, location.preview }, " "),
+    ordinal = table.concat({ discussion.file or "", tostring(location.line), location.status, location.preview }, " "),
   }
-end
-
---- @param entry table|nil
-local function open_selection(entry)
-  local value = entry and (entry.value or entry) or nil
-  local discussion = value and value.discussion or nil
-  local path = value and value.path or nil
-  local line = value and value.line or nil
-  if not discussion or not path or discussion.file == "" or not discussion.line or discussion.line < 1 then
-    return
-  end
-
-  M._edit(path)
-  local bufnr = M._current_buf()
-  if line then
-    local line_count = vim.api.nvim_buf_line_count(bufnr)
-    if line_count >= 1 then
-      M._set_cursor(math.max(1, math.min(line, line_count)))
-    end
-  end
-  require("parley.services.read").refresh_async(bufnr, { force = true, notify_errors = true }, function(snapshot)
-    if not line then
-      local mapping = snapshot and snapshot.all_mappings and snapshot.all_mappings[discussion.id]
-        or snapshot and snapshot.mappings and snapshot.mappings[discussion.id]
-        or nil
-      local local_line = mapping and mapping.local_line or nil
-      local line_count = vim.api.nvim_buf_line_count(bufnr)
-      if local_line and line_count >= 1 then
-        M._set_cursor(math.max(1, math.min(local_line, line_count)))
-      end
-    end
-    require("parley.discussion_window").open_discussion(bufnr, discussion.id)
-  end)
 end
 
 --- @param scope 'file'|'all'
@@ -118,7 +85,10 @@ local function open_picker(scope, prompt_title, opts)
       attach_mappings = function(prompt_bufnr)
         actions.select_default:replace(function()
           actions.close(prompt_bufnr)
-          open_selection(action_state.get_selected_entry())
+          local entry = action_state.get_selected_entry()
+          if entry then
+            require("parley.discussion_picker").open_selection(bufnr, entry.value or entry, M)
+          end
         end)
         return true
       end,

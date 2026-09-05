@@ -41,7 +41,7 @@ function M.get(ctx, shared)
   end
   for _, disc in ipairs(shared.all_discussions or {}) do
     local mapping = mappings[disc.id]
-    local buf = mapping and content.buffer(info.root .. "/" .. disc.file)
+    local buf = mapping and disc.file and content.buffer(info.root .. "/" .. disc.file)
     if buf and mapping.local_line then
       local count = vim.api.nvim_buf_line_count(buf)
       local line = math.max(1, math.min(mapping.local_line, count))
@@ -59,7 +59,7 @@ function M.get(ctx, shared)
   for _, disc in ipairs(shared.all_discussions or {}) do
     local mapping = mappings[disc.id]
     local warning_key = key .. "\0" .. (shared.head_sha or "") .. "\0" .. (disc.file or "")
-    if mapping and mapping.error then
+    if mapping and mapping.error and disc.file then
       failures[warning_key] = true
       if M._warnings[warning_key] ~= mapping.error then
         M._warnings[warning_key] = mapping.error

@@ -11,8 +11,57 @@ remote comment/review mutations were executed.
 The shared-workflow fix is implemented: explicit Git/Arc adapters, revision-to-buffer
 mapping (including unsaved edits), separate checkout projections, visibly stale
 fallbacks, and clean-file/revision validation both before drafting and submission.
-Active-diff requests now include `commit_ids(head)`. The findings below describe
-the research baseline; the remaining Arcanum API-contract defects are unchanged.
+Active-diff requests now include `commit_ids(head)`.
+
+Inline API-contract backlog item **2 is also implemented**: numeric diff XIDs,
+V2 changelist and creation schemas, explicit creation response fields, one shared
+callback/coroutine operation, diff-scoped entry caching, and fail-closed inline
+validation. Lookup failures preserve drafts instead of posting general comments.
+Submission deliberately uses the loaded review without re-fetching the active diff.
+
+Transport backlog item **3 is implemented**: shared callback/coroutine HTTP
+lifecycle, error callbacks, process termination on cancellation, a whole-request
+deadline, and per-host/credential pacing with shared 429 cooldowns. Comment/reply
+operations always carry a per-operation idempotency key; automatic write retries
+remain disabled unless `idempotent_write_retries` explicitly confirms deployment
+support. Replies and inline comments preserve uncertain outcomes through mapping
+failures and cancellation into the composer.
+
+Validation for item 3 (2026-09-05): **960 tests passed, 0 failures/errors**.
+`make format`, `make format-check`, and `make lint` passed (147 Lua files,
+0 lint warnings/errors). Deterministic tests cover queue and attempt deadlines,
+nonzero curl exits, process cancellation, late handles/callbacks, Retry-After
+seconds and GMT dates, scope isolation, retry exhaustion, lost responses with
+stable keys/payloads, opt-in mutation retries, and composer draft preservation.
+The real local key generator also passed a smoke check. Tests used mocked HTTP;
+no live API writes or Git commands were used. README and the help template were
+updated; generated help was not edited.
+
+Discussion backlog item **4 is implemented**: full parent graphs, deterministic
+ordering, explicit side/path/revision anchors, and distinct issue states. General,
+whole-file, old-side, historical, and unavailable threads remain accessible via
+`:Parley discussion list` and Telescope without fabricated buffer locations.
+Selected threads refresh in place, retaining composer text. Disk review caches
+use a new namespace to prevent reuse of earlier lossy discussion data.
+
+Validation for item 4 (2026-09-05): **973 tests passed, 0 failures/errors**.
+`make format`, `make format-check`, and `make lint` passed (154 Lua files,
+0 lint warnings/errors). Tests cover thread graphs, anchor metadata, issue states,
+unlocated selection, real float refresh with draft preservation, and quickfix
+location safety. Validation used mocked providers; live API behavior is unverified.
+
+The findings below describe the research baseline. The next unfinished item is
+**5: implement resolve/reopen and provider capabilities**; live deployment compatibility remains
+unverified. Queue coordination is process-local, and keys are not persisted
+across manual resubmissions or Neovim restarts.
+
+Validation for item 2 (2026-09-05): **927 tests passed, 0 failures/errors**.
+`make format`, `make format-check`, and `make lint` passed (141 Lua files,
+0 lint warnings/errors). Tests include V2 range/single-line bodies, coroutine and
+callback entry points, sparse metadata, null response fields, diff-scoped caches,
+cancellation races, and preservation of the composer draft after lookup failure.
+No live API writes were used for validation. The help template was updated;
+the generated help file was not edited.
 
 ## Assessment
 
@@ -231,18 +280,18 @@ Comment IDs may be negative; preserving them as strings is appropriate.
 
 ## Prioritized implementation backlog and regression protection
 
-1. **Make local VCS operations polymorphic.** Arc detection alone is insufficient.
+1. **Make local VCS operations polymorphic. — Implemented.** Arc detection alone is insufficient.
    Test the complete Arc read/write workflow with Git unavailable; use the shared
    revision field, distinguish VCS failure from unchanged content, and account for
    unsaved buffers and separate checkouts.
-2. **Fix the inline API contract as one unit.** Explicit active-diff fields,
+2. **Fix the inline API contract as one unit. — Implemented.** Explicit active-diff fields,
    correct numeric XID, compatible entry-ID/creation schemas, async prerequisite
    lookup, and refusal to silently post a general comment. Test realistic wire
    fixtures and request bodies, including empty/sparse responses and stale diffs.
-3. **Harden transport before enabling more writes.** Error callbacks, actual
+3. **Harden transport before enabling more writes. — Implemented.** Error callbacks, actual
    timeouts, cancellation, pacing, and idempotency. Test lost-response retry,
    cancellation races, 429, nonzero curl exit, and exactly-once completion.
-4. **Preserve discussion semantics.** Two-pass tree grouping, old/new side,
+4. **Preserve discussion semantics. — Implemented.** Two-pass tree grouping, old/new side,
    historical revision, general/file comments, dropped/non-issue state. Test
    grandchildren, arbitrary ordering, missing parents, renames and deleted files.
 5. **Implement resolve/reopen and provider capabilities.** Hide or explain unavailable

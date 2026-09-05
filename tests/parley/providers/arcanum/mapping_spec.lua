@@ -392,16 +392,16 @@ describe("parley.providers.arcanum.mapping — group_comments_into_discussions",
     assert.is_false(result[1].resolved)
   end)
 
-  it("preserves insertion order", function()
+  it("orders roots deterministically", function()
     local comments = {
       make_raw_comment({ id = 3, anchor = make_anchor("a.lua", 1), reply_to_id = vim.NIL }),
       make_raw_comment({ id = 1, anchor = make_anchor("b.lua", 2), reply_to_id = vim.NIL }),
       make_raw_comment({ id = 2, anchor = make_anchor("c.lua", 3), reply_to_id = vim.NIL }),
     }
     local result = mapping.group_comments_into_discussions(comments, "")
-    assert.equals("3", result[1].id)
-    assert.equals("1", result[2].id)
-    assert.equals("2", result[3].id)
+    assert.equals("1", result[1].id)
+    assert.equals("2", result[2].id)
+    assert.equals("3", result[3].id)
   end)
 end)
 

@@ -99,6 +99,12 @@ All Parley commands support tab completion.
     Force a re-fetch of PR discussions for the current buffer. Shows a
     progress popup while the request is in flight.
 
+:Parley discussion list                              *:Parley-discussion-list*
+    List every discussion in the active review using the built-in picker.
+    General, whole-file, old-side, historical, and unavailable anchors open in
+    a discussion float attached to the source buffer without jumping to a line.
+    Replies and your own comment edits/deletions remain available in that float.
+
 :Parley discussion open                              *:Parley-discussion-open*
     Open the discussion window for the current line.
 
@@ -366,21 +372,67 @@ The current user login is derived from `arc config -l` output (user.email
 field). The login is used to filter PRs authored by the current user and to
 determine `is_own` on comments.
 
+Inline comments: ~
+
+New line and range comments are published on the new side of the loaded review
+using the V2 diff API. Submission uses the loaded diff without checking whether
+Arcanum has since activated a newer diff. Refresh the review to use newer data.
+
+Missing diff/revision metadata, unavailable file entries, and failed lookups
+prevent submission; inline comments never fall back to general PR comments.
+The draft remains available after failure or cancellation. If a creation response
+is incomplete, check the review before retrying: the comment may have been sent.
+Cancellation after sending does not guarantee that the server discarded it.
+
 Provider options: ~
+
+Arcanum threads retain nested replies, including incomplete or cyclic ancestry.
+Only open issues contribute to the unresolved count; resolved, dropped, non-issue,
+and unknown states remain distinguishable. Only verified current new-side inline
+anchors receive buffer positions. Other anchors retain their side, paths, and
+revision metadata in the discussion list and float. Navigation skips unavailable
+positions; quickfix retains file-associated entries as invalid rows and omits
+general discussions. Discussion selection and composer text survive refreshes.
 
 Arcanum-specific options live under `providers.arcanum` in the setup call: >lua
     require("parley").setup({
       providers = {
         arcanum = {
-          timeout_ms = 10000,      -- HTTP request timeout in milliseconds
-          retry_count = 2,         -- Number of retries on transient errors
+          timeout_ms = 10000,      -- Queue + attempts + retry waits, milliseconds
+          retry_count = 2,         -- Maximum automatic retries for eligible requests
           retry_base_delay_ms = 250,
           retry_max_delay_ms = 2000,
+          request_interval_ms = 1000, -- Minimum spacing between request starts
+          idempotent_write_retries = false, -- Requires confirmed server support
           host = "arcanum.yandex.net",  -- API hostname (rarely changed)
         },
       },
     })
 <
+
+Each transport request has one `timeout_ms` budget covering queueing, HTTP
+attempts, and retry waits. Inline entry lookup and comment creation are separate
+requests. Expiration completes the request and terminates any active curl process.
+
+Requests sharing a host and OAuth token share a queue in this Neovim process.
+The default spacing is one second; retries use the same queue. Separate Neovim
+processes and other clients are not coordinated. A shared queue retains the
+slowest interval used during this process. A 429 response delays that queue;
+`Retry-After` seconds or a GMT HTTP-date takes precedence over shorter backoff.
+Long server-directed waits remain subject to the request's deadline.
+
+Reads, including PR search, retry transient failures up to `retry_count` times.
+Comment creation and replies always send one idempotency key per submission,
+reused across automatic retries with the same body. Their automatic retries are
+disabled unless `idempotent_write_retries = true`. Enable this only after confirming
+that your deployed Arcanum server supports `Idempotency-Key`; local server source
+alone does not establish deployment support. Edits, deletions, and unclassified
+mutations are not retried automatically. Conflicts and authentication failures
+are not retried.
+
+Manual resubmission uses a new key. After an uncertain write failure or
+cancellation, check the review before retrying. Drafts are preserved; terminating
+curl cannot roll back a change the server has already accepted.
 
 Limitations: ~
 
@@ -467,7 +519,11 @@ Starters must return promptly without yielding, returning a `parley.CancelHandle
 with a `cancel()` function (called without a self argument). Invoke the
 `parley.WriteCallback` exactly once on the Neovim main loop, either before returning
 or later. A `parley.WriteResult` contains `ok` (boolean), optional `comment`,
-optional `err` (string), and optional `cancelled` (boolean). A cancelled result must
+optional `err` (string), optional `cancelled` (boolean), and optional `uncertain`
+(boolean). Set `uncertain = true` when a failed write may have reached the server,
+with an `err` explaining that the user should check the review before retrying.
+This message remains visible in the composer after cancellation or failure.
+A cancelled result must
 have `ok = false`. Successful callbacks need not return a comment object.
 
 Cancellation requests completion through the callback; shared writes continue
@@ -476,6 +532,19 @@ Shared execution tolerates immediate completion, ignores duplicate or stale
 callbacks, and turns startup failures or malformed pending handles/results into
 write failures while retaining drafts. Existing providers with valid hooks need
 no behavioral changes. Providers without these hooks retain coroutine fallbacks.
+
+Shared HTTP infrastructure: ~
+
+`require("parley.http").start(opts, callback)` returns a cancel handle immediately.
+Options are `url`, optional `method`, `headers`, serialized `body`, Bearer `token`,
+and `timeout_ms` (default 10000). Its callback completes once on the main loop.
+A result has `ok`, `sent`, and either `response` or `err`; failures may also carry
+`exit`, `cancelled`, or `timed_out`. Network success is distinct from HTTP success:
+`result.response.ok` indicates a 2xx status. Response fields are `status`,
+`headers`, and `body`. `http.request(opts)` awaits the same operation through
+Plenary and returns the response, raising on network failure. `http.get` and
+`http.post` retain their convenience interfaces. Provider-specific scheduling,
+retries, and response-envelope validation belong to the provider layer.
 
 Every provider must implement `provider:cache_identity()`. It runs in a Plenary
 coroutine and returns { provider, host, repository, account }, with four nonempty

@@ -94,6 +94,44 @@ describe("Arc new-comment validation", function()
     end))
   end)
 
+  it("preserves the composer draft when Arcanum cannot resolve an inline entry", function()
+    local transport = require("parley.providers.arcanum.transport")
+    local original = transport.http_start
+    local p = require("parley.providers.arcanum.provider").new({
+      _auth = {
+        read_token = function()
+          return "test"
+        end,
+      },
+    })
+    providers._entries[buf].provider = p
+    local snapshot = reviews.get(buf)
+    snapshot.review.write_context.diff_id = 42
+    reviews._seed(buf, snapshot, "arc/write")
+    local instance = open()
+    local idle
+    instance.set_idle = function(message)
+      idle = message
+    end
+    composer.patch(buf, { draft = "preserve me" })
+    transport.http_start = function(_, method, _, _, callback)
+      assert.equals("GET", method, "Missing entries must not create general comments")
+      callback({ ok = true, data = {} })
+      return { cancel = function() end }
+    end
+    local ok, err = pcall(function()
+      compose.on_submit(instance, "preserve me")
+      assert.is_true(vim.wait(500, function()
+        return idle ~= nil
+      end))
+      assert.equals("preserve me", composer.get(buf).draft)
+      assert.equals("failed", composer.get(buf).submit_state)
+      assert.matches("no inline entry", notices[#notices])
+    end)
+    transport.http_start = original
+    assert.is_true(ok, tostring(err))
+  end)
+
   it("rejects unsaved edits before opening a composer", function()
     vim.bo[buf].modified = true
     assert.is_false(write.open_new_comment_input(buf, { line = 1 }))

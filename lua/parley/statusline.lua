@@ -23,7 +23,7 @@ local function unresolved_count(state)
 
   local count = 0
   for _, discussion in ipairs(state.discussions or {}) do
-    if discussion.resolved ~= true then
+    if require("parley.model").is_open_issue(discussion) then
       count = count + 1
     end
   end
