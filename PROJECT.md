@@ -1,278 +1,166 @@
 # parley.nvim
 
-A Neovim plugin for inline PR discussion — read, write, and navigate code review
-comments without leaving the editor. Works in regular file buffers and inside
-diffview.nvim.
+A Neovim plugin for reading, writing, and navigating pull request discussions
+without leaving the editor. Built-in providers support GitHub with Git and
+Arcanum with Arc in regular file buffers. Diffview integration is a future goal.
 
----
+## Problem and goals
 
-## 1. Problem Statement
+Developers switch between a browser and their editor to read review comments,
+respond to feedback, and track unresolved threads. Parley brings those discussions
+into the working file, with provider-independent navigation and composition.
 
-Developers working on PRs constantly switch between the browser and Neovim to read
-review comments, respond to discussions, and track unresolved threads. Existing
-plugins (octo.nvim, gh.nvim) are GitHub-centric general-purpose UIs for the whole
-GitHub feature surface — they don't solve the core problem of **tightly integrating
-PR discussion directly into the code editing experience** at the line level, across
-multiple hosting providers.
+The audience is developers reviewing code and authors responding to reviews.
+The priority is a responsive keyboard-driven UI, clear action availability, and
+preservation of the user's intent and drafts when an operation fails. The plugin
+focuses on discussions rather than a complete hosting-platform client for issues,
+notifications, repository browsing, or PR administration.
 
----
+## Implemented user scenarios
 
-## 2. Solution Overview
+### Read and navigate a review
 
-A Neovim plugin written in Lua that:
-- Fetches PR data from a hosting provider via REST API
-- Anchors review comments to specific lines in the local buffer
-- Visualizes comment presence inline using gutter signs and virtual text
-- Provides a floating discussion window tied to the cursor position
-- Supports full read/write interaction with the PR discussion without leaving Neovim
-- Works both in regular file buffers and inside diffview.nvim diff buffers
+1. Open a regular file in a Git or Arc working copy whose branch has an open PR.
+   Arcanum discovery requires a remote branch and follows search pages until it
+   finds an exact match. Without a matching review, Parley remains inactive.
+2. Signs and virtual text show discussions with usable local positions. Navigate
+   within a file with `]c` / `[c` or across the review with `]C` / `[C`.
+3. Run `:Parley discussion open` or `:Parley discussion toggle` at a commented
+   line. If multiple threads share the line, choose one in the built-in picker.
+4. Use `:Parley discussion list` for every thread, including general, whole-file,
+   old-side, historical, and unavailable-location discussions. Optional Telescope
+   extensions list all discussions or those associated with the current file.
+5. File-associated quickfix entries use available mappings; unavailable locations
+   remain invalid rows. General discussions are accessed through the pickers.
 
----
+The discussion float retains the selected thread across refreshes. It does not
+automatically open or follow the source cursor. Replies retain their parent IDs,
+and a generic tree renderer handles nested and incomplete discussion graphs.
 
-## 3. Target Users
+### Reply, create, edit, and delete comments
 
-- **Software engineers** actively participating in code review — both as authors
-  responding to feedback and as reviewers leaving comments
-- Expected to be comfortable with Neovim and keyboard-driven workflows
-- May work across different hosting platforms (GitHub, GitLab, Gitbucket, Yandex
-  Arcanum, Perforce-based review systems, etc.)
-- Single user group with uniform expertise level; no simplified or
-  accessibility-oriented UI needed
+1. In the discussion float, select a comment and press `r` to compose a reply,
+   `e` to edit your own comment, or `d` to request deletion with confirmation.
+2. Run `:Parley discussion new` on a line or visual range for a top-level comment.
+   The local HEAD must match the loaded review revision, the file must be clean,
+   and every selected line must belong to the changed new side of the review.
+3. Compose Markdown in the input window; submit with `s` in normal mode or
+   `<C-s>` in insert mode. Checks run before composition and again on submission.
+4. Failed lookups or validation preserve the draft. Inline posting never silently
+   changes into a general comment. After an uncertain write or cancellation,
+   check the review before retrying; cancelling a process cannot undo a server write.
 
----
+Arcanum inline creation uses the loaded diff. Unlike review verdict actions, it
+does not fetch the active diff again at submission time. Refresh to load a newer diff.
 
-## 4. User Scenarios
+### Resolve issues and react
 
-### 4.1 Reviewing a PR in a regular buffer (reading)
+- `:Parley discussion resolve` and `:Parley discussion reopen` transition complete
+  Arcanum root issues between open and resolved. General and unavailable-location
+  threads support these actions too. Dropped, non-issue, unknown, and incomplete
+  threads cannot transition. GitHub resolution/reopening remains planned.
+- `:Parley comment react` opens provider-owned choices. GitHub retains its reaction
+  vocabulary. Arcanum offers thumbs up, thumbs down, and heart, plus removal of
+  other reactions already added by the viewer. Its writes preserve the add/remove
+  intent selected in the picker. AI comment conflicts require explicit removal
+  of an existing reaction before replacement.
+- Capability checks explain unsupported actions before composition or submission.
+  Successful, conflicting, and uncertain action refreshes retain discussion drafts.
+  Capabilities describe implementation support; server permissions still apply.
 
-1. User opens a file from a local working copy. The plugin detects the current branch
-   and maps it to an open PR on the configured provider.
-2. Gutter signs appear on lines that have review comments. Virtual text at the end of
-   those lines shows a truncated snippet of the first comment.
-3. User navigates between commented lines using `]c` / `[c`.
-4. User places cursor on a commented line; the discussion floating window opens
-   showing the full flat/tree thread for that line.
-5. User reads Markdown-rendered comments, sees reactions, sees resolved/unresolved
-   state.
+### Review verdicts and status
 
-### 4.2 Reviewing a PR in diffview.nvim
+1. Run `:Parley review actions` for Arcanum ship, sticky ship, unship, block merge,
+   or unblock merge. There is no default keymap or bundled review message.
+2. Confirm the PR, loaded revision, and current viewer verdict. Sticky approval
+   includes future diffs; withdrawals require the corresponding viewer verdict.
+3. The provider rechecks the active diff before writing. The API cannot atomically
+   pin the expected diff, so an intervening update can still change the target.
+4. Status uses reviewer verdicts and remaining approval requirements. A failed or
+   malformed status read yields unknown and disables review actions while leaving
+   discussions readable. Only open issues contribute to the unresolved count.
 
-1. User opens diffview.nvim for the current branch. The plugin auto-detects the
-   diffview diff buffers by filetype/buffer name.
-2. Gutter signs and virtual text appear on the **new file side** (right pane) of the
-   diff, on lines that have review comments. Line numbers are translated from
-   diff-buffer positions to real file lines transparently.
-3. Navigation (`]c` / `[c`), discussion float, and all interaction work identically
-   to the regular buffer experience.
-4. The discussion floating window appears as an overlay on top of the diffview layout
-   (not embedded in it).
+GitHub's provider-level `submit_review` supports approve/request_changes/comment
+with a body. The explicit action picker is currently Arcanum-only.
 
-### 4.3 Responding to a comment
+## Architecture and reliability
 
-1. User opens the discussion floating window (cursor on a commented line, in either
-   regular buffer or diffview).
-2. User navigates the thread with arrow keys, selects a specific thread with Enter.
-3. Input subwindow opens (multiline Markdown buffer). User types a reply and submits.
-4. Plugin posts the reply via REST API, refreshes the thread in the window.
+### Provider and VCS boundaries
 
-### 4.4 Leaving a new line-level comment
+All concrete hosting and VCS implementations live under `lua/parley/providers/`.
+Shared workflows use provider contracts, capabilities, and VCS adapters. Built-in
+hosting providers are GitHub and Arcanum; built-in VCS adapters are Git and Arc.
+Custom integrations register their own implementations after `setup()`.
 
-1. User selects a line range in the buffer (visual selection) — works in both regular
-   buffer and diffview new-side pane.
-2. User triggers a keymap to open the input subwindow for a new top-level comment on
-   that range.
-3. In a diffview buffer, the plugin translates the selected diff-buffer line range to
-   real file line numbers before posting.
-4. User writes the comment (Markdown) and submits. Plugin posts it and anchors it to
-   the selected lines.
+Discussion anchors retain kind, side, paths, revision, and diff identity. Mapping
+compares the review head's file contents with the loaded buffer, including unsaved
+edits, or the working-tree file. Debounced local edits update positions without
+fetching the API. Missing revision content produces visibly stale approximations;
+old-side, historical, and unlocated threads do not receive fabricated positions.
+Remote review data can be shared across checkouts, but local mappings are separate.
 
-### 4.5 Resolving a thread
+### Authentication and caching
 
-1. User runs `:Parley discussion resolve` or `:Parley discussion reopen` for the
-   selected Arcanum issue, or chooses a thread at the source cursor.
-2. Plugin checks provider capability and open/resolved state, updates the root
-   issue, then refreshes the view and unresolved count without discarding drafts.
-3. General and unavailable-location threads support the same actions. Unsupported
-   providers and incomplete threads explain why the action cannot proceed.
-   GitHub resolution remains planned; no default resolution keymaps are assigned.
+GitHub uses `gh` for API requests and provider-specific credential resolution.
+Arcanum uses asynchronous HTTPS with credentials from `ARCANUM_TOKEN`,
+`ARC_OAUTH_TOKEN`, `ARC_TOKEN_PATH`, or `~/.arc/token`, in that order. An unreadable
+explicit token file fails rather than selecting another credential source.
+Arcanum verifies the API account before restoring cached reviews; local Arc login
+is diagnostic metadata and never establishes comment ownership.
 
-### 4.6 Reacting to a comment
+Disk review caches follow Neovim's XDG cache location and are isolated by provider,
+host, repository, and account fingerprint. Credentials are not stored in cache
+keys. Identity changes discard obsolete results. Stable identity is required for
+persistent caching; otherwise review state remains isolated and temporary.
 
-1. From the discussion window, user triggers a keymap to add/remove a reaction on a
-   comment.
-2. Plugin sends the reaction toggle request and updates the displayed reactions.
+### Refresh and transport
 
-### 4.7 Editing / deleting own comments
+Refresh runs asynchronously on buffer entry, explicit `:Parley refresh`, and after
+writes. Cache reuse can avoid a network fetch on buffer entry. Periodic refresh
+is not implemented: `refresh_interval` is accepted but currently has no effect.
 
-1. From the discussion window, user selects their own comment and triggers edit or
-   delete keymap.
-2. For edit: the input subwindow opens prefilled with the existing content; on
-   submit, plugin sends a PATCH/PUT request.
-3. For delete: confirmation prompt, then DELETE request.
+All remote operations are asynchronous. Arcanum requests have a shared per-process
+host/credential queue, request spacing, 429 cooldowns, and a deadline covering
+queueing, attempts, and retry waits. These controls do not coordinate other clients.
+Create/reply retries require explicit opt-in after deployment idempotency support
+is verified; other mutations are not automatically retried. GitHub has its own
+retry configuration; broader rate-limit-header handling remains planned.
 
-### 4.8 PR-level review actions
+Errors are reported with actionable messages. Cached data may remain available
+after fetch failures, but failed account verification does not restore obsolete
+ownership. Uncertain writes preserve drafts and require checking remote state.
+Health checks inspect local tools, credentials, configuration, and repository state;
+they do not verify authentication or deployment compatibility over the network.
 
-1. User runs `:Parley review actions` to select an explicit provider action.
-2. Arcanum offers normal/sticky ship, unship, block merge, and unblock merge.
-   Confirmation shows the PR, loaded revision, and current verdict. Sticky approval
-   includes future diffs. No review message is silently discarded.
-3. The provider rechecks the active diff before submission; the API still has a
-   race between recheck and mutation. Selected discussions and drafts survive refresh.
-4. Actual reviewer verdicts and remaining approval requirements determine status.
-   Failed status reads produce unknown while discussions remain usable.
+## UI and implementation choices
 
-### 4.9 PR status awareness
-
-1. Statusline component shows: `PR #42 · ✓ approved · 3 unresolved` (or similar).
-2. Data refreshes on buffer enter, on a configurable timer, and on explicit user
-   command.
-
----
-
-## 5. Core Requirements
-
-### 5.1 Line anchoring
-
-- Comments are anchored to lines by diffing the file at the PR base revision against
-  the local buffer content, then remapping line numbers through the diff hunks.
-- When the local file is stale or heavily diverged, the plugin shows a **visual
-  warning** (e.g., a different sign color or `vim.notify` message) but still
-  attempts best-effort placement.
-- The anchoring model must be **VCS-agnostic** at the interface level — providers
-  supply a (file, line) pair and the plugin handles remapping.
-- In diffview.nvim buffers, an **additional translation layer** maps diff-buffer
-  line numbers to real file line numbers (new side only) before applying the
-  standard anchoring logic. This keeps the anchoring core unaware of diffview
-  internals.
-
-### 5.2 Buffer context detection
-
-The plugin must robustly detect the context of the current buffer to apply the
-correct behavior:
-
-| Context | Detection method |
+| Concern | Current implementation |
 |---|---|
-| Regular file buffer | Standard filetype + file path inside a VCS repo |
-| diffview.nvim diff buffer | Buffer filetype (`DiffviewFiles`, `DiffviewDiff` etc.) and/or buffer name pattern |
-| Non-VCS buffer | No recognized repo root → plugin fully inactive |
-| Outside any PR branch | Branch not mapped to an open PR → plugin fully inactive |
+| Language and minimum editor | Lua with LuaCATS; Neovim 0.10 |
+| Async execution | `plenary.async`; cancellable callback starters for supported writes |
+| API transport | GitHub: `gh`; Arcanum: curl through Plenary |
+| Windows and inline rendering | Native Neovim windows, buffers, extmarks, signs, and virtual text |
+| Markdown | Optional `render-markdown.nvim` integration |
+| Discussion selection | Built-in pickers; optional Telescope extensions |
+| Statusline | Provider label, PR number, review status, and unresolved count |
+| Configuration | `require("parley").setup({})`; lazy.nvim or another plugin manager |
+| Testing | Plenary tests with mocked providers/HTTP and real Neovim UI fixtures |
 
-Detection must not rely on diffview.nvim internals — only on observable buffer
-properties (filetype, name, options). This ensures the integration remains robust
-across diffview.nvim version changes.
+## Future goals and remaining risks
 
-### 5.3 Provider abstraction
+- Diffview should eventually support discussion rendering, selection, navigation,
+  and inline composition in its diff buffers. Context detection exists, but the
+  current review services accept only regular file buffers. Revision/side mapping
+  and float placement need a separately designed and tested integration.
+- Periodic refresh needs a real scheduling lifecycle before `refresh_interval`
+  can control polling. GitHub resolution needs GraphQL integration.
+- Optional Arcanum extensions include drafts/publication, old-side or whole-file
+  comment creation, and suggestions. Reading existing threads does not imply
+  these creation workflows are supported.
+- Additional hosting/VCS integrations, richer Telescope previews, and remaining
+  quality work are tracked in TODO.md.
+- Mocked success does not establish live deployment parity, token authorization,
+  idempotency support, or the absence of active-diff races. Large local changes
+  also reduce the precision of line mappings.
 
-- A **provider interface** (Lua module contract) must be defined, covering: auth,
-  PR detection from current branch, fetching comments/reactions/status, and all
-  write operations.
-- GitHub is the first implementation. GitLab, Gitbucket, Yandex Arcanum, and
-  Perforce-based systems are planned future providers.
-- The **discussion data model** must support both flat (GitHub-style) and
-  arbitrarily deep tree (Arcanum-style) thread structures. The renderer must be
-  generic enough to handle both.
-
-### 5.4 Authentication
-
-Arcanum resolves explicit token values and paths before its default token file.
-Before loading a review or restoring its cache, it verifies the OAuth account;
-only that account determines comment ownership. Verification failure stops loading.
-Local Arc login remains diagnostic metadata. Health checks make no HTTP requests.
-Arcanum discovery follows prefix-search pages until it finds the exact remote
-branch, and stays inactive when no remote branch is configured.
-
-- Secrets are read from standard credential files used by existing CLI tools
-  (e.g., `~/.config/gh/hosts.yml` for GitHub, similar conventions for other
-  providers).
-- No custom credential storage.
-
-### 5.5 Rate limiting and caching
-
-- All API responses are **cached to disk** (survives Neovim restarts). Cache
-  location follows XDG conventions (`~/.cache/nvim/parley/`).
-- The plugin tracks rate limit headers and **silently pauses** requests when the
-  limit is approached, retrying automatically when the window resets.
-- No aggressive polling — refresh triggers are: buffer enter, a configurable timer
-  (default 5 min), and explicit user command.
-
-### 5.6 Performance
-
-- All network calls are **fully async** (non-blocking) using `plenary.async`.
-- The UI must remain responsive during fetches; stale cached data is shown while
-  fresh data loads in the background.
-
-### 5.7 Reliability
-
-- If the plugin cannot detect a PR for the current branch, it **silently
-  deactivates** — no errors, no UI noise.
-- Network errors and API failures are reported via `vim.notify` at warn/error level,
-  then the plugin falls back to cached data.
-
-### 5.8 VCS scope
-
-- Plugin is **active only inside a recognized VCS repository** (git, hg, Perforce,
-  etc.). Outside any repo = fully inactive.
-- Branch-to-PR mapping is provider-specific; the provider module is responsible for
-  implementing it.
-
----
-
-## 6. UI Specification
-
-| Element | Behavior |
-|---|---|
-| **Gutter sign** | Appears on every line with ≥1 comment. Indicates presence only (no count, no state). Works in both regular buffers and diffview new-side pane. |
-| **Virtual text** | Virtual lines below the commented line showing `author · timestamp`, the multiline first comment body, and, when applicable, a compact remaining-comment summary. |
-| **Discussion float** | Opens tied to cursor position; stays open until explicitly closed. Follows cursor to new lines on move. Rendered as overlay in both regular buffer and diffview contexts. |
-| **Thread rendering** | Flat list for GitHub; generic tree renderer for providers with nested replies. Markdown rendered via `render-markdown.nvim`. |
-| **Input subwindow** | Multiline Markdown buffer within or adjacent to the discussion float. Opens for: new reply, new top-level comment, edit existing. |
-| **Navigation** | `]c` / `[c` jump to next/prev commented line. Arrows + Enter to select threads in float. |
-| **Statusline** | Component exposing: PR number, approval status, unresolved comment count. Compatible with lualine and vanilla statusline. |
-
----
-
-## 7. Write Operations
-
-All write operations are supported in both regular buffer and diffview contexts:
-
-- Post a new line-level comment (from visual selection in buffer)
-- Post a reply to a specific thread (from discussion window)
-- Edit own comment
-- Delete own comment
-- Resolve / unresolve a thread
-- Add / remove a reaction on a comment
-- Submit a PR-level review (approve / request changes / comment)
-
----
-
-## 8. Technology Stack
-
-| Concern | Choice | Rationale |
-|---|---|---|
-| Language | Lua | Neovim native |
-| Minimum Neovim | 0.10 | `vim.system`, `vim.iter`, modern extmark API |
-| HTTP | `plenary.curl` | Widely used, no binary dependency beyond curl |
-| Async | `plenary.async` | Established, widely used in the plugin ecosystem |
-| UI components | `nui.nvim` | Handles floating windows, layouts, input boxes |
-| Markdown rendering | `render-markdown.nvim` | Renders Markdown in Neovim buffers inline |
-| Inline anchoring | `vim.api` extmarks | Native mechanism for signs, virtual text, highlights |
-| diffview integration | Auto-detection via buffer filetype/name | Robust against diffview.nvim internal changes |
-| Testing | `plenary.nvim` test harness + mocked providers | No real API calls in tests |
-| Distribution | lazy.nvim-first, any plugin manager supported | Standard `setup({})` entry point |
-| Config | `setup({})` Lua call | Modern Neovim plugin convention |
-| Credentials | Provider-specific standard files | No custom secret storage |
-| Cache | Disk, XDG path (`~/.cache/nvim/parley/`) | Survives restarts, reduces API pressure |
-
----
-
-## 10. Open Risks
-
-| Risk | Notes |
-|---|---|
-| Line re-anchoring reliability | Heuristic degrades with large uncommitted local changes. Show a non-intrusive warning when confidence is low. |
-| diffview line translation | Diff buffers interleave old/new lines with decorations. Mapping diff-buffer line N to real file line M requires a dedicated, well-tested translation module. |
-| diffview float placement | A floating overlay may obscure diff content. Consider user-configurable float position (top/bottom/right edge preference). |
-| Non-git VCS branch detection | Each VCS needs its own detection logic (`hg branch`, `p4 info`, etc.). Must be part of the provider contract. |
-| Arcanum API availability | Proprietary API; documentation may require internal access or reverse engineering. |
-| Follow-cursor float UX | Continuously updating the float on cursor move may feel jarring. Apply a small debounce delay. |
-| Plenary as hard dependency | Large library; worth revisiting if the plugin gains traction and minimizing deps becomes a priority. |
+See ARCANUM_COMPATIBILITY.md for current Arcanum contracts and validation limits.

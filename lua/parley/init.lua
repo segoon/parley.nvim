@@ -11,7 +11,7 @@ local M = {}
 
 --- Default configuration values.
 --- @class parley.Config
---- @field refresh_interval integer  Auto-refresh interval in seconds (0 = disabled)
+--- @field refresh_interval integer  Reserved interval in seconds; currently inactive (no periodic refresh)
 --- @field cache_dir         string  Directory for disk-cached API responses
 --- @field signs             parley.SignsConfig
 --- @field virtual_text      parley.VirtualTextConfig
@@ -55,7 +55,7 @@ local M = {}
 
 --- @type parley.Config
 local defaults = {
-  refresh_interval = 300, -- 5 minutes
+  refresh_interval = 300, -- Reserved; periodic refresh is not implemented
   cache_dir = vim.fn.stdpath("cache") .. "/parley",
   debug = false,
   telescope = true,
@@ -281,7 +281,7 @@ end
 ---
 --- ```lua
 --- require("parley").setup({
----   refresh_interval = 120,
+---   telescope = false,
 --- })
 --- ```
 ---

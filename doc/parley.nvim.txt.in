@@ -29,7 +29,7 @@ without leaving Neovim.
 
 Parley is intentionally narrow: it focuses on line-level code review inside
 the editing flow. For full GitHub clients (issues, PR metadata, repo
-browsing), see |octo.nvim| or |gh.nvim|.
+browsing), see octo.nvim or gh.nvim.
 
 Current state: ~
 
@@ -49,7 +49,8 @@ GitHub provider: ~
 
 Arcanum provider: ~
   - arc (Arcadia VCS CLI)
-  - Network access to arcanum.yandex.net
+  - curl
+  - HTTPS access to the configured API host (default arcanum.yandex.net)
 
 Optional: ~
 
@@ -82,8 +83,11 @@ With lazy.nvim: >lua
 Quick start: ~
 
   1. Install the plugin and call `setup()`.
-  2. Authenticate GitHub CLI: `gh auth login`.
-  3. Open a file in a git repo whose current branch has an open PR.
+  2. Configure GitHub credentials with `gh auth login` or a supported token
+     environment variable; for Arcanum, configure an OAuth token
+     (|parley-provider-arcanum|).
+  3. Open a regular file in a Git or Arc repo whose branch has an open PR.
+     Arcanum requires a remote branch.
   4. Run `:Parley refresh` or re-enter the buffer.
   5. Navigate with `]c` / `[c` / `]C` / `[C` (|parley-keymaps|).
   6. Toggle the discussion window with `:Parley discussion toggle`.
@@ -142,8 +146,9 @@ All Parley commands support tab completion.
     Withdrawals require your corresponding current verdict. No default keymap.
 
 :Parley comment react                                *:Parley-comment-react*
-    Open the reaction picker for the selected comment. Toggles: adds
-    the reaction if absent, removes it if present.
+    Open provider-specific choices for the selected comment. Add a reaction
+    if absent, or remove one you already added. Arcanum preserves the chosen
+    add/remove intent even if the local snapshot refreshes before submission.
 
 :Parley comment edit                                 *:Parley-comment-edit*
     Edit the selected comment. Only works on your own comments.
@@ -170,9 +175,10 @@ All Parley commands support tab completion.
     Mirror of `:Parley nav review-next`. Wraps around at the start.
 
 :Parley quickfix                                     *:Parley-quickfix*
-    Fill the quickfix list with all discussion locations from the active
-    review and open the quickfix window. Entries use review-wide anchor
-    mappings when available, with PR line numbers as fallback.
+    Fill and open the quickfix list with file-associated discussions from the
+    active review. Entries use review-wide mappings when available. Unavailable
+    positions remain invalid rows; general discussions are omitted. Use
+    `:Parley discussion list` to access every thread.
 
 ==============================================================================
 5. KEYMAPS                                           *parley-keymaps*
@@ -205,7 +211,7 @@ Draft/input window keymaps: ~
     `<C-s>`        i       Submit the draft
     `C`            n       Cancel the in-flight request
 
-Reaction picker keymaps: ~
+Reaction and review-action picker keymaps: ~
 
     Key        Action
     `q` / `<Esc>`  Cancel
@@ -227,8 +233,10 @@ Usage: >lua
     require("telescope").extensions.parley_discussions_file.parley_discussions_file()
 <
 
-Selecting an entry opens the file, refreshes Parley state, navigates to the
-discussed line, and opens the discussion window.
+Selecting a located entry opens the file, refreshes Parley state, navigates to
+the discussion, and opens its window. General, historical, old-side, and other
+unavailable-location entries open against the source buffer without a fabricated
+line jump. The review-wide picker includes these threads.
 
 If you do not use Telescope, disable the extension loading: >lua
     require("parley").setup({ telescope = false })
@@ -237,7 +245,7 @@ If you do not use Telescope, disable the extension loading: >lua
 ==============================================================================
 7. STATUSLINE                                        *parley-statusline*
 
-Parley exposes a statusline component via |parley.statusline()|.
+Parley exposes a statusline component via |parley.statusline(bufnr)|.
 Provider branding comes from public provider metadata: GitHub displays
 `GitHub PR #…`, Arcanum displays `Arcanum PR #…`, and custom providers supply their
 own name. Review state without a provider snapshot displays `PR #…`.
@@ -271,6 +279,10 @@ With the built-in statusline: >vim
 <parley-configuration-end>
 
 Provider defaults are merged separately; see |parley-providers|.
+
+`refresh_interval` is accepted but currently has no effect. Periodic refresh is
+not implemented. Buffer entry may reuse cached data; `:Parley refresh` forces a
+fetch. Writes refresh remote state, and local edits update mappings separately.
 
 ==============================================================================
 9. HIGHLIGHTS                                        *parley-highlights*
@@ -345,11 +357,6 @@ Tokens are resolved in the following order:
 
 Run `gh auth login` to set up authentication.
 
-The configured host must be a hostname or bracketed IPv6 address, optionally with
-a port. Schemes, userinfo, paths, queries, fragments, and whitespace are rejected.
-An explicit constructor host overrides providers.arcanum.host; the effective host
-is used consistently by verification, discovery, reads, writes, and cache identity.
-
 Provider options: ~
 
 GitHub-specific options live under `providers.github` in the setup call. Defaults: >lua
@@ -375,7 +382,7 @@ Limitations: ~
 Arcanum                                              *parley-provider-arcanum*
 
 The built-in Arcanum provider supports Arc (Arcadia VCS) repositories via
-the Arcanum public REST API at arcanum.yandex.net.
+the Arcanum public and plugin REST APIs over HTTPS at arcanum.yandex.net.
 
 The provider is activated automatically when the current buffer belongs to an
 Arc repository (detected via `arc root`).
@@ -422,7 +429,7 @@ The draft remains available after failure or cancellation. If a creation respons
 is incomplete, check the review before retrying: the comment may have been sent.
 Cancellation after sending does not guarantee that the server discarded it.
 
-Provider options: ~
+Discussion locations and issue states: ~
 
 Arcanum threads retain nested replies, including incomplete or cyclic ancestry.
 Only open issues contribute to the unresolved count; resolved, dropped, non-issue,
@@ -431,6 +438,13 @@ anchors receive buffer positions. Other anchors retain their side, paths, and
 revision metadata in the discussion list and float. Navigation skips unavailable
 positions; quickfix retains file-associated entries as invalid rows and omits
 general discussions. Discussion selection and composer text survive refreshes.
+
+Provider options: ~
+
+The configured host must be a hostname or bracketed IPv6 address, optionally with
+a port. Schemes, userinfo, paths, queries, fragments, and whitespace are rejected.
+An explicit constructor host overrides providers.arcanum.host; the effective host
+is used consistently by verification, discovery, reads, writes, and cache identity.
 
 Arcanum-specific options live under `providers.arcanum` in the setup call: >lua
     require("parley").setup({
@@ -582,8 +596,6 @@ the detected review's `head_sha`. Missing, empty, non-string, or leading-hyphen
 revisions return `nil, "review revision is unavailable"` before command execution.
 
 
-Provider-owned cache identity: ~
-
 Optional cancellable writes: ~
 
 Providers may implement either or both of these colon-call methods:
@@ -600,12 +612,13 @@ Starters must return promptly without yielding, returning a `parley.CancelHandle
 with a `cancel()` function (called without a self argument). Invoke the
 `parley.WriteCallback` exactly once on the Neovim main loop, either before returning
 or later. A `parley.WriteResult` contains `ok` (boolean), optional `comment`,
-optional `err` (string), optional `cancelled` (boolean), and optional `uncertain`
-(boolean). Set `uncertain = true` when a failed write may have reached the server,
+optional `err` (string), and optional boolean `cancelled`, `uncertain`, and
+`refresh`. Set `refresh = true` for a known conflict requiring fresh remote state.
+Set `uncertain = true` when a failed write may have reached the server,
 with an `err` explaining that the user should check the review before retrying.
 This message remains visible in the composer after cancellation or failure.
-A cancelled result must
-have `ok = false`. Successful callbacks need not return a comment object.
+A cancelled result must have `ok = false`. Successful callbacks need not return
+a comment object.
 
 Cancellation requests completion through the callback; shared writes continue
 waiting until it arrives. It does not guarantee rollback of a remote mutation.
@@ -627,6 +640,8 @@ Plenary and returns the response, raising on network failure. `http.get` and
 `http.post` retain their convenience interfaces. Provider-specific scheduling,
 retries, and response-envelope validation belong to the provider layer.
 
+Provider-owned cache identity: ~
+
 Every provider must implement `provider:cache_identity()`. It runs in a Plenary
 coroutine and returns { provider, host, repository, account }, with four nonempty
 strings, or nil when stable local credential identity is unavailable. `account`
@@ -639,7 +654,7 @@ snapshots. Missing methods and malformed values are contract errors. Nil identit
 keeps live review operations available using isolated temporary state and skips
 all persistent review-cache reads, writes, and invalidation.
 
-Review cache keys use the reviews-v2 namespace and hashes of ordered identity
+Review cache keys use the reviews-v3 namespace and hashes of ordered identity
 fields and typed branch/PR identifiers. Provider, host, repository, and credential
 contexts are isolated. Token rotation causes a cold refresh. Checkout-specific
 local mappings remain separate even when remote cache identity is shared.
