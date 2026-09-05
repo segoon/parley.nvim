@@ -91,9 +91,43 @@ and the old help incorrectly described local-login detection and ownership. Exac
 server DTOs and the current-user handler resolved those discrepancies; regression
 tests cover both pagination and verified ownership. Generated help was not edited.
 
+Reaction/review backlog item **7 is implemented**: common Arcanum reaction codes,
+removal of other viewer-owned codes, and the explicit `:Parley review actions`
+picker. Ship, sticky ship, unship, block merge, and unblock merge preserve their
+server meanings. Confirmation shows the loaded PR/revision and viewer verdict;
+a cancellable active-diff recheck precedes each mutation. The API cannot atomically
+pin the expected diff, so the remaining recheck/write race is documented.
+
+Review status comes from plugin reviewer data and remaining approval requirements;
+failed or malformed reads yield `unknown` without hiding discussions. Review actions
+remain disabled until that data is available. Arcanum ownership cache identity is
+versioned again to exclude old inferred approval data. Reactions use the PR comment
+route for inline, general, and historical comments, and send the desired state
+captured in the picker. AI conflicts refresh without automatically removing another
+reaction. Known conflicts are distinct from uncertain write outcomes.
+
+Validation for item 7 (2026-09-05): **1,049 tests passed, 0 failures/errors**.
+`make format`, `make format-check`, and `make lint` passed (187 Lua files,
+0 lint warnings/errors). Changed Lua files remain within 600 lines. Tests cover
+exact routes and sticky flags, remaining-approval normalization, unknown status,
+withdrawal eligibility, confirmation cancellation, stale diffs/accounts/comments,
+encoded reaction codes, desired-state preservation, scope failures, no mutation
+retries, cancellation in either stage, duplicate/late callbacks, and real float/draft
+preservation after successful, conflicting, and uncertain results. HTTP was mocked;
+no live API mutations were performed. Generated help remains untouched.
+
+Implementation difficulties: the wire field `min_ships_required` actually contains
+`minimumShipsLeft`, and public comment DTOs do not reliably identify AI comments.
+The implementation validates the server count and handles AI conflicts by HTTP
+status. Transport now retains that status even when a structured API error body
+replaces its message. Regression tests prevent accidental classification by message
+text. Ordinary credentials cannot call the admin-only authorities endpoint:
+GENERIC_WRITE / REVIEW_REQUEST_SHIP requirements are documented and 401/403 errors
+are explained safely, while authorization remains server-side.
+
 The findings below describe the research baseline. The next unfinished item is
-**7: add reactions and review actions deliberately**; live deployment compatibility remains
-unverified. Queue coordination is process-local, and keys are not persisted
+**8: reconcile the remaining documentation backlog**; live deployment compatibility
+remains unverified. Queue coordination is process-local, and keys are not persisted
 across manual resubmissions or Neovim restarts.
 
 Validation for item 2 (2026-09-05): **927 tests passed, 0 failures/errors**.
@@ -341,7 +375,7 @@ Comment IDs may be negative; preserving them as strings is appropriate.
 6. **Complete detection/configuration/health. — Implemented.** Paginate prefix search until exact
    match; test competing prefix branches, absent upstream, alternate token sources,
    authenticated-viewer mismatch, host propagation and multiple checkouts.
-7. **Add reactions and review actions deliberately.** Validate token scopes and
+7. **Add reactions and review actions deliberately. — Implemented.** Validate token scopes and
    ordinary versus sticky ship; normalize review status and reaction vocabulary.
 8. **Update README, PROJECT, TODO and the help template together.** Then tackle
    Diffview and optional drafts/suggestions as explicit follow-up scope.

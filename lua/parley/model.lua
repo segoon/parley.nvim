@@ -23,6 +23,7 @@ local KNOWN_BODY_FORMATS = {
 
 --- @type table<string, true>
 local KNOWN_REVIEW_STATUSES = {
+  unknown = true,
   approved = true,
   changes_requested = true,
   pending = true,
@@ -76,6 +77,7 @@ local KNOWN_REVIEW_STATUSES = {
 --- | "pending"
 --- | "dismissed"
 --- | "commented"
+--- | "unknown"
 
 --- Metadata for a pull / merge request.
 --- @class parley.PR

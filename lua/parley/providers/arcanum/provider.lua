@@ -10,8 +10,7 @@
 ---   • Discussion fetching: GET /v1/public/review-requests/{pr_id}/comments.
 ---   • Anchored comment posting requires resolving entry_id from the active diff
 ---     changelist; these are cached in write_context after detect_pr.
----   • Issue resolution uses public comment PATCH; reactions and review submission
----     are not implemented in this provider.
+---   • Issues use public PATCH; reactions and explicit review actions use plugin APIs.
 ---
 --- Testability:
 ---   • transport.http_run / transport.http_start: injectable transport seams.
@@ -34,6 +33,7 @@ local session = require("parley.providers.arcanum.session")
 --- @field pr_id         integer          PR numeric ID
 --- @field diff_id       integer|nil      Active diff numeric ID (nil before detect_pr resolves it)
 --- @field diff_set_xid  string|nil       Active diff set xid (for comment anchoring)
+--- @field review_data? table Validated plugin reviewer verdicts and remaining approval count
 --- @field changelist_diff_id integer|nil Diff owning cached entry IDs
 --- @field changelist    table<string, string>  Map of file path → entry_id (populated lazily)
 
@@ -59,6 +59,9 @@ ArcanumProvider.prepare = session.prepare
 ArcanumProvider.capabilities = require("parley.providers.arcanum.capabilities").get
 ArcanumProvider.validate_comment_target = require("parley.providers.comment_target").validate
 ArcanumProvider.cache_identity = require("parley.providers.arcanum.cache_identity").get
+ArcanumProvider.review_actions = require("parley.providers.arcanum.review_actions").choices
+ArcanumProvider.begin_review_action = require("parley.providers.arcanum.review_actions").start
+ArcanumProvider.begin_set_reaction = require("parley.providers.arcanum.reactions").start
 ArcanumProvider.reaction_choices = require("parley.providers.arcanum.reactions").choices
 ArcanumProvider.reaction_presentation = require("parley.providers.arcanum.reactions").presentation
 
@@ -213,11 +216,9 @@ function ArcanumProvider:detect_pr(_repo_root, branch)
     changelist = {},
   }
 
-  return {
-    pr = pr,
-    head_sha = head_sha,
-    write_context = write_context,
-  }
+  local review = { pr = pr, head_sha = head_sha, write_context = write_context }
+  require("parley.providers.arcanum.review_actions").load(self, review)
+  return review
 end
 
 --- Fetch all discussions for a PR.
@@ -307,17 +308,7 @@ ArcanumProvider.unresolve = resolution.unresolve
 ArcanumProvider.begin_resolve = resolution.begin_resolve
 ArcanumProvider.begin_unresolve = resolution.begin_unresolve
 
---- Toggle a reaction on a comment.
---- NOT IMPLEMENTED — plugin reaction API integration is pending.
----
---- @param self        parley.arcanum.Provider
---- @param _review     parley.DetectedReview
---- @param _comment_id string
---- @param _reaction   string
-function ArcanumProvider:react(_review, _comment_id, _reaction)
-  local _ = self
-  error("parley.arcanum: reaction changes are not implemented in Parley", 0)
-end
+ArcanumProvider.react = require("parley.providers.arcanum.reactions").run
 
 --- Edit an existing comment body.
 ---
@@ -350,7 +341,7 @@ function ArcanumProvider:delete(_review, comment_id)
 end
 
 --- Submit a PR-level review verdict.
---- NOT IMPLEMENTED — plugin review API integration is pending.
+--- Body/event transactions are not equivalent to explicit plugin review actions.
 ---
 --- @param self   parley.arcanum.Provider
 --- @param _review parley.DetectedReview
@@ -358,7 +349,7 @@ end
 --- @param _body  parley.Body
 function ArcanumProvider:submit_review(_review, _event, _body)
   local _ = self
-  error("parley.arcanum: review submission is not implemented in Parley", 0)
+  error("Use :Parley review actions; Arcanum review messages are unsupported", 0)
 end
 
 --- Return a short label for use in progress messages.

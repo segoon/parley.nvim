@@ -6,6 +6,7 @@ M.actions = {
   reply = { available = true },
   edit = { available = true },
   delete = { available = true },
+  review_action = { available = false, reason = "Explicit review actions are unavailable for GitHub" },
   react = { available = true },
   submit_review = { available = true },
   resolve = { available = false, reason = "GitHub resolution requires GraphQL; not implemented in Parley" },

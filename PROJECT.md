@@ -112,10 +112,14 @@ A Neovim plugin written in Lua that:
 
 ### 4.8 PR-level review actions
 
-1. User triggers a keymap for PR-level actions: approve, request changes, or submit
-   a review batch.
-2. Plugin opens an input buffer for the review summary comment and sends the review
-   submission request.
+1. User runs `:Parley review actions` to select an explicit provider action.
+2. Arcanum offers normal/sticky ship, unship, block merge, and unblock merge.
+   Confirmation shows the PR, loaded revision, and current verdict. Sticky approval
+   includes future diffs. No review message is silently discarded.
+3. The provider rechecks the active diff before submission; the API still has a
+   race between recheck and mutation. Selected discussions and drafts survive refresh.
+4. Actual reviewer verdicts and remaining approval requirements determine status.
+   Failed status reads produce unknown while discussions remain usable.
 
 ### 4.9 PR status awareness
 

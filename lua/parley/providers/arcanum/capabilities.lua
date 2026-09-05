@@ -8,13 +8,19 @@ M.actions = {
   delete = { available = true },
   resolve = { available = true },
   unresolve = { available = true },
-  react = { available = false, reason = "Arcanum reaction changes are not implemented in Parley" },
-  submit_review = { available = false, reason = "Arcanum review submission is not implemented in Parley" },
+  react = { available = true },
+  review_action = { available = true },
+  submit_review = { available = false, reason = "Use :Parley review actions; review messages are unsupported" },
 }
---- @param _self parley.Provider
---- @param _review parley.DetectedReview
+--- @param self parley.Provider
+--- @param review parley.DetectedReview
 --- @return parley.ProviderCapabilities
-function M.get(_self, _review)
-  return vim.deepcopy(M.actions)
+function M.get(self, review)
+  local actions = vim.deepcopy(M.actions)
+  local choices, reason = require("parley.providers.arcanum.review_actions").choices(self, review)
+  if #choices == 0 then
+    actions.review_action = { available = false, reason = reason }
+  end
+  return actions
 end
 return M

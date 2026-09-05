@@ -11,24 +11,6 @@ local M = {}
 -- Constants
 -- ---------------------------------------------------------------------------
 
---- Map Arcanum PR status values → parley.ReviewStatus values.
---- Arcanum doesn't have per-reviewer verdicts in the public API listing;
---- we derive a coarse review_status from the PR status field.
---- @type table<string, parley.ReviewStatus>
-M.PR_STATUS_MAP = {
-  open = "pending",
-  uploading = "pending",
-  conflicts = "pending",
-  errors = "pending",
-  configuration_failed = "pending",
-  merging = "pending",
-  merge_failed = "pending",
-  merged = "approved",
-  discarded = "dismissed",
-  no_changes = "pending",
-  unknown = "pending",
-}
-
 -- ---------------------------------------------------------------------------
 -- Helpers
 -- ---------------------------------------------------------------------------
@@ -54,7 +36,7 @@ function M.map_reactions(reactions, viewer)
         by_code[code] = { count = 0, viewer_reacted = false }
       end
       by_code[code].count = by_code[code].count + 1
-      if r.user and r.user.name == viewer then
+      if type(r.user) == "table" and viewer ~= "" and r.user.name == viewer then
         by_code[code].viewer_reacted = true
       end
     end
@@ -200,7 +182,7 @@ end
 --- @return parley.PR
 function M.map_pr(raw)
   local status = raw.status or "unknown"
-  local review_status = M.PR_STATUS_MAP[status] or "pending"
+  local review_status = "unknown"
 
   local vcs = raw.vcs or {}
   local author = raw.author

@@ -152,11 +152,12 @@ function M.http_start(self, method, path, body, callback, opts)
     --- @param retryable boolean
     --- @param message string
     --- @param delay number
-    local function fail_or_retry(retryable, message, delay)
+    --- @param status? integer
+    local function fail_or_retry(retryable, message, delay, status)
       if can_retry and retryable and attempt <= cfg.retry_count then
         enqueue(delay)
       else
-        finish({ ok = false, err = message })
+        finish({ ok = false, err = message, status = status })
       end
     end
     enqueue = function(delay)
@@ -234,7 +235,8 @@ function M.http_start(self, method, path, body, callback, opts)
               fail_or_retry(
                 response.retry_status(raw.status),
                 valid and ("Arcanum HTTP " .. raw.status) or tostring(data),
-                backoff
+                backoff,
+                raw.status
               )
             end
           end)

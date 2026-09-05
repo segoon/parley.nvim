@@ -7,6 +7,7 @@ describe("provider action capabilities", function()
     end
     assert.is_string(capabilities.reason({}, {}, "resolve"))
     assert.is_string(capabilities.reason({}, {}, "unresolve"))
+    assert.is_string(capabilities.reason({}, {}, "review_action"))
   end)
   it("fails closed on missing, malformed or failing declarations", function()
     for _, value in ipairs({ {}, { resolve = true }, { resolve = { available = "yes" } } }) do

@@ -114,6 +114,7 @@ return function(M)
         type(result) ~= "table"
         or type(result.ok) ~= "boolean"
         or (result.cancelled ~= nil and type(result.cancelled) ~= "boolean")
+        or (result.refresh ~= nil and type(result.refresh) ~= "boolean")
         or (result.uncertain ~= nil and type(result.uncertain) ~= "boolean")
         or (result.err ~= nil and type(result.err) ~= "string")
         or (result.ok and result.cancelled)
@@ -195,7 +196,7 @@ return function(M)
       if not result.ok then
         finish_progress(progress, bufnr, "failed", progress_texts.failed)
         M._notify(result.err or "parley: request failed", vim.log.levels.WARN)
-        if result.uncertain then
+        if result.uncertain or result.refresh then
           refresh_after_write(bufnr, refresh_selected)
         end
         return

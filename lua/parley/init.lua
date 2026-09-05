@@ -164,6 +164,14 @@ function M._dispatch_parley(fargs, bufnr, cmd_opts)
     return
   end
 
+  if group == "review" then
+    if action ~= "actions" then
+      error("parley: expected review actions", 0)
+    end
+    require("parley.review_actions").run(bufnr)
+    return
+  end
+
   if group == "quickfix" then
     if action ~= nil and action ~= "" then
       error("parley: quickfix does not accept subcommands", 0)

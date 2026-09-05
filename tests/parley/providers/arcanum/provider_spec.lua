@@ -574,7 +574,7 @@ describe("parley.providers.arcanum.provider — stubs raise errors", function()
     end)
   end)
 
-  it("react raises error", function()
+  it("react rejects invalid comment IDs before awaiting HTTP", function()
     assert.has_error(function()
       p:react({}, "comment-1", "+1")
     end)

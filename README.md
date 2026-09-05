@@ -108,6 +108,19 @@ issue state. Dropped, non-issue, unknown, and incomplete threads cannot transiti
 GitHub resolution remains unavailable. Unsupported provider actions explain why
 before you compose or choose them; see `:help parley-provider-capabilities`.
 
+Arcanum reactions offer thumbs up, thumbs down, and heart; other existing codes
+remain readable and removable by their author. AI comments allow one reaction
+per account; remove an existing reaction explicitly before replacing it.
+
+Use `:Parley review actions` for Ship, Sticky ship, Unship, Block merge, and
+Unblock merge. The confirmation shows the PR, loaded revision, and current verdict.
+Sticky ship approves future diffs until withdrawn. No review message is bundled.
+Reactions and withdrawals require `GENERIC_WRITE`; ship and block additions
+require `REVIEW_REQUEST_SHIP`. Server permissions remain authoritative.
+The active diff is rechecked after confirmation, but the API cannot atomically
+pin it during the write. Review data failures show status `unknown` and disable
+review actions until refresh; discussions remain available.
+
 Arcanum credentials are read from `ARCANUM_TOKEN`, then `ARC_OAUTH_TOKEN`, then
 `ARC_TOKEN_PATH`, then `~/.arc/token`. An unreadable or empty explicit token file
 is an error. Review loading verifies the token's API account before showing cached
@@ -257,4 +270,4 @@ provider-independent behavior tests.
 
 - `diffview.nvim` integration
 - real thread resolved state for GitHub via GraphQL
-- GitHub thread resolution/reopening and Arcanum reactions/review submission
+- GitHub thread resolution/reopening and generic Arcanum review messages

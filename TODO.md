@@ -1,7 +1,6 @@
 features:
 - :Telescope discussions|issues|comments? vcs_issues? - preview
 - GitHub resolve/unresolve thread and resolved state (GraphQL)
-- Arcanum reactions and review submission (provider capability metadata is in place)
 
 features (2):
 - `X-RateLimit-*`, 429, 403 from gh
@@ -25,3 +24,5 @@ tests:
 Completed Arcanum compatibility:
 - exact branch discovery across pages, alternate Arc credentials, verified API ownership
 - configured-host propagation and local-only health diagnostics
+- common Arcanum reactions and explicit ship/sticky ship/withdrawal/merge-block actions
+- actual review status with unknown fallback and confirmation-time active-diff recheck

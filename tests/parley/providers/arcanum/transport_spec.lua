@@ -75,6 +75,47 @@ describe("Arcanum reliable transport", function()
     })
   end
 
+  it("does not retry reactions and explains permission and AI conflicts by HTTP status", function()
+    for _, status in ipairs({ 401, 403, 409, 503 }) do
+      p:begin_set_reaction({ pr = { id = "12" } }, "42", ":heart:", true, function(r)
+        results[#results + 1] = r
+      end)
+      clock.advance(1000)
+      local count = #calls
+      respond(count, status, {}, '{"errors":[{"message":"private server detail"}]}')
+      clock.advance(5000)
+      assert.equals(count, #calls)
+      assert.is_false(results[#results].ok)
+      if status == 401 or status == 403 then
+        assert.is_nil(results[#results].err:find("private", 1, true))
+      elseif status == 409 then
+        assert.matches("one reaction", results[#results].err)
+        assert.is_true(results[#results].refresh)
+      end
+    end
+  end)
+  it("does not retry review writes and reports the required scope", function()
+    local review = {
+      pr = { id = "12" },
+      head_sha = "head",
+      write_context = {
+        pr_id = 12,
+        diff_id = 34,
+        review_data = { reviewers = {}, min_ships_required = 1 },
+      },
+    }
+    p:begin_review_action(review, "ship", function(r)
+      results[#results + 1] = r
+    end)
+    respond(1, 200, {}, '{"data":{"id":34,"commit_ids":{"head":"head"}}}')
+    clock.advance(1000)
+    assert.equals("PUT", calls[2].opts.method)
+    respond(2, 403, {}, '{"errors":[{"message":"private"}]}')
+    clock.advance(5000)
+    assert.equals(2, #calls)
+    assert.matches("REVIEW_REQUEST_SHIP", results[1].err)
+    assert.is_nil(results[1].err:find("private", 1, true))
+  end)
   it("does not retry resolution PATCH even with idempotent create retries enabled", function()
     p._config.idempotent_write_retries = true
     p:begin_resolve({}, "42", function(r)

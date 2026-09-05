@@ -10,7 +10,7 @@ function M.get(self)
     provider = "arcanum",
     host = self._host,
     repository = "arcanum",
-    account = vim.fn.sha256(vim.json.encode({ "verified-viewer-v2", self._token, self._viewer_login })),
+    account = vim.fn.sha256(vim.json.encode({ "verified-viewer-review-v3", self._token, self._viewer_login })),
   }
 end
 return M

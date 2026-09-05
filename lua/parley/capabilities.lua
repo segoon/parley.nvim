@@ -1,13 +1,23 @@
 --- Local provider action availability. Missing legacy metadata preserves existing actions.
 local M = {}
 --- @alias parley.ProviderAction 'post_top_level_comment'|'reply'|'edit'|'delete'|'react'
---- |'resolve'|'unresolve'|'submit_review'
+--- |'resolve'|'unresolve'|'submit_review'|'review_action'
 --- @class parley.ActionCapability
 --- @field available boolean
 --- @field reason? string Required explanatory reason when unavailable.
 --- @alias parley.ProviderCapabilities table<parley.ProviderAction, parley.ActionCapability>
 --- @type parley.ProviderAction[]
-M.actions = { "post_top_level_comment", "reply", "edit", "delete", "react", "resolve", "unresolve", "submit_review" }
+M.actions = {
+  "post_top_level_comment",
+  "reply",
+  "edit",
+  "delete",
+  "react",
+  "resolve",
+  "unresolve",
+  "submit_review",
+  "review_action",
+}
 
 --- @param provider parley.Provider|table
 --- @param review parley.DetectedReview
@@ -19,7 +29,7 @@ function M.reason(provider, review, action)
     return "Parley provider context is unavailable"
   end
   if provider.capabilities == nil then
-    return (action == "resolve" or action == "unresolve") and fallback or nil
+    return (action == "resolve" or action == "unresolve" or action == "review_action") and fallback or nil
   end
   local ok, values = pcall(provider.capabilities, provider, review)
   local value = ok and type(values) == "table" and values[action]

@@ -134,6 +134,13 @@ All Parley commands support tab completion.
 :Parley discussion reply                             *:Parley-discussion-reply*
     Reply to the selected or current comment thread.
 
+:Parley review actions                                *:Parley-review-actions*
+    Open the provider's explicit review-action picker. Arcanum offers Ship,
+    Sticky ship, Unship, Block merge, and Unblock merge. Confirm the PR, loaded
+    revision, and your current verdict before submitting. Escape cancels.
+    Sticky ship approves future diffs until withdrawn. No review message is sent.
+    Withdrawals require your corresponding current verdict. No default keymap.
+
 :Parley comment react                                *:Parley-comment-react*
     Open the reaction picker for the selected comment. Toggles: adds
     the reaction if absent, removes it if present.
@@ -467,8 +474,19 @@ curl cannot roll back a change the server has already accepted.
 
 Limitations: ~
 
-  - Reaction changes and review submission are not implemented in Parley.
-    Arcanum exposes APIs for these; their integration remains planned.
+  - Reactions require GENERIC_WRITE. Ship/sticky ship/block merge require
+    REVIEW_REQUEST_SHIP; withdrawing approval or a block requires GENERIC_WRITE.
+    Ordinary tokens cannot query the admin-only authorities endpoint. Permissions
+    are enforced by the server; capability support does not verify token scopes.
+  - :Parley review actions rechecks the active diff after confirmation and aborts
+    on mismatch. The server cannot atomically pin the expected diff, so a diff
+    activated between the recheck and mutation can still receive the action.
+    Mutations are never automatically retried. Check uncertain outcomes before
+    retrying. Generic submit_review with a body remains unsupported.
+  - Review status uses plugin review data: any block means changes_requested;
+    zero remaining required approvals means approved; otherwise pending. A failed
+    or malformed status response means unknown and disables review actions while
+    discussions remain readable. Refresh to recover.
   - Issue resolution/reopening uses the public comment PATCH API and requires
     GENERIC_WRITE authorization. Capability support does not guarantee permission.
     These PATCH requests are never retried automatically. After uncertain failures
@@ -480,11 +498,11 @@ Provider action capabilities: ~                       *parley-provider-capabilit
 
 Optional `provider:capabilities(review)` returns a table keyed by provider method:
 `post_top_level_comment`, `reply`, `edit`, `delete`, `react`, `resolve`, `unresolve`,
-and `submit_review`. Each value is `{ available = true }` or
+`submit_review`, and `review_action`. Each value is `{ available = true }` or
 `{ available = false, reason = "Explanation" }`. This hook must be local-only and
 must not yield. It describes implemented actions, not token permissions.
 When the hook exists, missing or malformed action entries fail closed.
-Providers without it retain existing actions; resolve/reopen require explicit
+Providers without it retain existing actions; resolve/reopen and review_action require explicit
 support. Reaction choices remain required for reaction mutation.
 
 Built-in action support (yes = implemented in Parley): ~
@@ -494,10 +512,11 @@ Built-in action support (yes = implemented in Parley): ~
   reply                     yes     yes
   edit                      yes     yes
   delete                    yes     yes
-  react                     yes     no
+  react                     yes     yes
   resolve                   no      yes
   unresolve                 no      yes
   submit_review             yes     no
+  review_action             no      yes
 
 Capability checks run before composing, choosing reactions, confirming deletion,
 and submitting writes. Provider reasons explain unavailable actions. Commands
@@ -655,7 +674,7 @@ Provider-owned reactions: ~
 Providers may implement these optional, synchronous, local-only methods:
 
   reaction_choices(review, comment)
-      Returns an ordered list of { reaction, label, emoji? } and an optional
+      Returns an ordered list of { reaction, label, emoji?, remove_only? } and an optional
       unavailable-reason string. `reaction` is an opaque provider identifier.
       An empty list disables mutation and displays the reason when requested.
 
@@ -669,11 +688,34 @@ concrete catalogs and presentation logic under `lua/parley/providers/`.
 Missing methods preserve raw labels and make interactive mutations unavailable;
 there is no implicit GitHub catalog. Cached reaction data remains unchanged.
 
-GitHub retains its existing reaction choices and emoji. Arcanum reactions remain
-readable using their original codes; changing them is not implemented in Parley.
+GitHub retains its existing reaction choices and emoji. Arcanum offers thumbs up,
+thumbs down, and heart (:+1:, :-1:, :heart:). Other codes remain readable and can
+be removed if you added them. AI comments allow only one reaction per account;
+a conflict requires refreshing and explicitly removing your existing reaction.
+The public comment response does not identify AI comments reliably.
 The picker and direct reaction service reject choices that are not currently
 offered. Changing review/provider context while the picker is open requires
 reopening it before submitting.
+
+Optional cancellable action hooks: ~
+
+  begin_set_reaction(review, comment_id, code, present, callback)
+      Sets the captured desired state; present=true adds, false removes. Shared
+      UI revalidates comment availability. Without this hook, react() toggles.
+      remove_only choices cannot add reactions.
+
+  review_actions(review)
+      Local-only ordered { action, label, confirmation, reason? } choices.
+      A reason disables that choice. Requires explicit review_action capability.
+
+  begin_review_action(review, action, callback)
+      Executes a confirmed action. The shared UI verifies review identity after
+      selection and confirmation; providers validate their own remote context.
+
+Both begin hooks follow the WriteCallback/CancelHandle contract above, including
+exactly-once completion, cancellation and uncertain outcomes. A failed result may
+set refresh=true for known conflicts that require a fresh snapshot. Refresh preserves
+selected discussions and drafts. GitHub's submit_review contract is unchanged.
 
 Custom VCS implementations: ~
 

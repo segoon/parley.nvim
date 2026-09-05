@@ -19,6 +19,8 @@ function M.get(bufnr)
   end
   return {
     provider = provider.provider,
+    identity_checked = provider.provider.cache_identity ~= nil,
+    identity = provider.provider.cache_identity and vim.deepcopy(provider.provider:cache_identity()),
     review = review.review,
     rel_path = context.rel_path,
     vcs_info = vim.deepcopy(context.vcs_info),
@@ -36,7 +38,8 @@ function M.reason(bufnr, action, expected)
   if
     expected
     and (
-      current.provider ~= expected.provider
+      (expected.identity_checked and not vim.deep_equal(current.identity, expected.identity))
+      or current.provider ~= expected.provider
       or current.review.pr.id ~= expected.review.pr.id
       or current.review.head_sha ~= expected.review.head_sha
     )

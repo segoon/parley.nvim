@@ -10,7 +10,7 @@ local progress_popup = require("parley.progress_popup")
 describe("parley command completion", function()
   it("returns top-level groups for the first argument", function()
     local items = parley._complete_parley("", ":Parley ")
-    assert.same({ "discussion", "comment", "nav", "quickfix", "refresh" }, items)
+    assert.same({ "discussion", "comment", "review", "nav", "quickfix", "refresh" }, items)
   end)
 
   it("returns discussion actions for the second argument", function()

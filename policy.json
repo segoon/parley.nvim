@@ -252,7 +252,9 @@
         "lua/parley/discussion_actions.lua",
         "lua/parley/services/write_context.lua",
         "lua/parley/services/comment_actions.lua",
-        "lua/parley/services/issue_actions.lua"
+        "lua/parley/services/issue_actions.lua",
+        "lua/parley/review_actions.lua",
+        "lua/parley/services/review_actions.lua"
       ],
       "capabilities": [
         "ui_direct",
@@ -327,7 +329,9 @@
         "lua/parley/providers/github/capabilities.lua",
         "lua/parley/providers/arcanum/session.lua",
         "lua/parley/providers/arcanum/discovery.lua",
-        "lua/parley/providers/arcanum/host.lua"
+        "lua/parley/providers/arcanum/host.lua",
+        "lua/parley/providers/arcanum/review_actions.lua",
+        "lua/parley/providers/arcanum/action_result.lua"
       ],
       "capabilities": [
         "buffer_inspect",

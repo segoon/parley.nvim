@@ -32,6 +32,23 @@ return function(M, operations, resolve_write_context, notify_context_error, allo
       return false
     end
     return operations.run_action(bufnr, cursor_line, function(callback)
+      if write_context.provider.begin_set_reaction then
+        local reason = require("parley.reactions").validate(bufnr, comment, reaction, expected)
+        if reason then
+          callback({ ok = false, err = reason })
+          return { cancel = function() end }
+        end
+        local present = expected and expected.present
+        if present == nil then
+          present = true
+          for _, state in ipairs(comment.reactions or {}) do
+            if state.type == reaction and state.viewer_reacted then
+              present = false
+            end
+          end
+        end
+        return write_context.provider:begin_set_reaction(write_context.review, comment.id, reaction, present, callback)
+      end
       local cancelled = false
       async.run(function()
         local ok, result = pcall(function()
@@ -58,7 +75,7 @@ return function(M, operations, resolve_write_context, notify_context_error, allo
       success = "Reaction updated",
       failed = "Reaction failed",
       cancelled = "Reaction cancelled",
-    })
+    }, { preserve_selection = true })
   end
 
   --- Delete an existing comment and refresh the discussion.

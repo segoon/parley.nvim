@@ -512,5 +512,6 @@ end
 
 require("parley.services.comment_actions")(M, operations, resolve_write_context, notify_context_error, allowed)
 require("parley.services.issue_actions")(M, operations)
+require("parley.services.review_actions")(M, operations)
 
 return M

@@ -22,6 +22,8 @@ a.describe("configured Arcanum workflow", function()
         data = { id = 2, commit_ids = { head = "head" } }
       elseif path:find("/v1/pull-requests/1?", 1, true) then
         data = { id = 1, vcs = { from_branch = "feature" } }
+      elseif path:find("/review?", 1, true) then
+        data = { reviewers = {}, min_ships_required = 0 }
       elseif path == "/v1/public/review-requests/1/comments" then
         data = {}
       else
@@ -51,7 +53,8 @@ a.describe("configured Arcanum workflow", function()
     assert.same({}, p:fetch_discussions(review))
     assert.is_true(p:reply(review, {}, { id = "1" }, { text = "reply" }).is_own)
     p:resolve(review, "1")
-    assert.equals(7, #calls)
+    assert.equals(8, #calls)
+    assert.equals("approved", review.pr.review_status)
     assert.equals("configured.example:8443", p:cache_identity().host)
   end)
 end)
