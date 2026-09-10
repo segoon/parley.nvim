@@ -1,11 +1,6 @@
-# TODO
-
-features:
-- :Telescope discussions|issues|comments? vcs_issues? - preview
-- multiple discussions of the same line
-- resolve/unresolve thread, unresolved count (GraphQL)
-
 # Remaining work
+
+- used size: ✅ OK cache_dir exists and is writable: /home/segoon/.cache/nvim/parley
 
 ## Review workflows
 

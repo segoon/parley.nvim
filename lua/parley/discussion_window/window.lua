@@ -1,30 +1,19 @@
 local M = {}
 
----@param lines string[]
----@param max_width integer
----@return integer
-local function window_width(lines, max_width)
-  local width = 20
-  for _, line in ipairs(lines) do
-    width = math.max(width, vim.fn.strdisplaywidth(line))
-  end
-  return math.min(max_width, width)
-end
-
----@param lines string[]
+---@param _lines string[]  unused; window size tracks the source window, not content
 ---@param float_cfg parley.FloatConfig
 ---@param source_winid integer
 ---@param _source_line integer  unused for positioning; retained for API stability
 ---@param title string|nil
 ---@return vim.api.keyset.win_config
-function M.make_win_config(lines, float_cfg, source_winid, _source_line, title)
-  local width = window_width(lines, float_cfg.max_width)
-  local height = math.min(float_cfg.max_height, math.max(1, #lines))
-
+function M.make_win_config(_lines, float_cfg, source_winid, _source_line, title)
   local win_width = vim.api.nvim_win_get_width(source_winid)
   local win_height = vim.api.nvim_win_get_height(source_winid)
-  width = math.min(width, math.max(12, win_width - 4))
-  height = math.min(height, math.max(1, win_height - 2))
+
+  local width = math.min(float_cfg.max_width, math.floor(win_width * (float_cfg.width_ratio or 0.8)))
+  local height = math.min(float_cfg.max_height, math.floor(win_height * (float_cfg.height_ratio or 0.8)))
+  width = math.max(20, math.min(width, math.max(12, win_width - 4)))
+  height = math.max(1, math.min(height, math.max(1, win_height - 2)))
 
   local config = {
     relative = "win",
@@ -35,7 +24,7 @@ function M.make_win_config(lines, float_cfg, source_winid, _source_line, title)
     border = float_cfg.border,
     width = width,
     height = height,
-    focusable = true,
+    focusable = float_cfg.focusable ~= false,
   }
 
   if title and title ~= "" then
@@ -51,10 +40,11 @@ end
 ---@param width integer
 ---@param border string
 ---@param input_height integer
+---@param title? string
 ---@return vim.api.keyset.win_config
-function M.make_input_win_config(discussion_winid, discussion_height, width, border, input_height)
+function M.make_input_win_config(discussion_winid, discussion_height, width, border, input_height, title)
   local pos = vim.api.nvim_win_get_position(discussion_winid)
-  return {
+  local config = {
     relative = "editor",
     row = pos[1] + discussion_height + 2,
     col = pos[2],
@@ -64,6 +54,11 @@ function M.make_input_win_config(discussion_winid, discussion_height, width, bor
     height = input_height,
     focusable = true,
   }
+  if title and title ~= "" then
+    config.title = title
+    config.title_pos = "left"
+  end
+  return config
 end
 
 ---@param instance table
@@ -154,20 +149,29 @@ function M.create_instance(lines, float_cfg, source_winid, source_line, opts)
     set_input_submitting = function() end,
     focus_discussion = function() end,
     focus_input = function() end,
-    close = function()
+    --- @param wiping_bufnr integer|nil Buffer already mid-BufWipeout; Neovim is
+    --- tearing it down itself, so closing/deleting it again here would race
+    --- with that teardown and raise E937 ("buffer is in use").
+    close = function(wiping_bufnr)
       if closed then
         return
       end
       closed = true
       instance._closing = true
-      opts.hide_input(instance, true)
-      if vim.api.nvim_win_is_valid(winid) then
-        vim.api.nvim_win_close(winid, true)
+      opts.hide_input(instance, true, wiping_bufnr)
+      if bufnr ~= wiping_bufnr then
+        if vim.api.nvim_win_is_valid(winid) then
+          vim.api.nvim_win_close(winid, true)
+        end
+        if vim.api.nvim_buf_is_valid(bufnr) then
+          pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+        end
       end
-      if vim.api.nvim_buf_is_valid(bufnr) then
-        pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
-      end
-      if instance.input_bufnr and vim.api.nvim_buf_is_valid(instance.input_bufnr) then
+      if
+        instance.input_bufnr
+        and instance.input_bufnr ~= wiping_bufnr
+        and vim.api.nvim_buf_is_valid(instance.input_bufnr)
+      then
         pcall(vim.api.nvim_buf_delete, instance.input_bufnr, { force = true })
       end
     end,
@@ -221,6 +225,14 @@ function M.write_lines(src_bufnr, instance, lines, opts)
   vim.keymap.set("n", "d", function()
     opts.on_delete(src_bufnr)
   end, { buffer = instance.bufnr, silent = true, nowait = true, desc = "Delete Parley comment" })
+
+  -- The discussion buffer is read-only; redirect the usual insert/edit
+  -- entry points to replying instead of erroring on a nomodifiable buffer.
+  for _, key in ipairs({ "i", "a", "I", "A", "o", "O", "s", "S", "c", "C" }) do
+    vim.keymap.set("n", key, function()
+      opts.on_reply(src_bufnr)
+    end, { buffer = instance.bufnr, silent = true, nowait = true, desc = "which_key_ignore" })
+  end
 end
 
 ---@param instances table<integer, parley.DiscussionWindowInstance>
@@ -247,6 +259,7 @@ function M.ensure_instance(instances, bufnr, lines, float_cfg, source_winid, sou
     )
     if instance.input_winid and vim.api.nvim_win_is_valid(instance.input_winid) then
       local discussion_cfg = vim.api.nvim_win_get_config(instance.winid)
+      local input_cfg = vim.api.nvim_win_get_config(instance.input_winid)
       vim.api.nvim_win_set_config(
         instance.input_winid,
         M.make_input_win_config(
@@ -254,7 +267,8 @@ function M.ensure_instance(instances, bufnr, lines, float_cfg, source_winid, sou
           discussion_cfg.height or #lines,
           discussion_cfg.width or 20,
           discussion_cfg.border,
-          opts.input_height
+          opts.input_height,
+          input_cfg.title
         )
       )
     end

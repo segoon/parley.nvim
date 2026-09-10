@@ -117,6 +117,7 @@ local function format_timestamp(timestamp)
     utc_offset = M._utc_offset,
   })
 end
+M.format_timestamp = format_timestamp
 
 ---@param bufnr integer
 ---@return table|nil
@@ -191,6 +192,7 @@ local function discussions_for_line(state, cursor_line)
   end
   return hits
 end
+M.discussions_for_line = discussions_for_line
 
 ---@param bufnr integer
 ---@param instance parley.DiscussionWindowInstance
@@ -296,8 +298,12 @@ end
 
 --- Close the discussion window for `bufnr`.
 ---@param bufnr integer
+---@param opts? { wiping_bufnr?: integer } wiping_bufnr identifies a buffer
+--- already mid-BufWipeout (Neovim is tearing it down itself), so it must not
+--- be closed/deleted again here.
 ---@return boolean
-function M.close(bufnr)
+function M.close(bufnr, opts)
+  opts = opts or {}
   bufnr = resolve_source_bufnr(bufnr)
 
   local instance = live_instance(bufnr)
@@ -311,7 +317,7 @@ function M.close(bufnr)
   M._instances[bufnr] = nil
   discussion_ui_state.clear(bufnr)
   composer_ui_state.clear(bufnr)
-  instance.close()
+  instance.close(opts.wiping_bufnr)
   return true
 end
 
@@ -533,6 +539,7 @@ end
 ---   status: string,
 ---   on_submit: fun(composer: parley.ComposerHandle, text: string): boolean|nil,
 ---   initial_text?: string,
+---   title?: string,
 --- }
 ---@return parley.ComposerHandle|nil
 function M.show_reply_input(bufnr, opts)
@@ -548,6 +555,7 @@ function M.show_reply_input(bufnr, opts)
     initial_text = opts.initial_text,
     parent_comment_id = opts.parent_comment_id,
     on_submit = opts.on_submit,
+    title = opts.title,
   })
 end
 

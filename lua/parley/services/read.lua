@@ -2,6 +2,7 @@
 
 local async = require("plenary.async")
 local async_operation = require("parley.async_operation")
+local autorefresh = require("parley.services.autorefresh")
 local context_repository = require("parley.repositories.context")
 local provider_repository = require("parley.repositories.provider")
 local review_repository = require("parley.repositories.review")
@@ -40,10 +41,17 @@ local function render_snapshot(bufnr, snapshot)
   end
 
   local config = M._get_config()
+  local cursor_line = nil
+  if config.virtual_text.hover then
+    local ok, winid = pcall(vim.fn.bufwinid, bufnr)
+    if ok and winid and winid ~= -1 then
+      cursor_line = vim.api.nvim_win_get_cursor(winid)[1]
+    end
+  end
   signs.render(bufnr, snapshot.discussions, snapshot.mappings or {}, {
     signs = config.signs,
     virtual_text = config.virtual_text,
-  })
+  }, cursor_line)
 end
 
 local function ensure_subscription(bufnr)
@@ -186,8 +194,23 @@ function M.refresh_async(bufnr, opts, callback)
       end
       local resolved, provider_result = pcall(provider_repository.refresh, bufnr)
       if not resolved or not provider_result then
-        if not resolved and opts.notify_errors ~= false then
-          M._notify("Provider identity or construction failed", vim.log.levels.WARN)
+        if not resolved then
+          local err_message = tostring(provider_result)
+          if
+            not opts._autorefresh_retry
+            and err_message:find("Repository context changed during provider preparation", 1, true)
+          then
+            local retried = autorefresh.once(bufnr, err_message, function()
+              M.refresh_async(bufnr, vim.tbl_extend("force", {}, opts, { _autorefresh_retry = true }))
+            end)
+            if retried then
+              finish(nil)
+              return
+            end
+          end
+          if opts.notify_errors ~= false then
+            M._notify("Provider identity or construction failed", vim.log.levels.WARN)
+          end
         end
         M.clear_buffer_state(bufnr)
         finish(nil)
@@ -231,7 +254,23 @@ function M.refresh_async(bufnr, opts, callback)
                 error = "Refresh failed",
               }
             or nil,
-          finally_scheduled_fn = function(_ok, _result)
+          finally_scheduled_fn = function(ok, _result)
+            if
+              ok
+              and last_snapshot == nil
+              and review_key
+              and not opts.background
+              and not opts._autorefresh_no_pr_retry
+            then
+              autorefresh.once(bufnr, "no_pr:" .. review_key, function()
+                M.refresh_async(
+                  bufnr,
+                  vim.tbl_extend("force", {}, opts, { _autorefresh_no_pr_retry = true, force = true })
+                )
+              end)
+            elseif last_snapshot and last_snapshot.review then
+              autorefresh.clear(bufnr)
+            end
             finish(last_snapshot)
           end,
         })

@@ -192,7 +192,9 @@ end
 --- @param discussions parley.Discussion[]                  All discussions for this buffer's file
 --- @param mappings    table<string, parley.anchor.Mapping> Keyed by discussion.id
 --- @param opts        { signs: parley.SignsConfig, virtual_text: parley.VirtualTextConfig }
-function M.render(bufnr, discussions, mappings, opts)
+--- @param cursor_line integer|nil  When `opts.virtual_text.hover` is true, only the
+--- discussion(s) whose mapped range contains this line get virt_lines.
+function M.render(bufnr, discussions, mappings, opts, cursor_line)
   ui.assert_main_loop("signs.render")
   M.clear(bufnr)
 
@@ -222,7 +224,9 @@ function M.render(bufnr, discussions, mappings, opts)
       -- then a bottom rule that doubles as the "(N more comments)" indicator.
       -- Each interior row is wrapped in side bars so the whole block reads as
       -- a left/right/bottom-bordered box (no top rule — meta is the first row).
-      if opts.virtual_text.enabled then
+      local end_row = mapping.local_end_line or mapping.local_line
+      local in_hover_range = cursor_line and cursor_line >= mapping.local_line and cursor_line <= end_row
+      if opts.virtual_text.enabled and (not opts.virtual_text.hover or in_hover_range) then
         local first = model.first_comment(disc)
         if first then
           local width = opts.virtual_text.max_width

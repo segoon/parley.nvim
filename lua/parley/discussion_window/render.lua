@@ -28,7 +28,7 @@ local function reaction_summary(reactions, presentation)
     local count = reaction.count > 1 and string.format(" x%d", reaction.count) or ""
     parts[#parts + 1] = string.format("%s%s%s", emoji, count, suffix)
   end
-  return "Reactions: " .. table.concat(parts, ", ")
+  return "  " .. table.concat(parts, ", ")
 end
 
 ---@param discussion parley.Discussion

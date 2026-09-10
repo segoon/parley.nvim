@@ -434,8 +434,17 @@ describe("parley.services.write", function()
     })
     local refresh_calls = {}
     local invalidate_calls = {}
+    local refresh_snapshot_calls = 0
     package.loaded["parley.discussion_window"] = {
       open_current_line = function() end,
+      -- react_comment preserves the discussion selection, so run_action calls
+      -- refresh_snapshot directly (not pcall-wrapped); the stub must provide
+      -- it or a still-pending vim.schedule callback errors later, in an
+      -- unrelated spec file, once this test's teardown restores the real
+      -- module.
+      refresh_snapshot = function()
+        refresh_snapshot_calls = refresh_snapshot_calls + 1
+      end,
     }
     provider.reaction_choices = function()
       return { { reaction = "+1", label = "Like" } }
@@ -450,8 +459,13 @@ describe("parley.services.write", function()
 
     write_service.react_comment(1, 10, comment, "+1")
 
+    -- Wait for refresh_snapshot too, not just refresh_calls: refresh_calls
+    -- is populated synchronously inside the async.run coroutine, one
+    -- vim.schedule tick before refresh_snapshot runs. Stopping at
+    -- refresh_calls alone lets the test return while that later tick is
+    -- still pending.
     assert.is_true(vim.wait(500, function()
-      return #provider.calls.react == 1 and #refresh_calls == 1
+      return #provider.calls.react == 1 and #refresh_calls == 1 and refresh_snapshot_calls == 1
     end))
     assert.equals("c1", provider.calls.react[1].comment_id)
     assert.equals("+1", provider.calls.react[1].reaction)
