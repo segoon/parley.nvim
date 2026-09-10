@@ -210,6 +210,14 @@ function M.write_lines(src_bufnr, instance, lines, opts)
   vim.keymap.set("n", "d", function()
     opts.on_delete(src_bufnr)
   end, { buffer = instance.bufnr, silent = true, nowait = true, desc = "Delete Parley comment" })
+
+  -- The discussion buffer is read-only; redirect the usual insert/edit
+  -- entry points to replying instead of erroring on a nomodifiable buffer.
+  for _, key in ipairs({ "i", "a", "I", "A", "o", "O", "s", "S", "c", "C" }) do
+    vim.keymap.set("n", key, function()
+      opts.on_reply(src_bufnr)
+    end, { buffer = instance.bufnr, silent = true, nowait = true, desc = "Reply in Parley discussion" })
+  end
 end
 
 ---@param instances table<integer, parley.DiscussionWindowInstance>
