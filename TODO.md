@@ -1,3 +1,5 @@
+# TODO
+
 features:
 - :Telescope discussions|issues|comments? vcs_issues? - preview
 - multiple discussions of the same line
