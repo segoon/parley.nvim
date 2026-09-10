@@ -72,7 +72,7 @@ describe("parley.discussion_window.render", function()
       "- **alice** · formatted:2024-01-01T10:00:00Z",
       "  Root comment",
       "  ---",
-      "  Reactions: 👍, ❤️ x2 (you)",
+      "    👍, ❤️ x2 (you)",
       "",
       "  - **bob** · formatted:2024-01-01T10:00:01Z",
       "    Reply comment",

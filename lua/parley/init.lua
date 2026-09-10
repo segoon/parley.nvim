@@ -31,9 +31,11 @@ local M = {}
 --- @field max_width integer  Maximum characters shown in virtual text snippet
 
 --- @class parley.FloatConfig
---- @field border    string   Border style (see `:h nvim_open_win`)
---- @field max_width integer
---- @field max_height integer
+--- @field border       string   Border style (see `:h nvim_open_win`)
+--- @field max_width    integer  Absolute width ceiling, in columns
+--- @field max_height   integer  Absolute height ceiling, in rows
+--- @field width_ratio  number   Fraction of the source window's width to use
+--- @field height_ratio number   Fraction of the source window's height to use
 
 --- @class parley.ProgressConfig
 --- @field enabled           boolean
@@ -71,6 +73,8 @@ local defaults = {
     border = "rounded",
     max_width = 80,
     max_height = 30,
+    width_ratio = 0.8,
+    height_ratio = 0.8,
   },
   progress = {
     enabled = true,

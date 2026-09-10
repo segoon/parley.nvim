@@ -1,30 +1,19 @@
 local M = {}
 
----@param lines string[]
----@param max_width integer
----@return integer
-local function window_width(lines, max_width)
-  local width = 20
-  for _, line in ipairs(lines) do
-    width = math.max(width, vim.fn.strdisplaywidth(line))
-  end
-  return math.min(max_width, width)
-end
-
----@param lines string[]
+---@param _lines string[]  unused; window size tracks the source window, not content
 ---@param float_cfg parley.FloatConfig
 ---@param source_winid integer
 ---@param _source_line integer  unused for positioning; retained for API stability
 ---@param title string|nil
 ---@return vim.api.keyset.win_config
-function M.make_win_config(lines, float_cfg, source_winid, _source_line, title)
-  local width = window_width(lines, float_cfg.max_width)
-  local height = math.min(float_cfg.max_height, math.max(1, #lines))
-
+function M.make_win_config(_lines, float_cfg, source_winid, _source_line, title)
   local win_width = vim.api.nvim_win_get_width(source_winid)
   local win_height = vim.api.nvim_win_get_height(source_winid)
-  width = math.min(width, math.max(12, win_width - 4))
-  height = math.min(height, math.max(1, win_height - 2))
+
+  local width = math.min(float_cfg.max_width, math.floor(win_width * (float_cfg.width_ratio or 0.8)))
+  local height = math.min(float_cfg.max_height, math.floor(win_height * (float_cfg.height_ratio or 0.8)))
+  width = math.max(20, math.min(width, math.max(12, win_width - 4)))
+  height = math.max(1, math.min(height, math.max(1, win_height - 2)))
 
   local config = {
     relative = "win",

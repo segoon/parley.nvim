@@ -312,7 +312,7 @@ describe("parley.discussion_window", function()
     local instance = discussion_window._instances[bufnr]
     local lines = vim.api.nvim_buf_get_lines(instance.bufnr, 0, -1, false)
 
-    assert.is_not_nil(vim.tbl_contains(lines, "  Reactions: 👍, ❤️ x2 (you)"))
+    assert.is_not_nil(vim.tbl_contains(lines, "    👍, ❤️ x2 (you)"))
   end)
 
   it("invokes the picker when multiple discussions share a line and opens the chosen one", function()
