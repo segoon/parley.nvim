@@ -4,6 +4,7 @@ local async = require("plenary.async")
 local model = require("parley.model")
 local vcs = require("parley.vcs")
 local composer_ui_state = require("parley.ui_states.composer")
+local autorefresh = require("parley.services.autorefresh")
 local context_repository = require("parley.repositories.context")
 local provider_repository = require("parley.repositories.provider")
 local review_repository = require("parley.repositories.review")
@@ -95,6 +96,18 @@ local function notify_context_error(message)
   M._notify(message or "Parley write context is not ready for this buffer", vim.log.levels.WARN)
 end
 
+--- @param bufnr integer
+--- @param expected table
+local function autorefresh_stale_review(bufnr, expected)
+  autorefresh.once(
+    bufnr,
+    "write_context:" .. tostring(expected.review.pr.id) .. "|" .. tostring(expected.review.head_sha),
+    function()
+      review_repository.refresh_async(bufnr, { force = true, notify_errors = false })
+    end
+  )
+end
+
 local operations = require("parley.services.write_operation")(M)
 
 --- @type fun(bufnr: integer): table|nil
@@ -172,6 +185,7 @@ local function validate_submission(bufnr, expected, anch)
     or snapshot.review.pr.id ~= expected.review.pr.id
     or snapshot.review.pr.base_branch ~= expected.review.pr.base_branch
   then
+    autorefresh_stale_review(bufnr, expected)
     return "Cannot comment: review changed. Refresh and reopen the draft."
   end
   if vim.bo[bufnr].modified then
@@ -203,6 +217,7 @@ local function validate_submission(bufnr, expected, anch)
     or snapshot.review.pr.base_branch ~= expected.review.pr.base_branch
     or current.rel_path ~= expected.rel_path
   then
+    autorefresh_stale_review(bufnr, expected)
     return "Cannot comment: review context changed during validation. Reopen the draft."
   end
 end

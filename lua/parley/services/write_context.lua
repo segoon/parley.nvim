@@ -3,6 +3,7 @@ local contexts = require("parley.repositories.context")
 local providers = require("parley.repositories.provider")
 local reviews = require("parley.repositories.review")
 local capabilities = require("parley.capabilities")
+local autorefresh = require("parley.services.autorefresh")
 local M = {}
 --- @param bufnr integer
 --- @return table|nil, string|nil
@@ -44,6 +45,13 @@ function M.reason(bufnr, action, expected)
       or current.review.head_sha ~= expected.review.head_sha
     )
   then
+    autorefresh.once(
+      bufnr,
+      "write_context:" .. tostring(expected.review.pr.id) .. "|" .. tostring(expected.review.head_sha),
+      function()
+        reviews.refresh_async(bufnr, { force = true, notify_errors = false })
+      end
+    )
     return "Parley review changed; reopen the action for the current review"
   end
   return capabilities.reason(current.provider, current.review, action)

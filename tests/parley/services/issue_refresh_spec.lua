@@ -162,7 +162,10 @@ describe("issue refresh with an active general-discussion draft", function()
       return { account = "new" }
     end
     assert.is_false(write.review_action(buf, "ship", expected))
-    assert.equals(0, refreshes)
+    -- Each rejection is a distinct stale condition (head_sha mismatch, then
+    -- identity mismatch), so autorefresh fires once per condition -- never a
+    -- retry loop for the same one.
+    assert.equals(2, refreshes)
   end)
   it("revalidates comment existence and captured account before setting reactions", function()
     local reactions = require("parley.reactions")

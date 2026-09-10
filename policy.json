@@ -237,6 +237,7 @@
         "lua/parley/repositories/review.lua",
         "lua/parley/repositories/review_cache.lua",
         "lua/parley/repositories/review_keys.lua",
+        "lua/parley/services/autorefresh.lua",
         "lua/parley/services/read.lua",
         "lua/parley/services/write.lua",
         "lua/parley/services/write_operation.lua",

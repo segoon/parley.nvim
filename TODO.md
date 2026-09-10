@@ -1,8 +1,10 @@
 # Remaining work
 
-- bug: :wq in "new discussion" doesn't work
-- "new discussion" floating window is too small
-- autorefresh on "no PR is open" error
+- feature: hover = true => show discussion floating window for the line (the 1st one)
+- bug: :q in discussion window:
+    Error in BufWipeout Autocommands for "*":
+    E937: Attempt to delete a buffer that is in use: [No Name]
+- used size: ✅ OK cache_dir exists and is writable: /home/segoon/.cache/nvim/parley
 
 ## Review workflows
 

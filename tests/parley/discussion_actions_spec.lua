@@ -2,11 +2,19 @@ local actions = require("parley.discussion_actions")
 local contexts = require("parley.services.write_context")
 local write = require("parley.services.write")
 local ui = require("parley.ui_states.discussion")
+local reviews = require("parley.repositories.review")
 
 describe("issue command selection", function()
   local saved, ctx, selected, choose, sent
   before_each(function()
-    saved = { package.loaded["parley.discussion_window"], contexts.get, write.set_issue_state, write._notify }
+    saved = {
+      package.loaded["parley.discussion_window"],
+      contexts.get,
+      write.set_issue_state,
+      write._notify,
+      reviews.refresh_async,
+    }
+    reviews.refresh_async = function() end
     ctx = {
       provider = {
         capabilities = function()
@@ -39,8 +47,8 @@ describe("issue command selection", function()
   end)
   after_each(function()
     ui.clear(7)
-    package.loaded["parley.discussion_window"], contexts.get, write.set_issue_state, write._notify =
-      saved[1], saved[2], saved[3], saved[4]
+    package.loaded["parley.discussion_window"] = saved[1]
+    contexts.get, write.set_issue_state, write._notify, reviews.refresh_async = saved[2], saved[3], saved[4], saved[5]
   end)
   it("acts on the selected thread from a float", function()
     selected = { id = "root" }
