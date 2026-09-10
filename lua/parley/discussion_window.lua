@@ -533,6 +533,7 @@ end
 ---   status: string,
 ---   on_submit: fun(composer: parley.ComposerHandle, text: string): boolean|nil,
 ---   initial_text?: string,
+---   title?: string,
 --- }
 ---@return parley.ComposerHandle|nil
 function M.show_reply_input(bufnr, opts)
@@ -548,6 +549,7 @@ function M.show_reply_input(bufnr, opts)
     initial_text = opts.initial_text,
     parent_comment_id = opts.parent_comment_id,
     on_submit = opts.on_submit,
+    title = opts.title,
   })
 end
 

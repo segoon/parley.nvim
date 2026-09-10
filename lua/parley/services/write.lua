@@ -388,6 +388,7 @@ function M.open_reply_input(bufnr, discussion, parent_comment)
 
   require("parley.discussion_window").show_reply_input(bufnr, {
     parent_comment_id = parent_comment.id,
+    title = "New reply:",
     status = "Drafting reply. Press <C-s> to send, or <Esc>s in normal mode. q closes.",
     on_submit = function(instance, text)
       if not allowed(bufnr, "reply", write_context, instance) then

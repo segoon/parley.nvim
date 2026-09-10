@@ -94,6 +94,14 @@ function M.new(deps)
     vim.keymap.set("i", "<C-s>", function()
       instance.submit_input()
     end, { buffer = instance.input_bufnr, silent = true, nowait = true, desc = "Submit Parley draft" })
+    vim.api.nvim_create_autocmd("BufWriteCmd", {
+      buffer = instance.input_bufnr,
+      callback = function()
+        vim.bo[instance.input_bufnr].modified = false
+        instance.submit_input()
+      end,
+      desc = "Parley: submit draft on :w/:wq",
+    })
     vim.api.nvim_create_autocmd("WinClosed", {
       buffer = instance.input_bufnr,
       callback = function()
@@ -114,7 +122,10 @@ function M.new(deps)
 
     if not instance.input_bufnr or not vim.api.nvim_buf_is_valid(instance.input_bufnr) then
       instance.input_bufnr = vim.api.nvim_create_buf(false, true)
-      vim.bo[instance.input_bufnr].buftype = "nofile"
+      -- "acwrite" (+ a synthetic name) is required for :w/:wq to route
+      -- through BufWriteCmd instead of erroring on a bufferless write.
+      vim.bo[instance.input_bufnr].buftype = "acwrite"
+      vim.api.nvim_buf_set_name(instance.input_bufnr, "parley-draft://" .. instance.input_bufnr)
       vim.bo[instance.input_bufnr].bufhidden = "hide"
       vim.bo[instance.input_bufnr].swapfile = false
       vim.bo[instance.input_bufnr].filetype = "markdown"
@@ -126,7 +137,8 @@ function M.new(deps)
       discussion_height,
       width,
       discussion_cfg.border or "rounded",
-      deps.input_height
+      deps.input_height,
+      opts.title
     )
     if instance.input_winid and vim.api.nvim_win_is_valid(instance.input_winid) then
       vim.api.nvim_win_set_config(instance.input_winid, input_cfg)

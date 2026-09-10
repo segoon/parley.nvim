@@ -40,10 +40,11 @@ end
 ---@param width integer
 ---@param border string
 ---@param input_height integer
+---@param title? string
 ---@return vim.api.keyset.win_config
-function M.make_input_win_config(discussion_winid, discussion_height, width, border, input_height)
+function M.make_input_win_config(discussion_winid, discussion_height, width, border, input_height, title)
   local pos = vim.api.nvim_win_get_position(discussion_winid)
-  return {
+  local config = {
     relative = "editor",
     row = pos[1] + discussion_height + 2,
     col = pos[2],
@@ -53,6 +54,11 @@ function M.make_input_win_config(discussion_winid, discussion_height, width, bor
     height = input_height,
     focusable = true,
   }
+  if title and title ~= "" then
+    config.title = title
+    config.title_pos = "left"
+  end
+  return config
 end
 
 ---@param instance table
@@ -216,7 +222,7 @@ function M.write_lines(src_bufnr, instance, lines, opts)
   for _, key in ipairs({ "i", "a", "I", "A", "o", "O", "s", "S", "c", "C" }) do
     vim.keymap.set("n", key, function()
       opts.on_reply(src_bufnr)
-    end, { buffer = instance.bufnr, silent = true, nowait = true, desc = "Reply in Parley discussion" })
+    end, { buffer = instance.bufnr, silent = true, nowait = true, desc = "which_key_ignore" })
   end
 end
 
@@ -244,6 +250,7 @@ function M.ensure_instance(instances, bufnr, lines, float_cfg, source_winid, sou
     )
     if instance.input_winid and vim.api.nvim_win_is_valid(instance.input_winid) then
       local discussion_cfg = vim.api.nvim_win_get_config(instance.winid)
+      local input_cfg = vim.api.nvim_win_get_config(instance.input_winid)
       vim.api.nvim_win_set_config(
         instance.input_winid,
         M.make_input_win_config(
@@ -251,7 +258,8 @@ function M.ensure_instance(instances, bufnr, lines, float_cfg, source_winid, sou
           discussion_cfg.height or #lines,
           discussion_cfg.width or 20,
           discussion_cfg.border,
-          opts.input_height
+          opts.input_height,
+          input_cfg.title
         )
       )
     end
