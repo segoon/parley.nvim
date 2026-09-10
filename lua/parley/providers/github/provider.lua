@@ -13,8 +13,9 @@
 ---   • resolve / unresolve are stubs that raise an error.
 ---
 --- Testability:
----   • _runner: fun(cmd: string[]): {code,stdout,stderr}  — replace in tests.
----   • _auth:   auth module table with read_token(host)    — replace in tests.
+---   • _runner:      fun(cmd: string[]): {code,stdout,stderr}  — replace in tests.
+---   • _sync_runner: coroutine-free variant used by cache_identity()          — replace in tests.
+---   • _auth:        auth module table with read_token(host)                 — replace in tests.
 ---   • _parse_remote_url is a pure function exported for unit testing.
 
 local await = require("parley.runtime.await")
@@ -129,6 +130,15 @@ function M.new(opts)
     return { code = result.code, stdout = result.stdout or "", stderr = result.stderr or "" }
   end
 
+  -- Blocking variant for cache_identity(): that function must produce a
+  -- consistent result whether called from inside a plenary.async coroutine
+  -- (composer submit) or outside one (initial context capture), and
+  -- await.system() silently no-ops outside a coroutine.
+  local default_sync_runner = function(cmd)
+    local result = system(cmd, { text = true, timeout = transport.transport_config(self).timeout_ms }):wait()
+    return { code = result.code, stdout = result.stdout or "", stderr = result.stderr or "" }
+  end
+
   local default_spawn = function(cmd, callback)
     local ui = require("parley.runtime.ui")
     return system(
@@ -146,6 +156,7 @@ function M.new(opts)
     _repo = repo,
     _api_base = opts.api_base or api_base_for_host(host),
     _runner = opts._runner or default_runner,
+    _sync_runner = opts._sync_runner or default_sync_runner,
     _spawn = opts._spawn or default_spawn,
     _sleep = opts._sleep or await.sleep,
     _defer = opts._defer or vim.defer_fn,
