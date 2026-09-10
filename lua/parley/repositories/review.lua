@@ -273,6 +273,39 @@ function M.has_review(review_key)
   return M._reviews[review_key] ~= nil
 end
 
+--- The review_key a buffer is currently attached to, if any (in-memory only).
+--- @param bufnr integer
+--- @return string|nil
+function M.key_for_bufnr(bufnr)
+  return M._bufnr_key[bufnr]
+end
+
+--- Attach `bufnr` to an already-loaded review `review_key` and publish its
+--- per-file view immediately, without any network I/O or VCS detection.
+---
+--- Used by parley.diffview_integration to alias a diffview diff buffer (whose
+--- synthetic name never passes buffer_context.classify as "regular") onto a
+--- review already active for a real buffer in the same repository, so the
+--- existing render/write pipelines work unmodified for diffview buffers.
+--- The caller must have already published a matching context_repository /
+--- provider_repository snapshot for `bufnr`.
+--- @param bufnr integer
+--- @param review_key string
+--- @return table|nil composite snapshot, or nil if the view couldn't be computed
+function M.attach(bufnr, review_key)
+  local shared = M._reviews[review_key]
+  if not shared then
+    return nil
+  end
+  register_bufnr(bufnr, review_key)
+  local view = compute_view(bufnr, shared)
+  if not view then
+    return nil
+  end
+  M._views[bufnr] = view
+  return clone(composite(shared, view))
+end
+
 --- Check whether the on-disk cache has PR data for this branch.
 --- Must be called from within a plenary.async coroutine.
 --- @param provider_snapshot table

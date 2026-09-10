@@ -54,6 +54,13 @@ local function render_snapshot(bufnr, snapshot)
   }, cursor_line)
 end
 
+--- Render a snapshot for `bufnr` (signs, virtual text, discussion window).
+--- Exposed for parley.diffview_integration, which builds review snapshots
+--- for diffview diff buffers outside the normal BufEnter refresh cycle.
+--- @param bufnr integer
+--- @param snapshot table|nil
+M.render_snapshot = render_snapshot
+
 local function ensure_subscription(bufnr)
   if M._subscriptions[bufnr] then
     return

@@ -326,6 +326,11 @@ The full default configuration:
         buf_prev = "[c",
         review_next = "]C",
         review_prev = "[C",
+        diffview_new_comment = "<leader>pc",
+      },
+      diffview = {
+        enabled = true,
+        file_panel_badges = true,
       },
       providers = {},
     })
@@ -445,6 +450,18 @@ keymaps ~                                             *parley-config-keymaps*
 
     review_prev  (`string`)  Default: `"[C"`
         Jump to previous comment in the whole review
+
+    diffview_new_comment  (`string`)  Default: `"<leader>pc"`
+        New top-level comment from a diffview diff buffer
+
+
+diffview ~                                           *parley-config-diffview*
+
+    enabled  (`boolean`)  Default: `true`
+        No-ops when diffview-plus.nvim isn't installed
+
+    file_panel_badges  (`boolean`)  Default: `true`
+        Show comment-count badges in diffview's file panel
 
 <parley-configuration-end>
 
