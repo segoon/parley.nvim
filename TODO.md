@@ -6,7 +6,6 @@
 
 - Diffview integration: revision/side mapping, rendering, navigation, and composition
   (context detection alone is implemented)
-- GitHub thread resolution/reopening and resolved state through GraphQL
 - Optional Arcanum drafts/publication, suggestions, and old-side/whole-file creation
 - Validate live Arcanum deployment behavior, OAuth permissions, representative
   responses, rate-limit headers, and idempotency support

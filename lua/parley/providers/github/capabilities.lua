@@ -9,8 +9,8 @@ M.actions = {
   review_action = { available = false, reason = "Explicit review actions are unavailable for GitHub" },
   react = { available = true },
   submit_review = { available = true },
-  resolve = { available = false, reason = "GitHub resolution requires GraphQL; not implemented in Parley" },
-  unresolve = { available = false, reason = "GitHub reopening requires GraphQL; not implemented in Parley" },
+  resolve = { available = true },
+  unresolve = { available = true },
 }
 --- @param _self parley.Provider
 --- @param _review parley.DetectedReview

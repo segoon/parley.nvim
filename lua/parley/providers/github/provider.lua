@@ -8,9 +8,10 @@
 ---   • Transport: `gh api` subprocess via vim.system + plenary.async.
 ---   • Discussion IDs = root review-comment database ID (string).
 ---     This lets reply() pass it directly as `in_reply_to`.
----   • resolved = false always — GraphQL required for resolved state.
----     See POSTPONED.md.
----   • resolve / unresolve are stubs that raise an error.
+---   • Thread resolution state and node ids come from a separate GraphQL
+---     query (`gh api graphql`) correlated to REST-derived discussions by
+---     root comment database id. resolve/unresolve call the corresponding
+---     GraphQL mutation against the cached thread node id.
 ---
 --- Testability:
 ---   • _runner:      fun(cmd: string[]): {code,stdout,stderr}  — replace in tests.
@@ -50,6 +51,7 @@ local M = {}
 --- @field _auth         table
 --- @field _viewer_login string|nil
 --- @field _cache_provider string
+--- @field _thread_node_ids table<string, string>  discussion id → GraphQL review-thread node id
 
 -- ---------------------------------------------------------------------------
 -- Internal helpers
@@ -70,6 +72,35 @@ end
 --- @return string  e.g. "/repos/owner/repo"
 local function repo_path(self)
   return "/repos/" .. self._owner .. "/" .. self._repo
+end
+
+--- Fetch review-thread resolution state + node ids for a PR via GraphQL,
+--- paginating through reviewThreads until exhausted.
+---
+--- @param self parley.github.Provider
+--- @param review parley.DetectedReview
+--- @return table<string, { node_id: string, resolved: boolean }>
+local function fetch_review_threads(self, review)
+  local pr_number = review.write_context and review.write_context.number or tonumber(review.pr.id)
+  local lookup = {}
+  local cursor = nil
+  repeat
+    local data = transport.gh_graphql(self, mapping.REVIEW_THREADS_QUERY, {
+      owner = self._owner,
+      repo = self._repo,
+      number = pr_number,
+      cursor = cursor,
+    })
+    local conn = data and data.repository and data.repository.pullRequest and data.repository.pullRequest.reviewThreads
+    if not conn then
+      break
+    end
+    for id, entry in pairs(mapping.map_review_thread_nodes(conn.nodes or {})) do
+      lookup[id] = entry
+    end
+    cursor = (conn.pageInfo and conn.pageInfo.hasNextPage) and conn.pageInfo.endCursor or nil
+  until not cursor
+  return lookup
 end
 
 -- ---------------------------------------------------------------------------
@@ -165,6 +196,7 @@ function M.new(opts)
     _auth = opts._auth or require("parley.providers.github.auth"),
     _viewer_login = nil,
     _cache_provider = "github",
+    _thread_node_ids = {},
   }, GitHubProvider)
 
   return self
@@ -233,8 +265,11 @@ function GitHubProvider:detect_pr(_repo_root, branch)
 end
 
 --- Fetch all discussions for a PR using the REST review-comments endpoint.
---- Discussions are grouped by root comment id.
---- resolved is always false (GraphQL required — see POSTPONED.md).
+--- Discussions are grouped by root comment id. Resolution state and thread
+--- node ids are then fetched via GraphQL and overlaid by root comment id;
+--- a GraphQL failure degrades to resolved=false rather than failing the
+--- whole fetch (resolve/unresolve will error until the next successful
+--- refresh repopulates the thread node id cache).
 ---
 --- @param self parley.github.Provider
 --- @param review parley.DetectedReview
@@ -254,6 +289,20 @@ function GitHubProvider:fetch_discussions(review)
   )
 
   local discussions = mapping.group_comments_into_discussions(comments, viewer)
+
+  local ok, lookup = pcall(fetch_review_threads, self, review)
+  if ok then
+    for _, d in ipairs(discussions) do
+      local entry = lookup[d.id]
+      if entry then
+        d.resolved = entry.resolved
+        self._thread_node_ids[d.id] = entry.node_id
+      end
+    end
+  else
+    dbg.trace("github.provider", "fetch_discussions: review-thread fetch failed: " .. tostring(lookup))
+  end
+
   local own_count = 0
   for _, d in ipairs(discussions) do
     for _, c in ipairs(d.comments) do
@@ -394,26 +443,71 @@ function GitHubProvider:begin_reply(review, discussion, parent_comment, body, ca
   end)
 end
 
---- Resolve a discussion thread.
---- NOT IMPLEMENTED — requires GraphQL. See POSTPONED.md.
----
---- @param self          parley.github.Provider
---- @param _review       parley.DetectedReview
---- @param _discussion_id string
-function GitHubProvider:resolve(_review, _discussion_id)
-  local _ = self
-  error("parley.github: resolve requires GraphQL (see POSTPONED.md)", 0)
+--- Look up the cached GraphQL review-thread node id for a discussion,
+--- raising a clear error if it hasn't been populated by a prior
+--- fetch_discussions() call.
+--- @param self parley.github.Provider
+--- @param discussion_id string
+--- @return string
+local function thread_node_id(self, discussion_id)
+  local thread_id = self._thread_node_ids[discussion_id]
+  if not thread_id then
+    error(
+      "parley.github: unknown review-thread id for discussion "
+        .. tostring(discussion_id)
+        .. "; refresh the review and retry",
+      0
+    )
+  end
+  return thread_id
 end
 
---- Unresolve a discussion thread.
---- NOT IMPLEMENTED — requires GraphQL. See POSTPONED.md.
+--- Resolve a discussion thread via the GraphQL resolveReviewThread mutation.
 ---
 --- @param self          parley.github.Provider
 --- @param _review       parley.DetectedReview
---- @param _discussion_id string
-function GitHubProvider:unresolve(_review, _discussion_id)
-  local _ = self
-  error("parley.github: unresolve requires GraphQL (see POSTPONED.md)", 0)
+--- @param discussion_id string
+function GitHubProvider:resolve(_review, discussion_id)
+  transport.gh_graphql(self, mapping.RESOLVE_THREAD_MUTATION, { id = thread_node_id(self, discussion_id) })
+end
+
+--- Start a cancellable resolve request.
+--- @param self parley.github.Provider
+--- @param _review parley.DetectedReview
+--- @param discussion_id string
+--- @param callback parley.WriteCallback
+--- @return parley.CancelHandle
+function GitHubProvider:begin_resolve(_review, discussion_id, callback)
+  local ok, thread_id = pcall(thread_node_id, self, discussion_id)
+  if not ok then
+    callback({ ok = false, err = tostring(thread_id) })
+    return { cancel = function() end }
+  end
+  return transport.gh_graphql_start(self, mapping.RESOLVE_THREAD_MUTATION, { id = thread_id }, callback)
+end
+
+--- Unresolve a discussion thread via the GraphQL unresolveReviewThread mutation.
+---
+--- @param self          parley.github.Provider
+--- @param _review       parley.DetectedReview
+--- @param discussion_id string
+function GitHubProvider:unresolve(_review, discussion_id)
+  transport.gh_graphql(self, mapping.UNRESOLVE_THREAD_MUTATION, { id = thread_node_id(self, discussion_id) })
+end
+
+--- Start a cancellable unresolve request.
+--- @param self parley.github.Provider
+--- @param _review parley.DetectedReview
+--- @param discussion_id string
+--- @param callback parley.WriteCallback
+--- @return parley.CancelHandle
+function GitHubProvider:begin_unresolve(_review, discussion_id, callback)
+  local ok, thread_id = pcall(thread_node_id, self, discussion_id)
+  if not ok then
+    callback({ ok = false, err = tostring(thread_id) })
+    return { cancel = function() end }
+  end
+  return transport.gh_graphql_start(self, mapping.UNRESOLVE_THREAD_MUTATION, { id = thread_id }, callback)
 end
 
 --- Toggle a reaction on a comment (add if absent, remove if present).

@@ -360,3 +360,116 @@ describe("parley.providers.github.transport — fetch_viewer_login availability 
     assert.equals(0, #notify_calls)
   end)
 end)
+
+-- ---------------------------------------------------------------------------
+-- Suite: build_graphql_cmd
+-- ---------------------------------------------------------------------------
+
+describe("parley.providers.github.transport — build_graphql_cmd", function()
+  it("builds a gh api graphql command with the query as -f query=", function()
+    local cmd = transport.build_graphql_cmd("query { viewer { login } }", {})
+    assert.same({ "gh", "api", "graphql", "-f", "query=query { viewer { login } }" }, cmd)
+  end)
+
+  it("passes string variables via -f and numeric/boolean variables via -F", function()
+    local cmd = transport.build_graphql_cmd("query($a: String!, $b: Int!, $c: Boolean!) { x }", {
+      a = "owner",
+      b = 42,
+      c = true,
+    })
+    --- @param flag string
+    --- @param value string
+    --- @return boolean
+    local function has_pair(flag, value)
+      for i = 5, #cmd - 1 do
+        if cmd[i] == flag and cmd[i + 1] == value then
+          return true
+        end
+      end
+      return false
+    end
+    assert.is_true(has_pair("-f", "a=owner"))
+    assert.is_true(has_pair("-F", "b=42"))
+    assert.is_true(has_pair("-F", "c=true"))
+  end)
+
+  it("omits variables whose value is nil", function()
+    local cmd = transport.build_graphql_cmd("query($cursor: String) { x }", { cursor = nil })
+    assert.same({ "gh", "api", "graphql", "-f", "query=query($cursor: String) { x }" }, cmd)
+  end)
+end)
+
+-- ---------------------------------------------------------------------------
+-- Suite: gh_graphql / gh_graphql_start — error surfacing
+-- ---------------------------------------------------------------------------
+
+describe("parley.providers.github.transport — gh_graphql", function()
+  before_each(save_seams)
+  after_each(restore_seams)
+
+  it("returns the decoded data field on success", function()
+    transport._gh_available = true
+    local provider = make_provider({
+      _runner = function(_cmd)
+        return { code = 0, stdout = vim.json.encode({ data = { viewer = { login = "alice" } } }), stderr = "" }
+      end,
+    })
+    local data = transport.gh_graphql(provider, "query { viewer { login } }", {})
+    assert.equals("alice", data.viewer.login)
+  end)
+
+  it("raises when the response body contains a top-level errors array", function()
+    transport._gh_available = true
+    local provider = make_provider({
+      _runner = function(_cmd)
+        return { code = 0, stdout = vim.json.encode({ errors = { { message = "not found" } } }), stderr = "" }
+      end,
+    })
+    local ok, err = pcall(transport.gh_graphql, provider, "query { x }", {})
+    assert.is_false(ok)
+    assert.is_not_nil(err:find("not found", 1, true))
+  end)
+end)
+
+describe("parley.providers.github.transport — gh_graphql_start", function()
+  before_each(save_seams)
+  after_each(restore_seams)
+
+  it("calls back with ok=true and the decoded data field on success", function()
+    transport._gh_available = true
+    local provider = make_provider({
+      _spawn = function(_cmd, callback)
+        callback({ code = 0, stdout = vim.json.encode({ data = { viewer = { login = "alice" } } }), stderr = "" })
+        return { kill = function() end }
+      end,
+    })
+    local result = nil
+    transport.gh_graphql_start(provider, "query { viewer { login } }", {}, function(r)
+      result = r
+    end)
+    vim.wait(50, function()
+      return result ~= nil
+    end)
+    assert.is_true(result.ok)
+    assert.equals("alice", result.data.viewer.login)
+  end)
+
+  it("calls back with ok=false when the response contains a top-level errors array", function()
+    transport._gh_available = true
+    local provider = make_provider({
+      _spawn = function(_cmd, callback)
+        callback({ code = 0, stdout = vim.json.encode({ errors = { { message = "nope" } } }), stderr = "" })
+        return { kill = function() end }
+      end,
+    })
+    local result = nil
+    transport.gh_graphql_start(provider, "query { x }", {}, function(r)
+      result = r
+    end)
+    vim.wait(50, function()
+      return result ~= nil
+    end)
+    assert.is_false(result.ok)
+    assert.is_not_nil(result.err:find("nope", 1, true))
+  end)
+end)

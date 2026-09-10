@@ -394,7 +394,9 @@ GitHub-specific options live under `providers.github` in the setup call. Default
 
 Limitations: ~
 
-  - `resolve` / `unresolve` are not supported (require GraphQL).
+  - `resolve` / `unresolve` use the GraphQL API (`gh api graphql`) and require
+    a discussion to have been fetched in the current session first, so its
+    review-thread node id is cached.
   - `submit_review` is supported: "approve", "request_changes", "comment".
 
 ------------------------------------------------------------------------------
@@ -547,8 +549,8 @@ Built-in action support (yes = implemented in Parley): ~
   edit                      yes     yes
   delete                    yes     yes
   react                     yes     yes
-  resolve                   no      yes
-  unresolve                 no      yes
+  resolve                   yes     yes
+  unresolve                 yes     yes
   submit_review             yes     no
   review_action             no      yes
 

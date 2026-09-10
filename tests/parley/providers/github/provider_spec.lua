@@ -198,6 +198,59 @@ local EDIT_COMMENT_RESP_JSON = vim.json.encode({
 --- Reaction creation response.
 local REACTION_CREATED_JSON = vim.json.encode({ id = 9999, user = { login = "alice" }, content = "+1" })
 
+--- GraphQL reviewThreads response: one thread, resolved, rooted at comment 1001.
+local REVIEW_THREADS_RESOLVED_JSON = vim.json.encode({
+  data = {
+    repository = {
+      pullRequest = {
+        reviewThreads = {
+          pageInfo = { hasNextPage = false, endCursor = vim.NIL },
+          nodes = {
+            {
+              id = "RT_1001",
+              isResolved = true,
+              comments = { nodes = { { databaseId = 1001 } } },
+            },
+          },
+        },
+      },
+    },
+  },
+})
+
+--- GraphQL reviewThreads response: one thread, unresolved, rooted at comment 1001.
+local REVIEW_THREADS_UNRESOLVED_JSON = vim.json.encode({
+  data = {
+    repository = {
+      pullRequest = {
+        reviewThreads = {
+          pageInfo = { hasNextPage = false, endCursor = vim.NIL },
+          nodes = {
+            {
+              id = "RT_1001",
+              isResolved = false,
+              comments = { nodes = { { databaseId = 1001 } } },
+            },
+          },
+        },
+      },
+    },
+  },
+})
+
+--- GraphQL mutation response for resolveReviewThread/unresolveReviewThread.
+local RESOLVE_MUTATION_RESP_JSON = vim.json.encode({
+  data = { resolveReviewThread = { thread = { id = "RT_1001", isResolved = true } } },
+})
+local UNRESOLVE_MUTATION_RESP_JSON = vim.json.encode({
+  data = { unresolveReviewThread = { thread = { id = "RT_1001", isResolved = false } } },
+})
+
+--- GraphQL error response (HTTP 200, top-level `errors` array).
+local GRAPHQL_ERROR_JSON = vim.json.encode({
+  errors = { { message = "Could not resolve to a node with the global id of 'bogus'" } },
+})
+
 -- ---------------------------------------------------------------------------
 -- Fake runner helpers
 -- ---------------------------------------------------------------------------
@@ -586,7 +639,38 @@ async_tests.describe("parley.providers.github.provider — fetch_discussions", f
     assert.equals("1001", disc.id)
     assert.equals("src/foo.lua", disc.file)
     assert.equals(10, disc.line)
-    assert.is_false(disc.resolved) -- always false (GraphQL postponed)
+    assert.is_false(disc.resolved) -- no graphql route configured → degrades to false
+  end)
+
+  async_tests.it("overlays resolved=true from the GraphQL reviewThreads query", function()
+    local runner = make_route_runner({
+      { pattern = "/comments", response = ok(COMMENTS_JSON) },
+      { pattern = "graphql", response = ok(REVIEW_THREADS_RESOLVED_JSON) },
+    })
+    local p = make_provider(runner.fn)
+    local disc = p:fetch_discussions(make_review())[1]
+    assert.is_true(disc.resolved)
+  end)
+
+  async_tests.it("overlays resolved=false from the GraphQL reviewThreads query", function()
+    local runner = make_route_runner({
+      { pattern = "/comments", response = ok(COMMENTS_JSON) },
+      { pattern = "graphql", response = ok(REVIEW_THREADS_UNRESOLVED_JSON) },
+    })
+    local p = make_provider(runner.fn)
+    local disc = p:fetch_discussions(make_review())[1]
+    assert.is_false(disc.resolved)
+  end)
+
+  async_tests.it("degrades to resolved=false when the GraphQL request fails", function()
+    local runner = make_route_runner({
+      { pattern = "/comments", response = ok(COMMENTS_JSON) },
+      { pattern = "graphql", response = fail("boom") },
+    })
+    local p = make_provider(runner.fn)
+    local discussions = p:fetch_discussions(make_review())
+    assert.equals(1, #discussions)
+    assert.is_false(discussions[1].resolved)
   end)
 
   async_tests.it("attaches two comments (root + reply) to the discussion", function()
@@ -873,21 +957,59 @@ async_tests.describe("parley.providers.github.provider — reply", function()
 end)
 
 -- ---------------------------------------------------------------------------
--- Suite: resolve / unresolve (stubbed — GraphQL postponed)
+-- Suite: resolve / unresolve
 -- ---------------------------------------------------------------------------
 
-describe("parley.providers.github.provider — resolve/unresolve stubs", function()
-  it("resolve raises an error mentioning GraphQL / POSTPONED", function()
+async_tests.describe("parley.providers.github.provider — resolve/unresolve", function()
+  --- Populate _thread_node_ids via a fetch_discussions() call before mutating.
+  --- @return table  provider
+  local function make_provider_with_thread()
+    local runner = make_route_runner({
+      { pattern = "/comments", response = ok(COMMENTS_JSON) },
+      { pattern = "graphql", response = ok(REVIEW_THREADS_RESOLVED_JSON) },
+    })
+    local p = make_provider(runner.fn)
+    p:fetch_discussions(make_review())
+    return p
+  end
+
+  async_tests.it("resolve sends the resolveReviewThread mutation with the cached thread node id", function()
+    local p = make_provider_with_thread()
+    p._runner = make_route_runner({
+      { pattern = "graphql", response = ok(RESOLVE_MUTATION_RESP_JSON) },
+    }).fn
+    p:resolve(make_review(), "1001")
+  end)
+
+  async_tests.it("resolve raises when no thread node id has been cached for the discussion", function()
     local p = make_provider(function(_) end)
+    assert.has_error(function()
+      p:resolve(make_review(), "9999")
+    end)
+  end)
+
+  async_tests.it("resolve surfaces a GraphQL-level error", function()
+    local p = make_provider_with_thread()
+    p._runner = make_route_runner({
+      { pattern = "graphql", response = ok(GRAPHQL_ERROR_JSON) },
+    }).fn
     assert.has_error(function()
       p:resolve(make_review(), "1001")
     end)
   end)
 
-  it("unresolve raises an error mentioning GraphQL / POSTPONED", function()
+  async_tests.it("unresolve sends the unresolveReviewThread mutation with the cached thread node id", function()
+    local p = make_provider_with_thread()
+    p._runner = make_route_runner({
+      { pattern = "graphql", response = ok(UNRESOLVE_MUTATION_RESP_JSON) },
+    }).fn
+    p:unresolve(make_review(), "1001")
+  end)
+
+  async_tests.it("unresolve raises when no thread node id has been cached for the discussion", function()
     local p = make_provider(function(_) end)
     assert.has_error(function()
-      p:unresolve(make_review(), "1001")
+      p:unresolve(make_review(), "9999")
     end)
   end)
 end)
@@ -1289,18 +1411,23 @@ end)
 -- ---------------------------------------------------------------------------
 
 async_tests.describe("parley.providers.github.provider — fetch_viewer_login", function()
-  async_tests.it("fast path: uses gh config get and caches login (no API call)", function()
+  async_tests.it("fast path: uses gh config get and caches login (no /user API call)", function()
     local runner = make_route_runner({
       { pattern = "config", response = ok_text("alice\n") },
       { pattern = "/comments", response = ok(COMMENTS_JSON) },
+      { pattern = "graphql", response = ok(REVIEW_THREADS_UNRESOLVED_JSON) },
     })
     local p2 = make_provider(runner.fn)
     p2:fetch_discussions(make_review())
     assert.equals("alice", p2._viewer_login)
-    -- no /user API call was made
+    -- no /user REST API call was made (only comments/graphql fetch + config)
     local api_calls = 0
     for _, call in ipairs(runner._calls) do
-      if not is_config_get(call) and not vim.tbl_contains(call, "--paginate") then
+      if
+        not is_config_get(call)
+        and not vim.tbl_contains(call, "--paginate")
+        and not vim.tbl_contains(call, "graphql")
+      then
         api_calls = api_calls + 1
       end
     end
