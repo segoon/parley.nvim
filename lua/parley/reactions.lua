@@ -104,7 +104,11 @@ function M.validate(bufnr, comment, code, expected)
   end
   if
     expected
-    and (ctx.provider ~= expected.provider or ctx.review.pr.id ~= expected.id or ctx.review.head_sha ~= expected.head)
+    and (
+      (not expected.identity_checked and ctx.provider ~= expected.provider)
+      or ctx.review.pr.id ~= expected.id
+      or ctx.review.head_sha ~= expected.head
+    )
   then
     return "Review context changed; reopen the reaction picker"
   end
