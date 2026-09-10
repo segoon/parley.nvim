@@ -90,12 +90,15 @@ describe("parley.services.write — open_new_comment_input sync-state check", fu
     review_repository._key_bufnrs = {}
     progress_ui_state.clear()
     notify_calls = {}
+    ---@diagnostic disable-next-line: duplicate-set-field
     write_service._notify = function(msg, level)
       notify_calls[#notify_calls + 1] = { msg = msg, level = level }
     end
+    ---@diagnostic disable-next-line: duplicate-set-field
     write_service._get_config = function()
       return { progress = { success_timeout = 1200, failed_timeout = 2500, cancelled_timeout = 1200 } }
     end
+    ---@diagnostic disable-next-line: duplicate-set-field
     write_service._confirm_delete = function()
       return true
     end
@@ -126,6 +129,8 @@ describe("parley.services.write — open_new_comment_input sync-state check", fu
       status = "ready",
       provider = provider,
       opts = { repository = "owner/repo", host = "github.com" },
+      persistent = false,
+      scope = "test",
     }
     review_repository._seed(1, {
       status = "ready",
@@ -234,15 +239,18 @@ describe("parley.services.write — open_new_comment_input anchor-in-diff check"
     review_repository._key_bufnrs = {}
     progress_ui_state.clear()
     notify_calls = {}
+    ---@diagnostic disable-next-line: duplicate-set-field
     write_service._notify = function(msg, level)
       notify_calls[#notify_calls + 1] = { msg = msg, level = level }
     end
+    ---@diagnostic disable-next-line: duplicate-set-field
     write_service._get_config = function()
       return { progress = { success_timeout = 1200, failed_timeout = 2500, cancelled_timeout = 1200 } }
     end
     write_service._check_sync_state = function()
       return { ok = true }
     end
+    ---@diagnostic disable-next-line: duplicate-set-field
     write_service._confirm_delete = function()
       return true
     end
@@ -273,6 +281,8 @@ describe("parley.services.write — open_new_comment_input anchor-in-diff check"
       status = "ready",
       provider = provider,
       opts = { repository = "owner/repo", host = "github.com" },
+      persistent = false,
+      scope = "test",
     }
     review_repository._seed(1, {
       status = "ready",
