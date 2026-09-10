@@ -1,11 +1,8 @@
-# TODO
-
-features:
-- :Telescope discussions|issues|comments? vcs_issues? - preview
-- multiple discussions of the same line
-- resolve/unresolve thread, unresolved count (GraphQL)
-
 # Remaining work
+
+- bug: :wq in "new discussion" doesn't work
+- "new discussion" floating window is too small
+- autorefresh on "no PR is open" error
 
 ## Review workflows
 
