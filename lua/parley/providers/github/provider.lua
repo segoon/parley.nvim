@@ -16,6 +16,7 @@
 ---   • _runner:      fun(cmd: string[]): {code,stdout,stderr}  — replace in tests.
 ---   • _sync_runner: coroutine-free variant used by cache_identity()          — replace in tests.
 ---   • _auth:        auth module table with read_token(host)                 — replace in tests.
+---
 ---   • _parse_remote_url is a pure function exported for unit testing.
 
 local await = require("parley.runtime.await")
