@@ -291,11 +291,23 @@ The full default configuration:
       virtual_text = {
         enabled = true,
         max_width = 60,
+        hover = false,
       },
       float = {
         border = "rounded",
         max_width = 80,
         max_height = 30,
+        width_ratio = 0.8,
+        height_ratio = 0.8,
+      },
+      floating_text = {
+        hover = false,
+        hover_delay = 0.5,
+        border = "rounded",
+        max_width = 60,
+        max_height = 12,
+        width_ratio = 0.6,
+        height_ratio = 0.4,
       },
       progress = {
         enabled = true,
@@ -351,6 +363,9 @@ virtual_text ~                                   *parley-config-virtual_text*
     max_width  (`integer`)  Default: `60`
         Maximum characters shown in virtual text snippet
 
+    hover  (`boolean`)  Default: `false`
+        Only show virtual text for the discussion under the cursor
+
 
 float ~                                                 *parley-config-float*
 
@@ -358,8 +373,40 @@ float ~                                                 *parley-config-float*
         Border style (see `:h nvim_open_win`)
 
     max_width  (`integer`)  Default: `80`
+        Absolute width ceiling, in columns
 
     max_height  (`integer`)  Default: `30`
+        Absolute height ceiling, in rows
+
+    width_ratio  (`number`)  Default: `0.8`
+        Fraction of the source window's width to use
+
+    height_ratio  (`number`)  Default: `0.8`
+        Fraction of the source window's height to use
+
+
+floating_text ~                                 *parley-config-floating_text*
+
+    hover  (`boolean`)  Default: `false`
+        Show an unfocused preview float for the discussion under the cursor
+
+    hover_delay  (`number`)  Default: `0.5`
+        Seconds the cursor must rest on a discussion line before the preview float opens
+
+    border  (`string`)  Default: `"rounded"`
+        Border style (see `:h nvim_open_win`)
+
+    max_width  (`integer`)  Default: `60`
+        Absolute width ceiling, in columns
+
+    max_height  (`integer`)  Default: `12`
+        Absolute height ceiling, in rows
+
+    width_ratio  (`number`)  Default: `0.6`
+        Fraction of the source window's width to use
+
+    height_ratio  (`number`)  Default: `0.4`
+        Fraction of the source window's height to use
 
 
 progress ~                                           *parley-config-progress*

@@ -517,3 +517,79 @@ describe("signs.render", function()
     assert.equal(1, #all_extmarks(bufnr))
   end)
 end)
+
+-- ---------------------------------------------------------------------------
+-- virtual_text.hover
+-- ---------------------------------------------------------------------------
+
+describe("signs.render with virtual_text.hover", function()
+  local function hover_opts()
+    return {
+      signs = { enabled = true, text = "▐" },
+      virtual_text = { enabled = true, max_width = 60, hover = true },
+    }
+  end
+
+  it("omits virt_lines for discussions outside the cursor line", function()
+    local bufnr = scratch(5)
+    local d1 = make_discussion("d1", "foo.lua", 2, "first")
+    local d2 = make_discussion("d2", "foo.lua", 4, "second")
+    local mappings = {
+      ["d1"] = make_mapping(2),
+      ["d2"] = make_mapping(4),
+    }
+
+    signs.render(bufnr, { d1, d2 }, mappings, hover_opts(), 4)
+    local marks = all_extmarks(bufnr)
+    assert.equal(2, #marks)
+    for _, mark in ipairs(marks) do
+      local details = mark[4]
+      if mark[2] == 1 then -- row for d1 (0-indexed line 2)
+        assert.is_nil(details.virt_lines)
+      else -- row for d2 (0-indexed line 4)
+        assert.is_not_nil(details.virt_lines)
+      end
+    end
+  end)
+
+  it("includes virt_lines for a multi-line discussion when cursor is inside its range", function()
+    local bufnr = scratch(6)
+    local disc = make_discussion("d1", "foo.lua", 2, "spanning")
+    local mapping = make_mapping(2)
+    mapping.local_end_line = 4
+    local mappings = { ["d1"] = mapping }
+
+    signs.render(bufnr, { disc }, mappings, hover_opts(), 3)
+    local marks = all_extmarks(bufnr)
+    assert.equal(1, #marks)
+    assert.is_not_nil(marks[1][4].virt_lines)
+  end)
+
+  it("omits virt_lines entirely when cursor_line is nil", function()
+    local bufnr = scratch(5)
+    local disc = make_discussion("d1", "foo.lua", 2, "hi")
+    local mappings = { ["d1"] = make_mapping(2) }
+
+    signs.render(bufnr, { disc }, mappings, hover_opts())
+    local marks = all_extmarks(bufnr)
+    assert.equal(1, #marks)
+    assert.is_nil(marks[1][4].virt_lines)
+  end)
+
+  it("ignores cursor_line and renders every discussion when hover is false", function()
+    local bufnr = scratch(5)
+    local d1 = make_discussion("d1", "foo.lua", 2, "first")
+    local d2 = make_discussion("d2", "foo.lua", 4, "second")
+    local mappings = {
+      ["d1"] = make_mapping(2),
+      ["d2"] = make_mapping(4),
+    }
+
+    signs.render(bufnr, { d1, d2 }, mappings, default_opts(), 4)
+    local marks = all_extmarks(bufnr)
+    assert.equal(2, #marks)
+    for _, mark in ipairs(marks) do
+      assert.is_not_nil(mark[4].virt_lines)
+    end
+  end)
+end)

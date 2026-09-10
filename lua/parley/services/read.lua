@@ -41,10 +41,17 @@ local function render_snapshot(bufnr, snapshot)
   end
 
   local config = M._get_config()
+  local cursor_line = nil
+  if config.virtual_text.hover then
+    local ok, winid = pcall(vim.fn.bufwinid, bufnr)
+    if ok and winid and winid ~= -1 then
+      cursor_line = vim.api.nvim_win_get_cursor(winid)[1]
+    end
+  end
   signs.render(bufnr, snapshot.discussions, snapshot.mappings or {}, {
     signs = config.signs,
     virtual_text = config.virtual_text,
-  })
+  }, cursor_line)
 end
 
 local function ensure_subscription(bufnr)

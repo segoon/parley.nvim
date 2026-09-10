@@ -16,6 +16,7 @@ local M = {}
 --- @field signs             parley.SignsConfig
 --- @field virtual_text      parley.VirtualTextConfig
 --- @field float             parley.FloatConfig
+--- @field floating_text     parley.FloatingTextConfig
 --- @field progress          parley.ProgressConfig
 --- @field telescope         boolean  Auto-register Parley Telescope extensions during setup
 --- @field keymaps           parley.KeymapsConfig
@@ -29,8 +30,18 @@ local M = {}
 --- @class parley.VirtualTextConfig
 --- @field enabled   boolean
 --- @field max_width integer  Maximum characters shown in virtual text snippet
+--- @field hover     boolean  Only show virtual text for the discussion under the cursor
 
 --- @class parley.FloatConfig
+--- @field border       string   Border style (see `:h nvim_open_win`)
+--- @field max_width    integer  Absolute width ceiling, in columns
+--- @field max_height   integer  Absolute height ceiling, in rows
+--- @field width_ratio  number   Fraction of the source window's width to use
+--- @field height_ratio number   Fraction of the source window's height to use
+
+--- @class parley.FloatingTextConfig
+--- @field hover        boolean  Show an unfocused preview float for the discussion under the cursor
+--- @field hover_delay  number   Seconds the cursor must rest on a discussion line before the preview float opens
 --- @field border       string   Border style (see `:h nvim_open_win`)
 --- @field max_width    integer  Absolute width ceiling, in columns
 --- @field max_height   integer  Absolute height ceiling, in rows
@@ -68,6 +79,7 @@ local defaults = {
   virtual_text = {
     enabled = true,
     max_width = 60,
+    hover = false,
   },
   float = {
     border = "rounded",
@@ -75,6 +87,15 @@ local defaults = {
     max_height = 30,
     width_ratio = 0.8,
     height_ratio = 0.8,
+  },
+  floating_text = {
+    hover = false,
+    hover_delay = 0.5,
+    border = "rounded",
+    max_width = 60,
+    max_height = 12,
+    width_ratio = 0.6,
+    height_ratio = 0.4,
   },
   progress = {
     enabled = true,
@@ -384,6 +405,8 @@ function M.setup(opts)
     desc = "Parley: update local discussion positions",
   })
 
+  require("parley.hover").setup(augroup)
+
   vim.api.nvim_create_user_command("Parley", function(cmd_opts)
     M._dispatch_parley(cmd_opts.fargs, vim.api.nvim_get_current_buf(), cmd_opts)
   end, {
@@ -401,6 +424,7 @@ function M.setup(opts)
       local discussion_window = require("parley.discussion_window")
       discussion_window.close(args.buf, { wiping_bufnr = args.buf })
       read_service.clear_buffer_state(args.buf)
+      require("parley.hover").close(args.buf)
     end,
     desc = "Parley: clean up discussion state on buffer wipeout",
   })

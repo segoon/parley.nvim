@@ -1,6 +1,5 @@
 # Remaining work
 
-- feature: hover = true => show discussion floating window for the line (the 1st one)
 - used size: ✅ OK cache_dir exists and is writable: /home/segoon/.cache/nvim/parley
 
 ## Review workflows

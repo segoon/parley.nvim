@@ -117,6 +117,7 @@ local function format_timestamp(timestamp)
     utc_offset = M._utc_offset,
   })
 end
+M.format_timestamp = format_timestamp
 
 ---@param bufnr integer
 ---@return table|nil
@@ -191,6 +192,7 @@ local function discussions_for_line(state, cursor_line)
   end
   return hits
 end
+M.discussions_for_line = discussions_for_line
 
 ---@param bufnr integer
 ---@param instance parley.DiscussionWindowInstance

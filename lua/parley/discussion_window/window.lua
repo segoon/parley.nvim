@@ -24,7 +24,7 @@ function M.make_win_config(_lines, float_cfg, source_winid, _source_line, title)
     border = float_cfg.border,
     width = width,
     height = height,
-    focusable = true,
+    focusable = float_cfg.focusable ~= false,
   }
 
   if title and title ~= "" then

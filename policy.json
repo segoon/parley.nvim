@@ -242,6 +242,7 @@
         "lua/parley/services/write.lua",
         "lua/parley/services/write_operation.lua",
         "lua/parley/signs.lua",
+        "lua/parley/hover.lua",
         "lua/parley/statusline.lua",
         "lua/parley/telescope.lua",
         "lua/parley/ui_states/composer.lua",
