@@ -399,7 +399,7 @@ function M.setup(opts)
     group = augroup,
     callback = function(args)
       local discussion_window = require("parley.discussion_window")
-      discussion_window.close(args.buf)
+      discussion_window.close(args.buf, { wiping_bufnr = args.buf })
       read_service.clear_buffer_state(args.buf)
     end,
     desc = "Parley: clean up discussion state on buffer wipeout",

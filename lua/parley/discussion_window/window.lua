@@ -149,20 +149,29 @@ function M.create_instance(lines, float_cfg, source_winid, source_line, opts)
     set_input_submitting = function() end,
     focus_discussion = function() end,
     focus_input = function() end,
-    close = function()
+    --- @param wiping_bufnr integer|nil Buffer already mid-BufWipeout; Neovim is
+    --- tearing it down itself, so closing/deleting it again here would race
+    --- with that teardown and raise E937 ("buffer is in use").
+    close = function(wiping_bufnr)
       if closed then
         return
       end
       closed = true
       instance._closing = true
-      opts.hide_input(instance, true)
-      if vim.api.nvim_win_is_valid(winid) then
-        vim.api.nvim_win_close(winid, true)
+      opts.hide_input(instance, true, wiping_bufnr)
+      if bufnr ~= wiping_bufnr then
+        if vim.api.nvim_win_is_valid(winid) then
+          vim.api.nvim_win_close(winid, true)
+        end
+        if vim.api.nvim_buf_is_valid(bufnr) then
+          pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+        end
       end
-      if vim.api.nvim_buf_is_valid(bufnr) then
-        pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
-      end
-      if instance.input_bufnr and vim.api.nvim_buf_is_valid(instance.input_bufnr) then
+      if
+        instance.input_bufnr
+        and instance.input_bufnr ~= wiping_bufnr
+        and vim.api.nvim_buf_is_valid(instance.input_bufnr)
+      then
         pcall(vim.api.nvim_buf_delete, instance.input_bufnr, { force = true })
       end
     end,

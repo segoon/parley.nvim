@@ -18,7 +18,9 @@ function M.new(deps)
     })
   end
 
-  local function hide_input(instance, force)
+  --- @param wiping_bufnr integer|nil Buffer already mid-BufWipeout; skip
+  --- closing/deleting it again to avoid racing Neovim's own teardown.
+  local function hide_input(instance, force, wiping_bufnr)
     if instance.input_state == "hidden" then
       return true
     end
@@ -41,7 +43,11 @@ function M.new(deps)
     local source_bufnr = instance.source_bufnr or instance.bufnr
     deps.composer_ui_state.clear(source_bufnr)
     deps.discussion_ui_state.patch(source_bufnr, { input_visible = false, highlighted_parent_comment_id = nil })
-    if instance.input_winid and vim.api.nvim_win_is_valid(instance.input_winid) then
+    if
+      instance.input_bufnr ~= wiping_bufnr
+      and instance.input_winid
+      and vim.api.nvim_win_is_valid(instance.input_winid)
+    then
       vim.api.nvim_win_close(instance.input_winid, true)
     end
     instance.input_winid = nil

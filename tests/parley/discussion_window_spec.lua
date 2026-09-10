@@ -242,6 +242,44 @@ describe("parley.discussion_window", function()
     assert.equal(source_winid, vim.api.nvim_get_current_win())
   end)
 
+  it("survives :q on the discussion float without an E937 BufWipeout error", function()
+    local bufnr = scratch(10)
+    vim.api.nvim_win_set_cursor(0, { 3, 0 })
+
+    review_repository._seed(bufnr, {
+      status = "ready",
+      stale = false,
+      discussions = { make_discussion({ line = 3 }) },
+      mappings = {
+        d1 = { local_line = 3, stale = false, confidence = 1.0 },
+      },
+    })
+
+    assert.is_true(discussion_window.open_current_line(bufnr))
+    local instance = discussion_window._instances[bufnr]
+
+    -- Mirrors the global BufWipeout autocmd registered in parley/init.lua:
+    -- the discussion float's bufhidden="wipe" fires this the moment Neovim
+    -- closes its last window (e.g. from the user's own `:q`), so this must
+    -- not race Neovim's own teardown of that same buffer.
+    local augroup = vim.api.nvim_create_augroup("discussion_window_spec_bufwipeout", { clear = true })
+    vim.api.nvim_create_autocmd("BufWipeout", {
+      group = augroup,
+      callback = function(args)
+        discussion_window.close(args.buf, { wiping_bufnr = args.buf })
+      end,
+    })
+
+    vim.api.nvim_set_current_win(instance.winid)
+    local ok, err = pcall(vim.cmd, "q")
+
+    vim.api.nvim_del_augroup_by_id(augroup)
+
+    assert.is_true(ok, err)
+    assert.is_nil(discussion_window._instances[bufnr])
+    assert.is_false(discussion_window.is_open(bufnr))
+  end)
+
   it("renders nested replies using parent_comment_id indentation", function()
     local bufnr = scratch(10)
     vim.api.nvim_win_set_cursor(0, { 3, 0 })
