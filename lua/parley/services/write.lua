@@ -133,7 +133,14 @@ end
 --- @return boolean
 local function provider_changed(bufnr, expected)
   local snapshot = provider_repository.get(bufnr)
-  return not snapshot or snapshot.provider ~= expected.provider
+  if not snapshot then
+    return true
+  end
+  if expected.identity_checked then
+    local current_identity = snapshot.provider.cache_identity and snapshot.provider:cache_identity()
+    return not vim.deep_equal(current_identity, expected.identity)
+  end
+  return snapshot.provider ~= expected.provider
 end
 
 --- @param bufnr integer

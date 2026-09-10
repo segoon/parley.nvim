@@ -1,3 +1,10 @@
+# TODO
+
+features:
+- :Telescope discussions|issues|comments? vcs_issues? - preview
+- multiple discussions of the same line
+- resolve/unresolve thread, unresolved count (GraphQL)
+
 # Remaining work
 
 ## Review workflows

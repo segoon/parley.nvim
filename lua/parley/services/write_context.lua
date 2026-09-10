@@ -39,7 +39,7 @@ function M.reason(bufnr, action, expected)
     expected
     and (
       (expected.identity_checked and not vim.deep_equal(current.identity, expected.identity))
-      or current.provider ~= expected.provider
+      or (not expected.identity_checked and current.provider ~= expected.provider)
       or current.review.pr.id ~= expected.review.pr.id
       or current.review.head_sha ~= expected.review.head_sha
     )
