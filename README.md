@@ -6,7 +6,7 @@ Inline pull request discussions for Neovim.
 
 > [!WARNING]
 > Early-stage plugin.
-> Current support includes GitHub (Git) and Arcanum (Arc) in regular file buffers. Diffview integration is planned; live Arcanum deployment compatibility remains unverified.
+> Current support includes GitHub (Git) and Arcanum (Arc) in regular file buffers, plus diffview-plus.nvim diff buffers (see below). Live Arcanum deployment compatibility remains unverified.
 
 ## Features
 
@@ -33,6 +33,8 @@ Parley is intentionally narrower. The goal is to make reading and responding to 
 
 ## Requirements
 
+Required:
+
 - Neovim `>= 0.10`
 - [`nvim-lua/plenary.nvim`](https://github.com/nvim-lua/plenary.nvim)
 
@@ -41,8 +43,9 @@ to its configured API host (default `arcanum.yandex.net`).
 
 Optional:
 
-- [`nvim-telescope/telescope.nvim`](https://github.com/nvim-telescope/telescope.nvim)
-- [`MeanderingProgrammer/render-markdown.nvim`](https://github.com/MeanderingProgrammer/render-markdown.nvim)
+- [`nvim-telescope/telescope.nvim`](https://github.com/nvim-telescope/telescope.nvim) — enables the `parley_discussions` / `parley_discussions_file` pickers (see [Telescope](#telescope))
+- [`MeanderingProgrammer/render-markdown.nvim`](https://github.com/MeanderingProgrammer/render-markdown.nvim) — renders comment bodies as Markdown in the discussion window
+- [diffview-plus.nvim](https://github.com/mistricky/diffview-plus.nvim) (a `diffview.nvim` fork) — when installed, parley automatically renders PR discussions, and lets you create new comments, inside its diff buffers, plus comment-count badges in its file panel (see [Diffview integration](#diffview-integration)). No extra configuration is required beyond having the plugin loaded; disable with `diffview = { enabled = false }`. Not verified against other `diffview.nvim` forks.
 
 ## Installation
 
@@ -155,6 +158,24 @@ Parley uses review-wide anchor mappings when available. Entries with unavailable
 positions remain invalid rows; general discussions are omitted. Use
 `:Parley discussion list` or the review-wide Telescope picker to access every thread.
 
+
+## Diffview integration
+
+Optional; requires [diffview-plus.nvim](https://github.com/mistricky/diffview-plus.nvim) to be installed and loaded. No extra setup call is needed — parley listens for diffview's `User` autocmds automatically once both plugins are set up.
+
+When you open a diffview diff buffer (e.g. `:DiffviewOpen`) showing the PR's head revision, parley:
+
+- Renders the same signs / virtual text / hover previews as regular buffers, for discussions anchored to that file
+- Lets you add a new top-level comment at the cursor line with `<leader>pc` (configurable, see `keymaps.diffview_new_comment` below)
+- Shows a 💬 comment-count badge (with `!` for unresolved threads) next to changed files in diffview's file panel
+
+Only the head/"new" side of a diff is supported — parley never anchors discussions to the base/"old" side, so base-revision diff buffers render nothing. Disable the integration entirely with:
+
+```lua
+require("parley").setup({
+  diffview = { enabled = false },
+})
+```
 
 ## Statusline
 
@@ -285,7 +306,6 @@ provider-independent behavior tests.
 
 ## Roadmap
 
-- `diffview.nvim` integration
 - GitHub thread resolution/reopening via GraphQL
 - optional Arcanum drafts/publication, suggestions, and additional comment anchors
 

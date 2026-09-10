@@ -297,7 +297,7 @@ function M._render_panel_badges()
   for _, file in view.panel.files:iter() do
     local entry = file.path and by_file[file.path]
     if entry then
-      local needle = vim.fs.basename(file.path)
+      local needle = vim.fn.fnamemodify(file.path, ":t")
       for lnum, text in ipairs(lines) do
         if not used_lines[lnum] and text:find(needle, 1, true) then
           used_lines[lnum] = true

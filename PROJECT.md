@@ -2,7 +2,8 @@
 
 A Neovim plugin for reading, writing, and navigating pull request discussions
 without leaving the editor. Built-in providers support GitHub with Git and
-Arcanum with Arc in regular file buffers. Diffview integration is a future goal.
+Arcanum with Arc in regular file buffers, plus diffview-plus.nvim diff buffers
+(head side only; see README.md § Diffview integration).
 
 ## Problem and goals
 
@@ -159,10 +160,10 @@ they do not verify authentication or deployment compatibility over the network.
 
 ## Future goals and remaining risks
 
-- Diffview should eventually support discussion rendering, selection, navigation,
-  and inline composition in its diff buffers. Context detection exists, but the
-  current review services accept only regular file buffers. Revision/side mapping
-  and float placement need a separately designed and tested integration.
+- Diffview integration (`lua/parley/diffview_integration.lua`) covers rendering,
+  hover, and comment creation on the head/"new" side of a diff buffer only;
+  base/"old"-side rendering, a `:Parley diffview open` convenience command, and
+  navigation across diffview's file panel remain future work.
 - Optional Arcanum extensions include drafts/publication, old-side or whole-file
   comment creation, and suggestions. Reading existing threads does not imply
   these creation workflows are supported.

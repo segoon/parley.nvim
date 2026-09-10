@@ -4,8 +4,9 @@
 
 ## Review workflows
 
-- Diffview integration: revision/side mapping, rendering, navigation, and composition
-  (context detection alone is implemented)
+- Diffview integration: base/"old"-side rendering, a `:Parley diffview open`
+  convenience command, and navigation across diffview's file panel
+  (head-side rendering and comment creation are implemented)
 - Optional Arcanum drafts/publication, suggestions, and old-side/whole-file creation
 - Validate live Arcanum deployment behavior, OAuth permissions, representative
   responses, rate-limit headers, and idempotency support
