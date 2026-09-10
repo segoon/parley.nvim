@@ -3,11 +3,12 @@
 local async = require("plenary.async")
 local context_repository = require("parley.repositories.context")
 local registry = require("parley.registry")
+local identity = require("parley.cache_identity")
 local ui = require("parley.runtime.ui")
 
 local M = {}
 
---- @type table<integer, { status: 'ready', provider: parley.Provider, opts: table }>
+--- @type table<integer, parley.ProviderSnapshot>
 M._entries = {}
 
 --- @type table<integer, table<integer, fun(snapshot: table|nil): nil>>
@@ -15,8 +16,12 @@ M._subscribers = {}
 M._next_subscriber_id = 0
 
 local function clone(snapshot)
-  return snapshot and { status = snapshot.status, provider = snapshot.provider, opts = vim.deepcopy(snapshot.opts) }
-    or nil
+  if not snapshot then
+    return nil
+  end
+  local result = vim.deepcopy(snapshot)
+  result.provider = snapshot.provider
+  return result
 end
 
 local function publish(bufnr, snapshot)
@@ -38,15 +43,12 @@ local function resolve_provider(ctx)
     return nil
   end
 
-  for _, spec in ipairs(registry.registered()) do
-    local opts = spec.detect(ctx.vcs_info)
-    if opts ~= nil then
-      return {
-        status = "ready",
-        provider = spec.factory(opts),
-        opts = opts,
-      }
+  local provider, opts = registry.resolve_with_opts(ctx.vcs_info)
+  if provider then
+    if provider.prepare then
+      provider:prepare(ctx.vcs_info)
     end
+    return identity.snapshot(provider, opts)
   end
   return nil
 end
@@ -62,7 +64,17 @@ end
 
 function M.refresh(bufnr)
   local ctx = context_repository.get(bufnr) or context_repository.refresh(bufnr)
-  local snapshot = resolve_provider(ctx)
+  local ok, snapshot = pcall(function()
+    local resolved = resolve_provider(ctx)
+    if not vim.deep_equal(context_repository.get(bufnr), ctx) then
+      error("Repository context changed during provider preparation; refresh the review", 0)
+    end
+    return resolved
+  end)
+  if not ok then
+    publish(bufnr, nil)
+    error(snapshot, 0)
+  end
   publish(bufnr, snapshot)
   return clone(snapshot)
 end
@@ -77,11 +89,22 @@ function M.invalidate(bufnr)
   publish(bufnr, nil)
 end
 
+--- Store a provider with a newly resolved identity; requires a Plenary coroutine.
 --- @param bufnr integer
 --- @param provider parley.Provider
 --- @param opts table
 function M.store(bufnr, provider, opts)
-  publish(bufnr, { status = "ready", provider = provider, opts = vim.deepcopy(opts) })
+  local ok, snapshot = pcall(function()
+    if provider.prepare then
+      provider:prepare((context_repository.get(bufnr) or {}).vcs_info)
+    end
+    return identity.snapshot(provider, opts)
+  end)
+  if not ok then
+    publish(bufnr, nil)
+    error(snapshot, 0)
+  end
+  publish(bufnr, snapshot)
 end
 
 function M.subscribe(bufnr, cb)

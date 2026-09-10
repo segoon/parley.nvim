@@ -1,5 +1,4 @@
 --- parley.providers.github.provider — GitHub provider implementation.
----
 --- Implements parley.Provider against the GitHub REST API via the `gh` CLI.
 --- All network calls are made by shelling out to `gh api …`, which handles
 --- authentication (env vars, hosts.yml, keyring, SSO) and rate-limiting
@@ -45,7 +44,7 @@ local M = {}
 --- ): vim.SystemObj|nil
 --- @field _sleep        fun(timeout_ms: integer): nil
 --- @field _defer        fun(callback: fun(), timeout_ms: integer): uv_timer_t|nil
---- @field _get_config   fun(): parley.Config|nil
+--- @field _config parley.GitHubProviderConfig
 --- @field _auth         table
 --- @field _viewer_login string|nil
 --- @field _cache_provider string
@@ -76,8 +75,13 @@ end
 -- ---------------------------------------------------------------------------
 
 --- @type parley.github.Provider
-local GitHubProvider = {}
+local GitHubProvider = { display_name = require("parley.providers.github.metadata").display_name }
 GitHubProvider.__index = GitHubProvider
+GitHubProvider.capabilities = require("parley.providers.github.capabilities").get
+GitHubProvider.validate_comment_target = require("parley.providers.comment_target").validate
+GitHubProvider.cache_identity = require("parley.providers.github.cache_identity").get
+GitHubProvider.reaction_choices = require("parley.providers.github.reactions").choices
+GitHubProvider.reaction_presentation = require("parley.providers.github.reactions").presentation
 
 -- ---------------------------------------------------------------------------
 -- Constructor
@@ -85,12 +89,11 @@ GitHubProvider.__index = GitHubProvider
 
 --- Create a new GitHub provider.
 ---
---- Required opts: owner, repo.
+--- Required opts: repository.
 --- Optional opts: host (default "github.com"), api_base, _runner, _auth.
 ---
 --- @param opts {
----   owner: string,
----   repo: string,
+---   repository: string,
 ---   host?: string,
 ---   api_base?: string,
 ---   _runner?: fun(cmd: string[]): table,
@@ -100,15 +103,21 @@ GitHubProvider.__index = GitHubProvider
 ---   ): vim.SystemObj|nil,
 ---   _sleep?: fun(timeout_ms: integer): nil,
 ---   _defer?: fun(callback: fun(), timeout_ms: integer): uv_timer_t|nil,
----   _get_config?: fun(): parley.Config|nil,
+---   config?: parley.GitHubProviderConfig,
 ---   _system?: fun(cmd: string[], opts: table, callback: fun(result: vim.SystemCompleted)): vim.SystemObj,
 ---   _auth?: table,
 --- }
 --- @return parley.github.Provider
 function M.new(opts)
   opts = opts or {}
-  assert(type(opts.owner) == "string" and opts.owner ~= "", "parley.github: opts.owner must be a non-empty string")
-  assert(type(opts.repo) == "string" and opts.repo ~= "", "parley.github: opts.repo must be a non-empty string")
+  local config = require("parley.providers.github.config").resolve(opts.config)
+  assert(
+    type(opts.repository) == "string" and opts.repository ~= "",
+    "parley.github: opts.repository must be a non-empty string"
+  )
+
+  local owner, repo = opts.repository:match("^([^/]+)/([^/]+)$")
+  assert(owner and repo, "parley.github: opts.repository must have the form 'owner/repo'")
 
   local host = opts.host or "github.com"
   local self
@@ -133,16 +142,14 @@ function M.new(opts)
 
   self = setmetatable({
     _host = host,
-    _owner = opts.owner,
-    _repo = opts.repo,
+    _owner = owner,
+    _repo = repo,
     _api_base = opts.api_base or api_base_for_host(host),
     _runner = opts._runner or default_runner,
     _spawn = opts._spawn or default_spawn,
     _sleep = opts._sleep or await.sleep,
     _defer = opts._defer or vim.defer_fn,
-    _get_config = opts._get_config or function()
-      return require("parley").config
-    end,
+    _config = config,
     _auth = opts._auth or require("parley.providers.github.auth"),
     _viewer_login = nil,
     _cache_provider = "github",
@@ -285,8 +292,8 @@ end
 --- @param file string
 --- @param anchor parley.Anchor
 --- @param body parley.Body
---- @param callback fun(result: { ok: boolean, comment?: parley.Comment, err?: string, cancelled?: boolean }): nil
---- @return { cancel: fun(): nil }
+--- @param callback parley.WriteCallback
+--- @return parley.CancelHandle
 function GitHubProvider:begin_post_top_level_comment(review, file, anchor, body, callback)
   local write_context = review.write_context
   dbg.trace(
@@ -348,8 +355,8 @@ end
 --- @param discussion parley.Discussion
 --- @param parent_comment parley.Comment
 --- @param body parley.Body
---- @param callback fun(result: { ok: boolean, comment?: parley.Comment, err?: string, cancelled?: boolean }): nil
---- @return { cancel: fun(): nil }
+--- @param callback parley.WriteCallback
+--- @return parley.CancelHandle
 function GitHubProvider:begin_reply(review, discussion, parent_comment, body, callback)
   local write_context = review.write_context
   local url = repo_path(self) .. "/pulls/" .. write_context.number .. "/comments"
@@ -409,6 +416,7 @@ end
 --- @param comment_id string
 --- @param reaction   string  e.g. "+1", "heart"
 function GitHubProvider:react(_review, comment_id, reaction)
+  assert(require("parley.providers.github.reactions").supports(reaction), "unsupported GitHub reaction")
   transport.fetch_viewer_login(self)
   local viewer = self._viewer_login or ""
   local base_url = repo_path(self) .. "/pulls/comments/" .. comment_id .. "/reactions"
@@ -509,6 +517,13 @@ function GitHubProvider:submit_review(review, event, body)
   })
 end
 
+--- Return a short label for use in progress messages, e.g. "github.com".
+--- @param self parley.github.Provider
+--- @return string
+function GitHubProvider:progress_label()
+  return self._host
+end
+
 -- ---------------------------------------------------------------------------
 -- Registry helpers
 -- ---------------------------------------------------------------------------
@@ -558,13 +573,13 @@ end
 
 --- Detect whether a VcsInfo points at a GitHub repository.
 ---
---- Returns the opts table for M.new (host/owner/repo) on a match, or nil
+--- Returns the opts table for M.new (host/repository) on a match, or nil
 --- when the remote URL is missing or not a recognised GitHub URL.  Only
 --- github.com is recognised today; Enterprise hosts can be added later by
 --- extending the host check.
 ---
 --- @param vcs_info parley.VcsInfo
---- @return { host: string, owner: string, repo: string }|nil
+--- @return { host: string, repository: string }|nil
 function M.detect(vcs_info)
   if type(vcs_info) ~= "table" then
     return nil
@@ -576,7 +591,10 @@ function M.detect(vcs_info)
   if parsed.host ~= "github.com" then
     return nil
   end
-  return parsed
+  return {
+    host = parsed.host,
+    repository = parsed.owner .. "/" .. parsed.repo,
+  }
 end
 
 return M

@@ -10,12 +10,12 @@ local progress_popup = require("parley.progress_popup")
 describe("parley command completion", function()
   it("returns top-level groups for the first argument", function()
     local items = parley._complete_parley("", ":Parley ")
-    assert.same({ "discussion", "comment", "nav", "refresh" }, items)
+    assert.same({ "discussion", "comment", "review", "nav", "quickfix", "refresh" }, items)
   end)
 
   it("returns discussion actions for the second argument", function()
     local items = parley._complete_parley("", ":Parley discussion ")
-    assert.same({ "open", "close", "toggle", "new", "reply" }, items)
+    assert.same({ "open", "close", "toggle", "new", "reply", "list", "resolve", "reopen" }, items)
   end)
 
   it("returns comment actions for the second argument", function()
@@ -25,7 +25,7 @@ describe("parley command completion", function()
 
   it("returns nav actions for the second argument", function()
     local items = parley._complete_parley("", ":Parley nav ")
-    assert.same({ "next", "prev" }, items)
+    assert.same({ "buf-next", "buf-prev", "review-next", "review-prev" }, items)
   end)
 end)
 
@@ -41,6 +41,8 @@ describe("parley setup", function()
   local saved_telescope
 
   before_each(function()
+    require("parley.vcs").reset_adapters()
+    require("parley.vcs").reset_detectors()
     saved_cache_setup = cache.setup
     saved_read_refresh_async = read_service.refresh_async
     saved_registry_reset = registry.reset
@@ -53,6 +55,9 @@ describe("parley setup", function()
   end)
 
   after_each(function()
+    require("parley.periodic_refresh").stop()
+    require("parley.vcs").reset_adapters()
+    require("parley.vcs").reset_detectors()
     cache.setup = saved_cache_setup
     read_service.refresh_async = saved_read_refresh_async
     registry.reset = saved_registry_reset
@@ -63,6 +68,78 @@ describe("parley setup", function()
     package.loaded["parley.providers.github.provider"] = saved_gh
     package.loaded["telescope"] = saved_telescope
     pcall(vim.api.nvim_del_user_command, "Parley")
+  end)
+
+  it("keeps the active config when polling interval validation fails", function()
+    local old = parley.config
+    assert.has_error(function()
+      parley.setup({ refresh_interval = -1 })
+    end)
+    assert.equals(old, parley.config)
+  end)
+  it("wires focus and shutdown events to one polling lifecycle", function()
+    local periodic = require("parley.periodic_refresh")
+    local clock = dofile("tests/support/clock.lua").new()
+    local defer = periodic._defer
+    periodic._defer = clock.defer
+    cache.setup = function() end
+    signs.setup_highlights = function() end
+    progress_popup.setup = function() end
+    parley.setup({ telescope = false, refresh_interval = 2 })
+    assert.equals(2000, clock.timers[1].at)
+    vim.api.nvim_exec_autocmds("FocusLost", {})
+    assert.is_true(clock.timers[1].closed)
+    vim.api.nvim_exec_autocmds("FocusGained", {})
+    assert.equals(2, #clock.timers)
+    parley.setup({ telescope = false, refresh_interval = 0 })
+    assert.is_true(clock.timers[2].closed)
+    vim.api.nvim_exec_autocmds("VimLeavePre", {})
+    periodic._defer = defer
+  end)
+  it("resets and registers VCS adapters on repeated setup", function()
+    local vcs = require("parley.vcs")
+    local adapters = require("parley.vcs.adapters")
+    cache.setup = function() end
+    signs.setup_highlights = function() end
+    progress_popup.setup = function() end
+    read_service.refresh_async = function() end
+    parley.setup({ telescope = false })
+    vcs.register_adapter("temporary", require("parley.providers.vcs.git"))
+    parley.setup({ telescope = false })
+    assert.is_nil(adapters.get({ vcs = "temporary", root = "/checkout" }))
+    assert.is_not_nil(adapters.get({ vcs = "git", root = "/checkout" }))
+    assert.is_not_nil(adapters.get({ vcs = "arc", root = "/checkout" }))
+    assert.equals(2, #vcs.registered_detectors())
+  end)
+
+  it("snapshots provider settings across repeated setup", function()
+    local specs = {}
+    cache.setup = function() end
+    signs.setup_highlights = function() end
+    progress_popup.setup = function() end
+    read_service.refresh_async = function() end
+    registry.register = function(spec)
+      specs[#specs + 1] = spec
+    end
+    local opts = { telescope = false, providers = { arcanum = { host = "first.example", retry_count = 0 } } }
+    parley.setup(opts)
+    local factory = specs[2].factory
+    local auth = {
+      read_token = function()
+        return "token"
+      end,
+    }
+    local p = factory({ _auth = auth })
+    opts.providers.arcanum.host = "mutated.example"
+    parley.config.providers.arcanum.host = "mutated.example"
+    assert.equals("first.example", p._host)
+    assert.equals("first.example", factory({ _auth = auth })._host)
+    assert.equals(0, require("parley.providers.arcanum.transport").transport_config(p).retry_count)
+    parley.setup({ telescope = false, providers = { arcanum = { host = "second.example" } } })
+    assert.equals("second.example", specs[4].factory({ _auth = auth })._host)
+    assert.equals("first.example", p._host)
+    parley.setup({ telescope = false })
+    assert.equals("arcanum.yandex.net", specs[6].factory({ _auth = auth })._host)
   end)
 
   it("wires :Parley refresh to a progress-enabled refresh", function()
@@ -197,17 +274,20 @@ end)
 describe("parley command dispatch", function()
   local saved_discussion
   local saved_nav
+  local saved_quickfix
   local saved_write
 
   before_each(function()
     saved_discussion = package.loaded["parley.discussion_window"]
     saved_nav = package.loaded["parley.nav"]
+    saved_quickfix = package.loaded["parley.quickfix"]
     saved_write = package.loaded["parley.services.write"]
   end)
 
   after_each(function()
     package.loaded["parley.discussion_window"] = saved_discussion
     package.loaded["parley.nav"] = saved_nav
+    package.loaded["parley.quickfix"] = saved_quickfix
     package.loaded["parley.services.write"] = saved_write
   end)
 
@@ -268,24 +348,47 @@ describe("parley command dispatch", function()
     }, calls)
   end)
 
-  it("dispatches nav next/prev", function()
+  it("dispatches nav buf-next/buf-prev/review-next/review-prev", function()
     local calls = {}
     package.loaded["parley.nav"] = {
-      next = function(bufnr)
-        calls[#calls + 1] = { action = "next", bufnr = bufnr }
+      buf_next = function(bufnr)
+        calls[#calls + 1] = { action = "buf-next", bufnr = bufnr }
       end,
-      prev = function(bufnr)
-        calls[#calls + 1] = { action = "prev", bufnr = bufnr }
+      buf_prev = function(bufnr)
+        calls[#calls + 1] = { action = "buf-prev", bufnr = bufnr }
+      end,
+      review_next = function(bufnr)
+        calls[#calls + 1] = { action = "review-next", bufnr = bufnr }
+      end,
+      review_prev = function(bufnr)
+        calls[#calls + 1] = { action = "review-prev", bufnr = bufnr }
       end,
     }
 
-    parley._dispatch_parley({ "nav", "next" }, 21)
-    parley._dispatch_parley({ "nav", "prev" }, 22)
+    parley._dispatch_parley({ "nav", "buf-next" }, 21)
+    parley._dispatch_parley({ "nav", "buf-prev" }, 22)
+    parley._dispatch_parley({ "nav", "review-next" }, 23)
+    parley._dispatch_parley({ "nav", "review-prev" }, 24)
 
     assert.same({
-      { action = "next", bufnr = 21 },
-      { action = "prev", bufnr = 22 },
+      { action = "buf-next", bufnr = 21 },
+      { action = "buf-prev", bufnr = 22 },
+      { action = "review-next", bufnr = 23 },
+      { action = "review-prev", bufnr = 24 },
     }, calls)
+  end)
+
+  it("dispatches quickfix without subcommands", function()
+    local calls = {}
+    package.loaded["parley.quickfix"] = {
+      open = function(bufnr)
+        calls[#calls + 1] = bufnr
+      end,
+    }
+
+    parley._dispatch_parley({ "quickfix" }, 31)
+
+    assert.same({ 31 }, calls)
   end)
 
   it("errors on an unknown group", function()
@@ -328,5 +431,11 @@ describe("parley command dispatch", function()
     assert.has_error(function()
       parley._dispatch_parley({ "nav" }, 1)
     end, "parley: expected a nav action")
+  end)
+
+  it("errors when quickfix has a subcommand", function()
+    assert.has_error(function()
+      parley._dispatch_parley({ "quickfix", "nope" }, 1)
+    end, "parley: quickfix does not accept subcommands")
   end)
 end)

@@ -14,13 +14,45 @@ local dbg = require("parley.debug")
 local M = {}
 
 -- ---------------------------------------------------------------------------
--- Constants
+-- gh availability probe
 -- ---------------------------------------------------------------------------
 
-local DEFAULT_TIMEOUT_MS = 5000
-local DEFAULT_RETRY_COUNT = 2
-local DEFAULT_RETRY_BASE_DELAY_MS = 250
-local DEFAULT_RETRY_MAX_DELAY_MS = 2000
+--- nil = not yet probed, true = available, false = not available.
+--- @type boolean|nil
+M._gh_available = nil
+
+--- Injectable executable checker. Defaults to vim.fn.executable.
+--- @type fun(bin: string): integer
+M._executable = function(bin)
+  return vim.fn.executable(bin)
+end
+
+--- Probe whether the `gh` CLI is available and cache the result.
+--- Called once at setup() and lazily inside check_gh_available().
+function M.probe_gh_executable()
+  M._gh_available = M._executable("gh") == 1
+end
+
+--- Ensure gh availability is known. If not currently confirmed available,
+--- re-probes once (the binary may have just been installed).
+--- When gh is unavailable, emits vim.notify(WARN) and returns an error string.
+--- Returns nil when gh is ok.
+--- @return string|nil
+local function check_gh_available()
+  if M._gh_available ~= true then
+    M.probe_gh_executable()
+  end
+  if not M._gh_available then
+    local msg = "parley: 'gh' (GitHub CLI) not found — install it from https://cli.github.com"
+    vim.notify(msg, vim.log.levels.WARN)
+    return msg
+  end
+  return nil
+end
+
+-- ---------------------------------------------------------------------------
+-- Constants
+-- ---------------------------------------------------------------------------
 
 local RETRYABLE_ERROR_PATTERNS = {
   "i/o timeout",
@@ -42,14 +74,7 @@ local RETRYABLE_ERROR_PATTERNS = {
 ---@param self parley.github.Provider
 ---@return { timeout_ms: integer, retry_count: integer, retry_base_delay_ms: integer, retry_max_delay_ms: integer }
 function M.transport_config(self)
-  local config = self._get_config and self._get_config() or nil
-  local github = config and config.providers and config.providers.github or {}
-  return {
-    timeout_ms = github.timeout_ms or DEFAULT_TIMEOUT_MS,
-    retry_count = github.retry_count or DEFAULT_RETRY_COUNT,
-    retry_base_delay_ms = github.retry_base_delay_ms or DEFAULT_RETRY_BASE_DELAY_MS,
-    retry_max_delay_ms = github.retry_max_delay_ms or DEFAULT_RETRY_MAX_DELAY_MS,
-  }
+  return self._config
 end
 
 ---@param attempt integer
@@ -95,6 +120,11 @@ function M.gh_run(self, cmd)
   local result
 
   dbg.trace("github.transport", "gh_run: cmd=" .. vim.inspect(cmd))
+
+  local gh_err = check_gh_available()
+  if gh_err then
+    error(gh_err, 0)
+  end
 
   for attempt = 1, attempts do
     result = runner(cmd)
@@ -180,6 +210,11 @@ function M.gh_start(self, cmd, callback)
   local function start_attempt()
     attempt = attempt + 1
     dbg.trace("github.transport", "gh_start: attempt=" .. attempt)
+    local gh_err = check_gh_available()
+    if gh_err then
+      finish({ ok = false, err = gh_err })
+      return
+    end
     handle = self._spawn(cmd, function(result)
       handle = nil
       dbg.trace(
@@ -267,13 +302,17 @@ end
 ---   2. `gh config get -h <host> user`  (local config, no network).
 ---   3. `gh api /user`                  (one API call, always authoritative).
 ---
---- Errors are silenced — caller treats nil _viewer_login as "unknown"
---- and defaults is_own to false.
+--- Network/auth errors are silenced — caller treats nil _viewer_login as
+--- "unknown" and defaults is_own to false.
+--- A missing gh executable is reported via check_gh_available().
 ---
 --- @param self parley.github.Provider
 function M.fetch_viewer_login(self)
   if self._viewer_login then
     dbg.trace("github.provider", "fetch_viewer_login: already cached → " .. self._viewer_login)
+    return
+  end
+  if check_gh_available() then
     return
   end
   -- Fast path: gh config (local, no network call)

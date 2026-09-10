@@ -1,18 +1,23 @@
---- parley.vcs — VCS detection.
+--- parley.vcs — VCS detection dispatcher.
 ---
---- Detects whether a buffer path lives inside a recognised VCS repository
---- (git first) and extracts repo root, current branch, and remote URL.
+--- Provides a generic `detect(path)` function that iterates registered VCS
+--- detectors and returns the first match.  No built-in detectors are bundled
+--- here; each provider module is responsible for registering its own detector
+--- via `register_detector()` during `setup()`.
+---
+--- This design lets providers own their VCS probing logic while keeping the
+--- buffer-classification pipeline (buffer_context.lua) provider-agnostic.
 ---
 --- Design notes:
----   • Uses vim.system (Neovim ≥ 0.10) wrapped with plenary.async so the
----     call yields the coroutine instead of blocking Neovim.
----   • detect() must be called inside a plenary.async coroutine.
----   • M._runner is the single I/O seam; replace it in tests to avoid real
----     git invocations.
----   • Only git is supported today; the interface is intentionally generic
----     so additional VCS backends can be added in later phases.
+---   • detect() must be called inside a plenary.async coroutine because
+---     detector functions typically yield while running subprocesses.
+---   • Detectors are tried in registration order; first non-nil result wins.
+---   • reset_detectors() is provided for test isolation.
+---
+--- Revision reads and write validation dispatch through explicit VCS adapters.
 
 local await = require("parley.runtime.await")
+local adapters = require("parley.vcs.adapters")
 
 local M = {}
 
@@ -23,23 +28,68 @@ local M = {}
 --- Information extracted from a VCS repository.
 ---
 --- @class parley.VcsInfo
---- @field vcs        string      VCS type identifier, e.g. "git"
+--- @field vcs        string      VCS type identifier, e.g. "git" or "arc"
 --- @field root       string      Absolute path to the repository root
---- @field branch     string|nil  Active branch name; nil when detached HEAD or unknown
---- @field remote_url string|nil  URL of the "origin" remote; nil when not configured
+--- @field branch     string|nil  Active branch name; for Arc this is the remote branch id from `arc info --json`
+--- @field remote_url string|nil  URL of the "origin" remote or arc remote; nil when not configured
 
 -- ---------------------------------------------------------------------------
--- Default async runner
+-- Detector registry
+-- ---------------------------------------------------------------------------
+
+--- @type { name: string, fn: fun(path: string): parley.VcsInfo|nil }[]
+local _detectors = {}
+
+--- Register an adapter for revision reads and local validation.
+--- Register custom adapters after setup(); duplicate names are rejected.
+--- @param name string
+--- @param adapter parley.VcsAdapter
+function M.register_adapter(name, adapter)
+  adapters.register(name, adapter)
+end
+
+--- Remove all adapters. Does not change detector registrations.
+function M.reset_adapters()
+  adapters.reset()
+end
+
+--- Register a VCS detector function.
+---
+--- Detectors are called in registration order with the buffer file path.
+--- The first one that returns a non-nil VcsInfo wins.
+---
+--- @param name string   Human-readable identifier (e.g. "git", "arc")
+--- @param fn   fun(path: string): parley.VcsInfo|nil
+function M.register_detector(name, fn)
+  assert(type(name) == "string" and name ~= "", "vcs.register_detector: name must be a non-empty string")
+  assert(type(fn) == "function", "vcs.register_detector: fn must be a function")
+  table.insert(_detectors, { name = name, fn = fn })
+end
+
+--- Remove all registered detectors.  Intended for test isolation.
+function M.reset_detectors()
+  _detectors = {}
+end
+
+--- Return a shallow copy of registered detectors in registration order.
+--- @return { name: string, fn: fun(path: string): parley.VcsInfo|nil }[]
+function M.registered_detectors()
+  local copy = {}
+  for i, d in ipairs(_detectors) do
+    copy[i] = d
+  end
+  return copy
+end
+
+-- ---------------------------------------------------------------------------
+-- Default async runner (shared by check_sync_state / read_diff)
 -- ---------------------------------------------------------------------------
 
 --- Run a command asynchronously and return its result.
 ---
---- Wrapped with plenary.async.wrap so it yields the current coroutine while
---- the subprocess runs, keeping Neovim responsive.
----
 --- @type fun(cmd: string[], cwd: string): { code: integer, stdout: string, stderr: string }
 M._runner = function(cmd, cwd)
-  local result = await.system(cmd, { cwd = cwd, text = true })
+  local result = await.system(cmd, { cwd = cwd, text = true, timeout = 10000 })
   return {
     code = result.code,
     stdout = result.stdout or "",
@@ -52,7 +102,6 @@ end
 -- ---------------------------------------------------------------------------
 
 --- Strip trailing whitespace (including newlines) from a string.
----
 --- @param s string
 --- @return string
 local function trim(s)
@@ -63,101 +112,108 @@ end
 -- Public API
 -- ---------------------------------------------------------------------------
 
---- Check that the local repo is in a state suitable for posting a new comment.
+--- Detect VCS information for the file at `path`.
 ---
---- Two checks are performed in order; the first failure short-circuits:
----   1. Local HEAD matches the PR `head_sha` — no unpushed commits.
----   2. The file at `rel_path` has no uncommitted changes.
+--- Iterates registered detectors in order; returns the first non-nil result.
+--- Returns nil when no detector matches or when no detectors are registered.
 ---
 --- Must be called inside a plenary.async coroutine.
 ---
---- @param root     string  Absolute repo root (cwd for git commands)
---- @param rel_path string  Repo-relative path of the file being commented on
---- @param head_sha string  PR head SHA received from GitHub
---- @return { ok: boolean, err?: string }
-function M.check_sync_state(root, rel_path, head_sha)
-  local run = M._runner
-
-  -- ── 1. Unpushed commits ───────────────────────────────────────────────────
-  local head_result = run({ "git", "rev-parse", "HEAD" }, root)
-  if head_result.code ~= 0 then
-    return { ok = false, err = "Cannot comment: failed to read local HEAD (" .. (head_result.stderr or "") .. ")" }
+--- @param  path string  Buffer file path to probe
+--- @return parley.VcsInfo|nil
+function M.detect(path)
+  for _, detector in ipairs(_detectors) do
+    local info = detector.fn(path)
+    if info ~= nil then
+      return info
+    end
   end
-  local local_sha = trim(head_result.stdout)
-  if local_sha ~= head_sha then
+  return nil
+end
+
+--- Read a file at an immutable review revision.
+--- @param info parley.VcsInfo
+--- @param revision string
+--- @param path string
+--- @return string|nil, string|nil
+function M.read_file(info, revision, path)
+  local adapter, err = adapters.get(info)
+  if not adapter then
+    return nil, err
+  end
+  if type(revision) ~= "string" or revision == "" or revision:sub(1, 1) == "-" then
+    return nil, "review revision is unavailable"
+  end
+  local result = M._runner(adapter.show(revision, path), info.root)
+  if result.code ~= 0 then
+    return nil, result.stderr or "cannot read revision content"
+  end
+  return result.stdout or ""
+end
+
+--- Require a clean file and local HEAD equal to the shared review revision.
+--- @param info parley.VcsInfo
+--- @param rel_path string
+--- @param head_sha string
+--- @return {ok: boolean, err?: string}
+function M.check_sync_state(info, rel_path, head_sha)
+  local adapter, err = adapters.get(info)
+  if not adapter then
+    return { ok = false, err = "Cannot comment: " .. err }
+  end
+  if type(head_sha) ~= "string" or head_sha == "" then
+    return { ok = false, err = "Cannot comment: review revision is unavailable. Refresh the review and retry." }
+  end
+  local result = M._runner(adapter.head(), info.root)
+  if result.code ~= 0 then
+    return { ok = false, err = "Cannot comment: failed to read local HEAD (" .. (result.stderr or "") .. ")" }
+  end
+  if trim(result.stdout or "") ~= head_sha then
     return {
       ok = false,
-      err = "Cannot comment: local branch has commits not yet pushed to the remote. Push first and retry.",
+      err = "Cannot comment: local checkout differs from the review revision. "
+        .. "Synchronize the checkout and review, then retry.",
     }
   end
-
-  -- ── 2. Uncommitted changes in the file ───────────────────────────────────
-  local status_result = run({ "git", "status", "--porcelain", "--", rel_path }, root)
-  if status_result.code ~= 0 then
-    return {
-      ok = false,
-      err = "Cannot comment: failed to check file status (" .. (status_result.stderr or "") .. ")",
-    }
+  result = M._runner(adapter.status(rel_path), info.root)
+  if result.code ~= 0 then
+    return { ok = false, err = "Cannot comment: failed to check file status (" .. (result.stderr or "") .. ")" }
   end
-  if (status_result.stdout or "") ~= "" then
+  local dirty, status_err = adapter.dirty(result.stdout or "")
+  if dirty == nil then
+    return { ok = false, err = "Cannot comment: " .. status_err }
+  end
+  if dirty then
     return {
       ok = false,
       err = "Cannot comment: '" .. rel_path .. "' has uncommitted changes. Commit or stash them and retry.",
     }
   end
-
   return { ok = true }
 end
 
---- Detect VCS information for the file at `path`.
----
---- Must be called inside a plenary.async coroutine.  Returns nil when `path`
---- is not inside a recognised VCS repository or when detection fails.
----
---- Currently only git is supported.  The returned `vcs` field is always
---- `"git"` when detection succeeds.
----
---- @param  path string  Buffer file path to probe
---- @return parley.VcsInfo|nil
-function M.detect(path)
-  local run = M._runner
-
-  -- Derive the working directory from the file path.  For a regular file
-  -- /a/b/c.lua this yields /a/b; for an empty string git will simply fail.
-  local cwd = vim.fn.fnamemodify(path, ":p:h")
-
-  -- ── Step 1: is this path inside a git repo? ──────────────────────────────
-  local root_result = run({ "git", "rev-parse", "--show-toplevel" }, cwd)
-  if root_result.code ~= 0 then
-    return nil
+--- Read a review diff through the registered VCS adapter.
+--- @param info parley.VcsInfo
+--- @param base_branch string
+--- @param rel_path string
+--- @param head_sha string
+--- @return string|nil, string|nil
+function M.read_diff(info, base_branch, rel_path, head_sha)
+  local adapter, err = adapters.get(info)
+  if not adapter then
+    return nil, err
   end
-  local root = trim(root_result.stdout)
-
-  -- ── Step 2: current branch ────────────────────────────────────────────────
-  local branch_result = run({ "git", "rev-parse", "--abbrev-ref", "HEAD" }, root)
-  local branch = nil
-  if branch_result.code == 0 then
-    local raw = trim(branch_result.stdout)
-    -- "HEAD" is what git returns for a detached HEAD state — not a real branch.
-    if raw ~= "HEAD" then
-      branch = raw
-    end
+  if type(base_branch) ~= "string" or base_branch == "" or base_branch:sub(1, 1) == "-" then
+    return nil, "review base is unavailable."
   end
-
-  -- ── Step 3: origin remote URL ─────────────────────────────────────────────
-  local remote_result = run({ "git", "remote", "get-url", "origin" }, root)
-  local remote_url = nil
-  if remote_result.code == 0 then
-    remote_url = trim(remote_result.stdout)
+  if type(head_sha) ~= "string" or head_sha == "" or head_sha:sub(1, 1) == "-" then
+    return nil, "review revision is unavailable"
   end
-
-  --- @type parley.VcsInfo
-  return {
-    vcs = "git",
-    root = root,
-    branch = branch,
-    remote_url = remote_url,
-  }
+  local result = M._runner(adapter.diff(base_branch, head_sha, rel_path), info.root)
+  if result.code ~= 0 then
+    return nil, "failed to read review diff (" .. (result.stderr or "") .. ")"
+  end
+  return result.stdout
 end
 
 return M

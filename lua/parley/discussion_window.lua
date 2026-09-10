@@ -3,30 +3,26 @@
 --- Opens a floating scratch buffer that renders all discussions anchored to the
 --- current cursor line. The content is written as Markdown so users with
 --- render-markdown.nvim installed get rich rendering automatically.
-
 local read_service = require("parley.services.read")
 local composer_ui_state = require("parley.ui_states.composer")
 local discussion_ui_state = require("parley.ui_states.discussion")
 local timestamp_format = require("parley.timestamp")
 local render = require("parley.discussion_window.render")
+local reactions = require("parley.reactions")
 local input = require("parley.discussion_window.input")
 local selection = require("parley.discussion_window.selection")
 local window_helpers = require("parley.discussion_window.window")
-
 local dbg = require("parley.debug")
-
+local semantics = require("parley.discussion")
 local M = {}
-
 local INPUT_HEIGHT = 6
 local HIGHLIGHT_NS = vim.api.nvim_create_namespace("parley.discussion_window")
 local INPUT_STATUS_NS = vim.api.nvim_create_namespace("parley.discussion_window.input_status")
-
 ---@class parley.ComposerHandle
 ---@field set_submitting fun(status: string): nil
 ---@field set_idle fun(status: string): nil
 ---@field set_cancel fun(cancel: fun(): nil): nil
 ---@field close fun(force?: boolean): boolean
-
 ---@class parley.DiscussionWindowInstance
 ---@field bufnr integer
 ---@field winid integer
@@ -45,19 +41,15 @@ local INPUT_STATUS_NS = vim.api.nvim_create_namespace("parley.discussion_window.
 ---@field focus_input fun(): nil
 ---@field close fun(): nil
 ---@field submit_input fun(): nil
-
 --- Active window instances keyed by source buffer number.
 ---@type table<integer, parley.DiscussionWindowInstance>
 M._instances = {}
-
 local live_instance
-
 --- Notify hook; replace in tests.
 --- @type fun(msg: string, level: integer)
 M._notify = function(msg, level)
   vim.notify(msg, level)
 end
-
 --- Config accessor; replace in tests.
 --- @type fun(): parley.Config|{ float: parley.FloatConfig }
 M._get_config = function()
@@ -102,38 +94,7 @@ M._select_reaction = function(items, on_choice)
   }, on_choice)
 end
 
-local PICKER_PREVIEW_WIDTH = 60
-
----@param discussion parley.Discussion
----@return string
-function M._format_discussion_picker_item(discussion)
-  local first = discussion.comments and discussion.comments[1] or nil
-  if not first then
-    return "(no comments) (?)"
-  end
-
-  local body = first.body and first.body.text or ""
-  local first_line = vim.split(body, "\n", { plain = true })[1] or ""
-  first_line = vim.trim(first_line)
-  if first_line == "" then
-    first_line = "(empty)"
-  end
-  if vim.fn.strdisplaywidth(first_line) > PICKER_PREVIEW_WIDTH then
-    first_line = vim.fn.strcharpart(first_line, 0, PICKER_PREVIEW_WIDTH - 1) .. "…"
-  end
-
-  local extras = math.max(0, #discussion.comments - 1)
-  local suffix
-  if extras == 0 then
-    suffix = ""
-  elseif extras == 1 then
-    suffix = " (1 more comment)"
-  else
-    suffix = string.format(" (%d more comments)", extras)
-  end
-
-  return string.format("%s (%s)%s", first_line, first.author, suffix)
-end
+M._format_discussion_picker_item = require("parley.discussion_picker").line_preview
 
 --- Discussion picker hook; replace in tests.
 --- @type fun(items: parley.Discussion[], source_winid: integer|nil,
@@ -231,18 +192,6 @@ local function discussions_for_line(state, cursor_line)
   return hits
 end
 
----@param state { discussions: parley.Discussion[] }
----@param discussion_id string
----@return parley.Discussion|nil
-local function discussion_by_id(state, discussion_id)
-  for _, discussion in ipairs(state.discussions) do
-    if discussion.id == discussion_id then
-      return discussion
-    end
-  end
-  return nil
-end
-
 ---@param bufnr integer
 ---@param instance parley.DiscussionWindowInstance
 ---@param lines string[]
@@ -281,6 +230,7 @@ local function open_discussions(bufnr, discussions, mappings, source_winid, sour
   }
   local lines, comment_ranges, title = render.render_lines(discussions, mappings, {
     format_timestamp = format_timestamp,
+    reaction_presentation = reactions.presentation(bufnr),
   })
   local instance = window_helpers.ensure_instance(M._instances, bufnr, lines, float_cfg, source_winid, source_line, {
     hide_input = input_controller.hide_input,
@@ -301,6 +251,40 @@ local function open_discussions(bufnr, discussions, mappings, source_winid, sour
   })
   sync_selected_comment(bufnr)
   return true
+end
+
+--- Refresh the selected thread in place, retaining composer text and selection.
+--- @param bufnr integer
+--- @param snapshot table|nil
+function M.refresh_snapshot(bufnr, snapshot)
+  local instance = live_instance(bufnr)
+  local state = discussion_ui_state.get(bufnr)
+  if not instance or not state or not state.current_discussion_id then
+    return
+  end
+  local discussion = snapshot and semantics.find(snapshot, state.current_discussion_id)
+  if not discussion then
+    if instance.input_state == "hidden" then
+      M.close(bufnr)
+    end
+    return
+  end
+  local lines, ranges, title = render.render_lines(
+    { discussion },
+    vim.tbl_extend("force", snapshot.mappings or {}, snapshot.all_mappings or {}),
+    {
+      format_timestamp = format_timestamp,
+      reaction_presentation = reactions.presentation(bufnr),
+    }
+  )
+  local selected = state.selected_comment_id
+  local cursor = vim.api.nvim_win_get_cursor(instance.winid)[1]
+  instance.comment_ranges = ranges
+  write_lines(bufnr, instance, lines)
+  vim.api.nvim_win_set_config(instance.winid, { title = title, title_pos = "center" })
+  local row = selected and ranges[selected] and ranges[selected].start_line or math.min(cursor, math.max(1, #lines))
+  vim.api.nvim_win_set_cursor(instance.winid, { row, 0 })
+  sync_selected_comment(bufnr)
 end
 
 --- Return whether the discussion window is open for `bufnr`.
@@ -333,7 +317,7 @@ end
 
 --- Open the discussion window for the current line in `bufnr`.
 ---@param bufnr integer
----@param opts? { cursor_line?: integer }
+---@param opts? { cursor_line?: integer, on_select?: fun(discussion: parley.Discussion): boolean }
 ---@return boolean
 function M.open_current_line(bufnr, opts)
   opts = opts or {}
@@ -364,11 +348,18 @@ function M.open_current_line(bufnr, opts)
   end
 
   if #discussions == 1 then
+    if opts.on_select then
+      return opts.on_select(discussions[1])
+    end
     return open_discussions(bufnr, discussions, state.mappings or {}, source_winid, cursor_line)
   end
 
   M._select_discussion(discussions, source_winid, function(chosen)
     if not chosen then
+      return
+    end
+    if opts.on_select then
+      opts.on_select(chosen)
       return
     end
     open_discussions(bufnr, { chosen }, state.mappings or {}, source_winid, cursor_line)
@@ -398,16 +389,20 @@ function M.open_discussion(bufnr, discussion_id)
     return false
   end
 
-  local discussion = discussion_by_id(state, discussion_id)
+  local discussion = semantics.find(state, discussion_id)
   if not discussion then
     M.close(bufnr)
     M._notify("Parley discussion not found", vim.log.levels.INFO)
     return false
   end
 
-  local mapping = state.mappings and state.mappings[discussion.id] or nil
+  local mappings = vim.tbl_extend("force", state.mappings or {}, state.all_mappings or {})
+  local mapping = mappings[discussion.id]
   local source_line = mapping and mapping.local_line or nil
-  return open_discussions(bufnr, { discussion }, state.mappings or {}, source_winid, source_line)
+  if state.rel_path and discussion.file ~= state.rel_path then
+    source_line = nil
+  end
+  return open_discussions(bufnr, { discussion }, mappings, source_winid, source_line)
 end
 
 --- Return the first discussion for the current source buffer line.
@@ -419,11 +414,7 @@ function M.current_discussion(bufnr)
   local snapshot = read_service.get_buffer_state(bufnr)
   local discussion_id = ui_state and ui_state.current_discussion_id or nil
   if snapshot and discussion_id then
-    for _, discussion in ipairs(snapshot.discussions or {}) do
-      if discussion.id == discussion_id then
-        return discussion
-      end
-    end
+    return semantics.find(snapshot, discussion_id)
   end
   return nil
 end
@@ -448,7 +439,8 @@ function M.reply_current_line(bufnr)
     return false
   end
 
-  local parent = discussion.comments[#discussion.comments]
+  local _, selected = current_selection(bufnr)
+  local parent = selected or discussion.comments[#discussion.comments]
   if not parent then
     M._notify("Cannot reply to an empty Parley discussion", vim.log.levels.WARN)
     return false
@@ -470,18 +462,7 @@ function M.react_current_comment(bufnr)
     return false
   end
 
-  M._select_reaction(render.reaction_picker_items(comment), function(item)
-    if not item then
-      return
-    end
-    require("parley.services.write").react_comment(
-      bufnr,
-      ui_state and ui_state.current_source_line or nil,
-      comment,
-      item.reaction
-    )
-  end)
-  return true
+  return reactions.select(bufnr, ui_state and ui_state.current_source_line, comment, M._select_reaction, M._notify)
 end
 
 --- Edit the currently selected comment.
@@ -580,68 +561,24 @@ end
 --- }
 ---@return parley.ComposerHandle|nil
 function M.show_new_comment_input(bufnr, opts)
-  bufnr = resolve_source_bufnr(bufnr)
-  local instance = live_instance(bufnr)
-  if not instance then
-    local state = read_service.get_buffer_state(bufnr)
-    local config = M._get_config() or {}
-    local source_winid = window_helpers.resolve_source_winid(bufnr, nil)
-    local float_cfg = config.float or {
-      border = "rounded",
-      max_width = 80,
-      max_height = 30,
-    }
-    if not source_winid then
-      M._notify("Open the source buffer to write a Parley comment", vim.log.levels.INFO)
-      return nil
-    end
-    local discussions = state and discussions_for_line(state, opts.cursor_line) or {}
-    if #discussions > 0 then
-      local lines, comment_ranges, title = render.render_lines(discussions, state.mappings, {
-        format_timestamp = format_timestamp,
-      })
-      instance = window_helpers.ensure_instance(M._instances, bufnr, lines, float_cfg, source_winid, opts.cursor_line, {
-        hide_input = input_controller.hide_input,
-        input_height = INPUT_HEIGHT,
-        on_cursor_moved = sync_selected_comment,
-        title = title,
-      })
-      instance.comment_ranges = comment_ranges
-      write_lines(bufnr, instance, lines)
-      discussion_ui_state.set(bufnr, {
-        visible = true,
-        current_discussion_id = discussions[1].id,
-        current_source_line = opts.cursor_line,
-        highlighted_parent_comment_id = nil,
-        selected_comment_id = nil,
-        input_visible = false,
-      })
-    else
-      local placeholder = { "_No discussion on this line yet._" }
-      instance =
-        window_helpers.ensure_instance(M._instances, bufnr, placeholder, float_cfg, source_winid, opts.cursor_line, {
-          hide_input = input_controller.hide_input,
-          input_height = INPUT_HEIGHT,
-          on_cursor_moved = sync_selected_comment,
-        })
-      instance.comment_ranges = {}
-      write_lines(bufnr, instance, placeholder)
-      discussion_ui_state.set(bufnr, {
-        visible = true,
-        current_discussion_id = nil,
-        current_source_line = opts.cursor_line,
-        highlighted_parent_comment_id = nil,
-        selected_comment_id = nil,
-        input_visible = false,
-      })
-    end
-  end
-
-  return input_controller.show_input(bufnr, instance, {
-    status = opts.status,
-    initial_text = opts.initial_text,
-    parent_comment_id = nil,
-    on_submit = opts.on_submit,
+  return require("parley.discussion_window.new_comment").show(bufnr, opts, {
+    get_config = M._get_config,
+    notify = M._notify,
+    instances = M._instances,
+    close = M.close,
+    resolve_source_bufnr = resolve_source_bufnr,
+    live_instance = live_instance,
+    read_service = read_service,
+    window_helpers = window_helpers,
+    input_controller = input_controller,
+    INPUT_HEIGHT = INPUT_HEIGHT,
+    sync_selected_comment = sync_selected_comment,
+    render = render,
+    format_timestamp = format_timestamp,
+    write_lines = write_lines,
+    discussion_ui_state = discussion_ui_state,
+    discussions_for_line = discussions_for_line,
+    reactions = reactions,
   })
 end
 

@@ -13,11 +13,6 @@ M._has_nvim_010 = function()
   return vim.fn.has("nvim-0.10") == 1
 end
 
---- @type fun(bin: string): boolean|integer
-M._executable = function(bin)
-  return vim.fn.executable(bin)
-end
-
 --- @type fun(): table|nil
 M._get_parley = function()
   return require("parley")
@@ -47,24 +42,14 @@ M._get_buf_props = function(bufnr)
   }
 end
 
---- @type fun(cmd: string[], cwd: string): { code: integer, stdout: string, stderr: string }
-M._run = function(cmd, cwd)
-  local result = vim.system(cmd, { cwd = cwd, text = true }):wait()
-  return {
-    code = result.code or 0,
-    stdout = result.stdout or "",
-    stderr = result.stderr or "",
-  }
+--- @type fun(timeout: integer, predicate: fun(): boolean): boolean
+M._wait = function(timeout, predicate)
+  return vim.wait(timeout, predicate, 20)
 end
 
---- @type fun(host: string): string|nil, string|nil
-M._read_github_token = function(host)
-  return require("parley.providers.github.auth").read_token(host)
-end
-
---- @type fun(url: string|nil): { host: string, owner: string, repo: string }|nil
-M._parse_remote_url = function(url)
-  return require("parley.providers.github.provider")._parse_remote_url(url)
+--- @type fun(): integer
+M._alternate_buf = function()
+  return vim.fn.bufnr("#")
 end
 
 --- @return table
@@ -76,12 +61,6 @@ end
 --- @return boolean
 local function is_true(value)
   return value == true or value == 1 or value == 2
-end
-
---- @param text string
---- @return string
-local function trim(text)
-  return (text or ""):gsub("%s+$", "")
 end
 
 --- @param path string
@@ -102,12 +81,6 @@ local function path_writable(path)
   return type(path) == "string" and path ~= "" and is_true(M._filewritable(path))
 end
 
---- @param name string
---- @return boolean, any
-local function try_require(name)
-  return pcall(M._require, name)
-end
-
 local function check_runtime()
   local health = health_api()
   health.start("Runtime")
@@ -118,23 +91,14 @@ local function check_runtime()
     health.error("Neovim >= 0.10 is required")
   end
 
-  if try_require("plenary.async") then
+  local available, async = pcall(M._require, "plenary.async")
+  if available then
     health.ok("plenary.async is installed")
   else
     health.error("plenary.async is not installed")
   end
 
-  if is_true(M._executable("git")) then
-    health.ok("git executable found")
-  else
-    health.error("git executable not found")
-  end
-
-  if is_true(M._executable("gh")) then
-    health.ok("gh executable found")
-  else
-    health.error("gh executable not found")
-  end
+  return available, async
 end
 
 --- @return table|nil, table|nil
@@ -187,7 +151,7 @@ local function check_integrations(config)
   health.start("Integrations")
 
   local telescope_enabled = config and config.telescope == true
-  if try_require("telescope") then
+  if pcall(M._require, "telescope") then
     health.ok("telescope.nvim is installed")
   elseif telescope_enabled then
     health.warn("telescope.nvim is enabled in Parley config but not installed")
@@ -195,115 +159,115 @@ local function check_integrations(config)
     health.info("telescope.nvim is not installed")
   end
 
-  if try_require("render-markdown") then
+  if pcall(M._require, "render-markdown") then
     health.ok("render-markdown.nvim is installed")
   else
     health.info("render-markdown.nvim is not installed")
   end
 end
 
---- @param repo_root string
---- @return string|nil
-local function detect_branch(repo_root)
-  local result = M._run({ "git", "rev-parse", "--abbrev-ref", "HEAD" }, repo_root)
-  if result.code ~= 0 then
-    return nil
+--- Resolve the originating file when :checkhealth has switched to its report.
+--- @return table|nil
+local function source_props()
+  local props = M._get_buf_props(M._current_buf())
+  if props.name == "health://" or props.filetype == "checkhealth" then
+    local alternate = M._alternate_buf()
+    if alternate < 1 or not vim.api.nvim_buf_is_valid(alternate) then
+      return nil
+    end
+    props = M._get_buf_props(alternate)
+    if props.buftype ~= "" or props.name == "" then
+      return nil
+    end
   end
-
-  local branch = trim(result.stdout)
-  if branch == "" or branch == "HEAD" then
-    return nil
-  end
-  return branch
+  return props
 end
 
---- @param repo_root string
---- @return string|nil
-local function detect_remote(repo_root)
-  local result = M._run({ "git", "remote", "get-url", "origin" }, repo_root)
-  if result.code ~= 0 then
-    return nil
+--- Gather provider diagnostics without constructing a provider or publishing UI.
+--- @param path string
+--- @param config table
+--- @return parley.HealthEntry[]
+local function collect(path, config)
+  local info = require("parley.vcs").detect(path)
+  if not info then
+    return { { level = "info", message = "No recognized repository for the source file" } }
   end
-  local remote_url = trim(result.stdout)
-  if remote_url == "" then
-    return nil
+  local entries = { { level = "ok", message = "Repository: " .. info.root } }
+  for _, spec in ipairs(require("parley.registry").registered()) do
+    local opts = spec.detect(info)
+    if opts ~= nil then
+      entries[#entries + 1] = { level = "ok", message = spec.name .. " provider matches current repository" }
+      if spec.health then
+        local result = spec.health({ vcs_info = info, opts = opts, config = config })
+        assert(type(result) == "table", "invalid health results")
+        for _, entry in ipairs(result) do
+          assert(type(entry) == "table" and type(entry.message) == "string", "invalid health entry")
+          assert(vim.tbl_contains({ "ok", "info", "warn", "error" }, entry.level), "invalid health level")
+          entries[#entries + 1] = entry
+        end
+      else
+        entries[#entries + 1] = { level = "info", message = spec.name .. ": additional diagnostics unavailable" }
+      end
+      return entries
+    end
   end
-  return remote_url
+  entries[#entries + 1] = { level = "info", message = "No registered provider matches the current repository" }
+  return entries
 end
 
-local function check_current_buffer()
+--- @param props table|nil
+--- @param config table|nil
+--- @param async table|nil
+local function check_repository(props, config, async)
   local health = health_api()
-  health.start("Current Buffer")
-
-  local bufnr = M._current_buf()
-  local props = M._get_buf_props(bufnr)
+  health.start("Current Repository")
+  if not config or not async then
+    health.info("Repository diagnostics skipped: setup and plenary.async are required")
+    return
+  end
+  if not props then
+    health.info("Repository diagnostics skipped: source file buffer is unavailable")
+    return
+  end
   if props.buftype ~= "" then
-    health.info("current buffer buftype=" .. props.buftype .. " is not a regular file buffer")
+    health.info("Source buffer is not a regular file")
     return
   end
-
   if props.name == "" then
-    health.info("current buffer has no file path")
+    health.info("Source buffer has no file path")
     return
   end
-
-  if not is_true(M._executable("git")) then
-    health.warn("cannot inspect current buffer repository because git is unavailable")
+  local done, active, entries = false, true, nil
+  async.run(function()
+    local ok, result = pcall(collect, props.name, config)
+    if not active then
+      return
+    end
+    entries = ok and result or { { level = "warn", message = "Repository diagnostics failed" } }
+    done = true
+  end)
+  if not done then
+    M._wait(10000, function()
+      return done
+    end)
+  end
+  active = false
+  if not done then
+    health.warn("Repository diagnostics timed out after 10 seconds")
     return
   end
-
-  local cwd = parent_dir(props.name)
-  local root_result = M._run({ "git", "rev-parse", "--show-toplevel" }, cwd)
-  if root_result.code ~= 0 then
-    health.info("current buffer is not in a git repository")
-    return
+  for _, entry in ipairs(entries) do
+    health[entry.level](entry.message)
   end
-
-  local repo_root = trim(root_result.stdout)
-  health.ok("current buffer is in git repository: " .. repo_root)
-
-  local branch = detect_branch(repo_root)
-  if branch then
-    health.ok("current branch: " .. branch)
-  else
-    health.info("current branch could not be determined (possibly detached HEAD)")
-  end
-
-  local remote_url = detect_remote(repo_root)
-  if not remote_url then
-    health.warn("origin remote is not configured")
-    return
-  end
-  health.ok("origin remote: " .. remote_url)
-
-  local parsed = M._parse_remote_url(remote_url)
-  if not parsed then
-    health.warn("origin remote format is not recognized by Parley: " .. remote_url)
-    return
-  end
-
-  if parsed.host ~= "github.com" then
-    health.warn("current repository host " .. parsed.host .. " is not supported yet")
-    return
-  end
-
-  health.ok("GitHub provider matches current repository")
-
-  local token, err = M._read_github_token(parsed.host)
-  if token then
-    health.ok("GitHub authentication token resolved for " .. parsed.host)
-  else
-    health.warn("GitHub auth is not configured for " .. parsed.host .. ": " .. tostring(err or "unknown error"))
-  end
-
-  health.info("PR detection is not probed during checkhealth because it would require a live API call")
+  health.info("Credentials are checked locally; authentication and PR detection are not verified with the server")
 end
 
 function M.check()
-  check_runtime()
+  local props = source_props()
+  local available, async = check_runtime()
   local _, config = check_configuration()
   check_integrations(config)
-  check_current_buffer()
+  check_repository(props, config, available and async or nil)
 end
 
 return M

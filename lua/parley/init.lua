@@ -11,7 +11,7 @@ local M = {}
 
 --- Default configuration values.
 --- @class parley.Config
---- @field refresh_interval integer  Auto-refresh interval in seconds (0 = disabled)
+--- @field refresh_interval integer  Seconds between visible-review polling rounds; 0 disables periodic refresh
 --- @field cache_dir         string  Directory for disk-cached API responses
 --- @field signs             parley.SignsConfig
 --- @field virtual_text      parley.VirtualTextConfig
@@ -48,18 +48,14 @@ local M = {}
 --- @field spinner_interval  integer
 
 --- @class parley.KeymapsConfig
---- @field next_comment string  Jump to next commented line
---- @field prev_comment string  Jump to previous commented line
-
---- @class parley.GitHubProviderConfig
---- @field timeout_ms integer
---- @field retry_count integer
---- @field retry_base_delay_ms integer
---- @field retry_max_delay_ms integer
+--- @field buf_next    string  Jump to next commented line in buffer
+--- @field buf_prev    string  Jump to previous commented line in buffer
+--- @field review_next string  Jump to next comment in the whole review
+--- @field review_prev string  Jump to previous comment in the whole review
 
 --- @type parley.Config
 local defaults = {
-  refresh_interval = 300, -- 5 minutes
+  refresh_interval = 300, -- Seconds between background refresh rounds
   cache_dir = vim.fn.stdpath("cache") .. "/parley",
   debug = false,
   telescope = true,
@@ -89,17 +85,12 @@ local defaults = {
     spinner_interval = 100,
   },
   keymaps = {
-    next_comment = "]c",
-    prev_comment = "[c",
+    buf_next = "]c",
+    buf_prev = "[c",
+    review_next = "]C",
+    review_prev = "[C",
   },
-  providers = {
-    github = {
-      timeout_ms = 5000,
-      retry_count = 2,
-      retry_base_delay_ms = 250,
-      retry_max_delay_ms = 2000,
-    },
-  },
+  providers = {},
 }
 
 --- Active (merged) configuration. Nil until setup() is called.
@@ -110,14 +101,8 @@ M._notify = function(msg, level)
   vim.notify(msg, level)
 end
 
---- @type table<string, string[]>
-local PARLEY_GROUPS = {
-  discussion = { "open", "close", "toggle", "new", "reply" },
-  comment = { "react", "edit", "delete" },
-  nav = { "next", "prev" },
-}
-
-local PARLEY_TOP_LEVEL = { "discussion", "comment", "nav", "refresh" }
+local commands = require("parley.commands")
+local PARLEY_GROUPS, PARLEY_TOP_LEVEL = commands.groups, commands.top_level
 
 --- @param items string[]
 --- @param prefix string
@@ -179,10 +164,34 @@ function M._dispatch_parley(fargs, bufnr, cmd_opts)
     return
   end
 
+  if group == "review" then
+    if action ~= "actions" then
+      error("parley: expected review actions", 0)
+    end
+    require("parley.review_actions").run(bufnr)
+    return
+  end
+
+  if group == "quickfix" then
+    if action ~= nil and action ~= "" then
+      error("parley: quickfix does not accept subcommands", 0)
+    end
+    require("parley.quickfix").open(bufnr)
+    return
+  end
+
   if group == "discussion" then
     local discussion_window = require("parley.discussion_window")
     if action == nil or action == "" then
       error("parley: expected a discussion action", 0)
+    end
+    if commands.issue_actions[action] then
+      require("parley.discussion_actions").run(bufnr, commands.issue_actions[action])
+      return
+    end
+    if action == "list" then
+      require("parley.discussion_picker").open(bufnr)
+      return
     end
     if action == "open" then
       discussion_window.open_current_line(bufnr)
@@ -216,12 +225,20 @@ function M._dispatch_parley(fargs, bufnr, cmd_opts)
     if action == nil or action == "" then
       error("parley: expected a nav action", 0)
     end
-    if action == "next" then
-      nav_mod.next(bufnr)
+    if action == "buf-next" then
+      nav_mod.buf_next(bufnr)
       return
     end
-    if action == "prev" then
-      nav_mod.prev(bufnr)
+    if action == "buf-prev" then
+      nav_mod.buf_prev(bufnr)
+      return
+    end
+    if action == "review-next" then
+      nav_mod.review_next(bufnr)
+      return
+    end
+    if action == "review-prev" then
+      nav_mod.review_prev(bufnr)
       return
     end
     error("parley: unknown nav action: " .. tostring(action), 0)
@@ -264,13 +281,17 @@ end
 ---
 --- ```lua
 --- require("parley").setup({
----   refresh_interval = 120,
+---   telescope = false,
 --- })
 --- ```
 ---
 --- @param opts parley.Config | nil  Partial config; merged with defaults.
 function M.setup(opts)
-  M.config = vim.tbl_deep_extend("force", defaults, opts or {})
+  local providers = require("parley.providers")
+  local config = vim.tbl_deep_extend("force", vim.deepcopy(defaults), { providers = providers.defaults() }, opts or {})
+  local periodic = require("parley.periodic_refresh")
+  periodic.validate(config.refresh_interval)
+  M.config = config
 
   require("parley.debug").tracing_enable(M.config.debug)
 
@@ -281,20 +302,15 @@ function M.setup(opts)
   signs.setup_highlights()
   require("parley.progress_popup").setup()
 
-  -- Reset and re-populate the provider registry on every setup() call so
-  -- that calling setup() twice produces a clean, deterministic state.
-  -- Built-in provider specs are registered here as they are implemented
-  -- (Step 9+).  User-supplied providers can call registry.register() after
-  -- setup() if needed.
+  -- Reset and re-populate the provider registry and VCS detectors on every
+  -- setup() call so that calling setup() twice produces a clean state.
+  -- User-supplied providers can call registry.register() after setup() if needed.
   registry.reset()
+  local vcs = require("parley.vcs")
+  vcs.reset_detectors()
 
-  -- Register built-in providers.
-  local gh = require("parley.providers.github.provider")
-  registry.register({
-    name = "GitHub",
-    detect = gh.detect,
-    factory = gh.new,
-  })
+  vcs.reset_adapters()
+  providers.register({ registry = registry, vcs = vcs }, M.config.providers)
 
   if M.config.telescope then
     local ok_telescope, telescope = pcall(require, "telescope")
@@ -308,15 +324,25 @@ function M.setup(opts)
 
   -- Register navigation keymaps (global; act on the current buffer at call time).
   -- An empty string disables the keymap.
-  if M.config.keymaps.next_comment ~= "" then
-    vim.keymap.set("n", M.config.keymaps.next_comment, function()
-      nav.next(vim.api.nvim_get_current_buf())
-    end, { desc = "Jump to next Parley comment" })
+  if M.config.keymaps.buf_next ~= "" then
+    vim.keymap.set("n", M.config.keymaps.buf_next, function()
+      nav.buf_next(vim.api.nvim_get_current_buf())
+    end, { desc = "Jump to next Parley comment in buffer" })
   end
-  if M.config.keymaps.prev_comment ~= "" then
-    vim.keymap.set("n", M.config.keymaps.prev_comment, function()
-      nav.prev(vim.api.nvim_get_current_buf())
-    end, { desc = "Jump to previous Parley comment" })
+  if M.config.keymaps.buf_prev ~= "" then
+    vim.keymap.set("n", M.config.keymaps.buf_prev, function()
+      nav.buf_prev(vim.api.nvim_get_current_buf())
+    end, { desc = "Jump to previous Parley comment in buffer" })
+  end
+  if M.config.keymaps.review_next ~= "" then
+    vim.keymap.set("n", M.config.keymaps.review_next, function()
+      nav.review_next(vim.api.nvim_get_current_buf())
+    end, { desc = "Jump to next Parley comment in review" })
+  end
+  if M.config.keymaps.review_prev ~= "" then
+    vim.keymap.set("n", M.config.keymaps.review_prev, function()
+      nav.review_prev(vim.api.nvim_get_current_buf())
+    end, { desc = "Jump to previous Parley comment in review" })
   end
 
   -- BufEnter triggers a refresh; the read service's classify step decides
@@ -324,6 +350,19 @@ function M.setup(opts)
   -- whose remote matches a registered provider).
   local augroup = vim.api.nvim_create_augroup("parley", { clear = true })
   pcall(vim.api.nvim_del_user_command, "Parley")
+  periodic.setup(M.config.refresh_interval)
+  vim.api.nvim_create_autocmd({ "FocusLost", "FocusGained" }, {
+    group = augroup,
+    callback = function(args)
+      periodic.focus(args.event == "FocusGained")
+    end,
+    desc = "Parley: pause periodic refresh while unfocused",
+  })
+  vim.api.nvim_create_autocmd("VimLeavePre", {
+    group = augroup,
+    callback = periodic.stop,
+    desc = "Parley: stop periodic refresh",
+  })
 
   vim.api.nvim_create_autocmd("BufEnter", {
     group = augroup,
@@ -331,6 +370,14 @@ function M.setup(opts)
       read_service.refresh_async(args.buf, { notify_errors = false })
     end,
     desc = "Parley: refresh PR discussions on buffer enter",
+  })
+
+  vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI", "BufWritePost", "BufReadPost", "BufUnload" }, {
+    group = augroup,
+    callback = function(args)
+      require("parley.repositories.review").remap_async(args.buf)
+    end,
+    desc = "Parley: update local discussion positions",
   })
 
   vim.api.nvim_create_user_command("Parley", function(cmd_opts)

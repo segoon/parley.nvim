@@ -5,6 +5,13 @@ local async_tests = require("plenary.async.tests")
 local provider_mod = require("parley.provider")
 local model = require("parley.model")
 local gh = require("parley.providers.github.provider")
+local transport = require("parley.providers.github.transport")
+
+-- All tests in this file inject a fake _runner/_spawn and exercise provider
+-- logic, not the gh availability guard. Mark gh as available so that
+-- check_gh_available() does not re-probe (which would fail in CI where gh is
+-- absent) and lets the injected runners receive the call.
+transport._gh_available = true
 
 -- ---------------------------------------------------------------------------
 -- Fixtures — raw GitHub API JSON responses (as Lua strings)
@@ -301,7 +308,7 @@ end
 ---   ): vim.SystemObj|nil,
 ---   _sleep?: fun(timeout_ms: integer): nil,
 ---   _defer?: fun(callback: fun(), timeout_ms: integer): uv_timer_t|nil,
----   _get_config?: fun(): table|nil,
+---   config?: table,
 ---   _system?: fun(cmd: string[], opts: table, callback: fun(result: vim.SystemCompleted)): vim.SystemObj,
 --- }
 local function make_provider(opts)
@@ -310,13 +317,12 @@ local function make_provider(opts)
   end
   opts = opts or {}
   return gh.new({
-    owner = "owner",
-    repo = "repo",
+    repository = "owner/repo",
     _runner = opts._runner,
     _spawn = opts._spawn,
     _sleep = opts._sleep,
     _defer = opts._defer,
-    _get_config = opts._get_config,
+    config = opts.config,
     _system = opts._system,
     _auth = make_auth("ghp_TESTTOKEN"),
   })
@@ -363,19 +369,19 @@ end
 
 describe("parley.providers.github.provider — new / validate", function()
   it("returns a table that passes provider.validate()", function()
-    local p = gh.new({ owner = "o", repo = "r" })
+    local p = gh.new({ repository = "o/r" })
     assert.is_true(provider_mod.validate(p))
   end)
 
-  it("errors when owner is missing", function()
+  it("errors when repository is missing", function()
     assert.has_error(function()
-      gh.new({ repo = "r" })
+      gh.new({})
     end)
   end)
 
-  it("errors when repo is missing", function()
+  it("errors when repository is malformed", function()
     assert.has_error(function()
-      gh.new({ owner = "o" })
+      gh.new({ repository = "not-valid" })
     end)
   end)
 end)
@@ -386,12 +392,12 @@ end)
 
 async_tests.describe("parley.providers.github.provider — auth", function()
   async_tests.it("returns token from the auth module", function()
-    local p = gh.new({ owner = "o", repo = "r", _auth = make_auth("ghp_ABC") })
+    local p = gh.new({ repository = "o/r", _auth = make_auth("ghp_ABC") })
     assert.equals("ghp_ABC", p:auth())
   end)
 
   async_tests.it("propagates error when auth module returns nil", function()
-    local p = gh.new({ owner = "o", repo = "r", _auth = make_auth_err("no token") })
+    local p = gh.new({ repository = "o/r", _auth = make_auth_err("no token") })
     assert.has_error(function()
       p:auth()
     end)
@@ -460,9 +466,6 @@ async_tests.describe("parley.providers.github.provider — detect_pr", function(
         timeouts[#timeouts + 1] = opts.timeout
         callback({ code = 0, stdout = PR_LIST_EMPTY_JSON, stderr = "" })
         return { kill = function() end }
-      end,
-      _get_config = function()
-        return nil
       end,
     })
 
@@ -1149,6 +1152,22 @@ async_tests.describe("parley.providers.github.provider — submit_review", funct
 end)
 
 -- ---------------------------------------------------------------------------
+-- Suite: progress_label
+-- ---------------------------------------------------------------------------
+
+describe("parley.providers.github.provider — progress_label", function()
+  it("returns 'github.com' for the default host", function()
+    local p = make_provider({})
+    assert.equals("github.com", p:progress_label())
+  end)
+
+  it("returns the configured host for a GitHub Enterprise instance", function()
+    local p = gh.new({ host = "github.mycompany.com", repository = "owner/repo", _auth = make_auth("token") })
+    assert.equals("github.mycompany.com", p:progress_label())
+  end)
+end)
+
+-- ---------------------------------------------------------------------------
 -- Suite: M._parse_remote_url
 -- ---------------------------------------------------------------------------
 
@@ -1217,24 +1236,24 @@ end)
 -- ---------------------------------------------------------------------------
 
 describe("parley.providers.github.provider — detect", function()
-  it("returns owner/repo/host for an SSH github.com URL", function()
+  it("returns repository/host for an SSH github.com URL", function()
     local opts = gh.detect({
       vcs = "git",
       root = "/some/repo",
       branch = "main",
       remote_url = "git@github.com:owner/repo.git",
     })
-    assert.same({ host = "github.com", owner = "owner", repo = "repo" }, opts)
+    assert.same({ host = "github.com", repository = "owner/repo" }, opts)
   end)
 
-  it("returns owner/repo/host for an HTTPS github.com URL", function()
+  it("returns repository/host for an HTTPS github.com URL", function()
     local opts = gh.detect({
       vcs = "git",
       root = "/some/repo",
       branch = "main",
       remote_url = "https://github.com/owner/repo",
     })
-    assert.same({ host = "github.com", owner = "owner", repo = "repo" }, opts)
+    assert.same({ host = "github.com", repository = "owner/repo" }, opts)
   end)
 
   it("returns nil for a non-GitHub host (gitlab.com)", function()

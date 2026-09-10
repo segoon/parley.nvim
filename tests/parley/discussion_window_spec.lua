@@ -276,7 +276,15 @@ describe("parley.discussion_window", function()
     local bufnr = scratch(10)
     vim.api.nvim_win_set_cursor(0, { 3, 0 })
 
+    require("parley.repositories.provider").store(bufnr, {
+      cache_identity = function()
+        return nil
+      end,
+      reaction_choices = require("parley.providers.github.reactions").choices,
+      reaction_presentation = require("parley.providers.github.reactions").presentation,
+    }, {})
     review_repository._seed(bufnr, {
+      review = { pr = { id = "r" }, head_sha = "rev" },
       status = "ready",
       stale = false,
       discussions = {
@@ -591,7 +599,15 @@ describe("parley.discussion_window", function()
     vim.api.nvim_win_set_cursor(0, { 3, 0 })
     local calls = {}
 
+    require("parley.repositories.provider").store(bufnr, {
+      cache_identity = function()
+        return nil
+      end,
+      reaction_choices = require("parley.providers.github.reactions").choices,
+      reaction_presentation = require("parley.providers.github.reactions").presentation,
+    }, {})
     review_repository._seed(bufnr, {
+      review = { pr = { id = "r" }, head_sha = "rev" },
       status = "ready",
       stale = false,
       discussions = {
@@ -893,5 +909,34 @@ describe("parley.discussion_window", function()
     assert.is_true(discussion_window.is_open(bufnr))
     assert.is_nil(instance.input_winid)
     assert.is_true(vim.api.nvim_win_is_valid(instance.winid))
+  end)
+
+  it("closes the discussion window when new-comment input is dismissed on a line with no discussions", function()
+    local bufnr = scratch(10)
+    vim.api.nvim_win_set_cursor(0, { 5, 0 })
+
+    review_repository._seed(bufnr, {
+      status = "ready",
+      stale = false,
+      discussions = {},
+      mappings = {},
+    })
+
+    discussion_window._confirm_discard = function(_msg)
+      return true
+    end
+    local composer = discussion_window.show_new_comment_input(bufnr, {
+      cursor_line = 5,
+      status = "Drafting new comment",
+      on_submit = function() end,
+    })
+
+    assert.is_not_nil(composer)
+    assert.is_true(discussion_window.is_open(bufnr))
+
+    vim.api.nvim_buf_set_lines(discussion_window._instances[bufnr].input_bufnr, 0, -1, false, { "draft" })
+    composer.close(false)
+
+    assert.is_false(discussion_window.is_open(bufnr))
   end)
 end)

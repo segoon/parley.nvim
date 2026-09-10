@@ -63,6 +63,9 @@ describe("parley.discussion_window.render", function()
 
     local lines, ranges, title = render.render_lines({ discussion }, { d1 = { stale = true } }, {
       format_timestamp = formatter,
+      reaction_presentation = function(code)
+        return require("parley.providers.github.reactions").presentation(nil, code)
+      end,
     })
 
     assert.same({
@@ -78,15 +81,36 @@ describe("parley.discussion_window.render", function()
       c1 = { start_line = 1, end_line = 4 },
       c2 = { start_line = 6, end_line = 7 },
     }, ranges)
-    assert.equals("unresolved · stale anchor", title)
+    assert.equals("unresolved · stale", title)
+  end)
+
+  it("renders placeholder text for a discussion with no comments", function()
+    local discussion = make_discussion({ comments = {} })
+
+    local lines, ranges, title = render.render_lines({ discussion }, {}, {
+      format_timestamp = formatter,
+      reaction_presentation = function(code)
+        return require("parley.providers.github.reactions").presentation(nil, code)
+      end,
+    })
+
+    assert.same({ "(no comments in the discussion yet)" }, lines)
+    assert.same({}, ranges)
+    assert.equals("unresolved", title)
   end)
 
   it("builds reaction picker items with counts and viewer state", function()
-    local items = render.reaction_picker_items(make_comment({
-      reactions = {
-        model.new_reaction({ type = "heart", count = 2, viewer_reacted = true }),
+    local items = require("parley.reactions").items(
+      {
+        reaction_choices = require("parley.providers.github.reactions").choices,
       },
-    }))
+      {},
+      make_comment({
+        reactions = {
+          model.new_reaction({ type = "heart", count = 2, viewer_reacted = true }),
+        },
+      })
+    )
 
     assert.same({ reaction = "+1", emoji = "👍", label = "+1", count = 0, viewer_reacted = false }, items[1])
     assert.same({ reaction = "heart", emoji = "❤️", label = "heart", count = 2, viewer_reacted = true }, items[5])

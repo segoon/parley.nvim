@@ -1,26 +1,7 @@
 local M = {}
-
-local REACTION_EMOJI = {
-  ["+1"] = "👍",
-  ["-1"] = "👎",
-  laugh = "😄",
-  confused = "😕",
-  heart = "❤️",
-  hooray = "🎉",
-  rocket = "🚀",
-  eyes = "👀",
-}
-
-local REACTION_CHOICES = {
-  { reaction = "+1", emoji = "👍", label = "+1" },
-  { reaction = "-1", emoji = "👎", label = "-1" },
-  { reaction = "laugh", emoji = "😄", label = "laugh" },
-  { reaction = "confused", emoji = "😕", label = "confused" },
-  { reaction = "heart", emoji = "❤️", label = "heart" },
-  { reaction = "hooray", emoji = "🎉", label = "hooray" },
-  { reaction = "rocket", emoji = "🚀", label = "rocket" },
-  { reaction = "eyes", emoji = "👀", label = "eyes" },
-}
+local semantics = require("parley.discussion")
+local tree = require("parley.comment_tree")
+local entries = require("parley.discussion_entries")
 
 ---@param text string
 ---@return string[]
@@ -31,9 +12,10 @@ local function split_lines(text)
   return vim.split(text, "\n", { plain = true })
 end
 
+---@param presentation? fun(code: string): parley.ReactionPresentation
 ---@param reactions parley.Reaction[]
 ---@return string|nil
-local function reaction_summary(reactions)
+local function reaction_summary(reactions, presentation)
   if #reactions == 0 then
     return nil
   end
@@ -41,78 +23,64 @@ local function reaction_summary(reactions)
   local parts = {}
   for _, reaction in ipairs(reactions) do
     local suffix = reaction.viewer_reacted and " (you)" or ""
-    local emoji = REACTION_EMOJI[reaction.type] or reaction.type
+    local display = presentation and presentation(reaction.type) or { label = reaction.type }
+    local emoji = display.emoji or display.label or reaction.type
     local count = reaction.count > 1 and string.format(" x%d", reaction.count) or ""
     parts[#parts + 1] = string.format("%s%s%s", emoji, count, suffix)
   end
   return "Reactions: " .. table.concat(parts, ", ")
 end
 
----@param comment parley.Comment
----@return table[]
-function M.reaction_picker_items(comment)
-  local by_type = {}
-  for _, reaction in ipairs(comment.reactions or {}) do
-    by_type[reaction.type] = reaction
-  end
-
-  local items = {}
-  for _, choice in ipairs(REACTION_CHOICES) do
-    local reaction = by_type[choice.reaction]
-    items[#items + 1] = vim.tbl_extend("force", choice, {
-      count = reaction and reaction.count or 0,
-      viewer_reacted = reaction and reaction.viewer_reacted or false,
-    })
-  end
-  return items
-end
-
----@param comment parley.Comment
----@param by_id table<string, parley.Comment>
----@param cache table<string, integer>
----@return integer
-local function comment_depth(comment, by_id, cache)
-  local cached = cache[comment.id]
-  if cached ~= nil then
-    return cached
-  end
-
-  if not comment.parent_comment_id or not by_id[comment.parent_comment_id] then
-    cache[comment.id] = 0
-    return 0
-  end
-
-  local depth = comment_depth(by_id[comment.parent_comment_id], by_id, cache) + 1
-  cache[comment.id] = depth
-  return depth
-end
-
 ---@param discussion parley.Discussion
 ---@param mapping parley.anchor.Mapping|nil
 ---@param out string[]
 ---@param ranges table<string, { start_line: integer, end_line: integer }>
----@param deps { format_timestamp: fun(timestamp: string): string }
+---@param deps { format_timestamp: fun(timestamp: string): string,
+--- reaction_presentation?: fun(code: string): parley.ReactionPresentation }
 ---@return string
 local function render_discussion(discussion, mapping, out, ranges, deps)
-  local title = discussion.resolved and "resolved" or "unresolved"
+  local title = entries.status(discussion)
+  if discussion.anchor then
+    title = title .. " · " .. semantics.anchor(discussion).kind
+  end
   if mapping and mapping.stale then
-    title = title .. " · stale anchor"
+    title = title .. " · stale"
   end
 
   if #discussion.comments == 0 then
-    out[#out + 1] = "_No comments in this thread._"
+    out[#out + 1] = "(no comments in the discussion yet)"
     out[#out + 1] = ""
     return title
   end
 
-  local by_id = {}
-  local depth_cache = {}
-  for _, comment in ipairs(discussion.comments) do
-    by_id[comment.id] = comment
+  local ordered, depths, ancestry = tree.order(discussion.comments)
+  local a = discussion.anchor
+  if a then
+    local parts = { a.path or (a.kind == "general" and "General discussion" or "Location unavailable") }
+    if a.side then
+      parts[#parts + 1] = a.side .. " side"
+    end
+    if a.line then
+      parts[#parts + 1] = "line " .. a.line .. (a.end_line and ("–" .. a.end_line) or "")
+    end
+    if a.diff_id then
+      parts[#parts + 1] = "diff " .. a.diff_id
+    end
+    if a.revision then
+      parts[#parts + 1] = "revision " .. a.revision
+    end
+    if a.unavailable_reason then
+      parts[#parts + 1] = a.unavailable_reason
+    end
+    out[#out + 1], out[#out + 2] = table.concat(parts, " · "), ""
   end
-
-  for _, comment in ipairs(discussion.comments) do
-    local depth = comment_depth(comment, by_id, depth_cache)
+  if ancestry or discussion.ancestry then
+    out[#out + 1] = (ancestry or discussion.ancestry) == "cycle" and "Thread contains cyclic ancestry."
+      or "Some parent comments are unavailable."
+    out[#out + 1] = ""
+  end
+  for _, comment in ipairs(ordered) do
+    local depth = math.min(depths[comment.id], 12)
     local indent = string.rep("  ", depth)
     local start_line = #out + 1
 
@@ -121,7 +89,7 @@ local function render_discussion(discussion, mapping, out, ranges, deps)
       out[#out + 1] = string.format("%s  %s", indent, line)
     end
 
-    local reactions = reaction_summary(comment.reactions)
+    local reactions = reaction_summary(comment.reactions, deps.reaction_presentation)
     if reactions then
       out[#out + 1] = string.format("%s  ---", indent)
       out[#out + 1] = string.format("%s  %s", indent, reactions)
@@ -135,7 +103,8 @@ end
 
 ---@param discussions parley.Discussion[]
 ---@param mappings table<string, parley.anchor.Mapping>
----@param deps { format_timestamp: fun(timestamp: string): string }
+---@param deps { format_timestamp: fun(timestamp: string): string,
+--- reaction_presentation?: fun(code: string): parley.ReactionPresentation }
 ---@return string[], table<string, { start_line: integer, end_line: integer }>, string|nil
 function M.render_lines(discussions, mappings, deps)
   local out = {}
