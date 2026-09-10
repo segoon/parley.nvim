@@ -172,6 +172,9 @@ a.describe("parley.diffview_integration._on_diff_buf", function()
     end
 
     diffview_integration._on_diff_buf(diff_bufnr)
+    vim.wait(1000, function()
+      return rendered_bufnr ~= nil
+    end, 10)
 
     assert.is_true(diffview_integration._attached[diff_bufnr])
     assert.equals(diff_bufnr, rendered_bufnr)

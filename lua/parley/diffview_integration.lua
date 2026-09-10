@@ -17,6 +17,7 @@
 --- unconditionally, so the integration is zero-config for users who have
 --- both plugins installed.
 
+local async = require("plenary.async")
 local context_repository = require("parley.repositories.context")
 local provider_repository = require("parley.repositories.provider")
 local review_repository = require("parley.repositories.review")
@@ -149,6 +150,11 @@ end
 
 --- Handle a diffview diff buffer becoming current: resolve its identity,
 --- alias it onto the host review (head side only), and render.
+---
+--- review_repository.attach() may read revision/working-tree content
+--- (parley.runtime.fs), which yields internally; run it inside a plenary
+--- coroutine so that's safe from a plain `User` autocmd callback (mirrors
+--- services/read.lua's do_refresh, which does the same for BufEnter).
 --- @param bufnr integer
 function M._on_diff_buf(bufnr)
   local config = M._get_config()
@@ -195,14 +201,18 @@ function M._on_diff_buf(bufnr)
     rel_path = file.path,
   })
   provider_repository.set(bufnr, provider_snapshot)
-  local snapshot = review_repository.attach(bufnr, review_key)
-  if not snapshot then
-    return
-  end
 
-  M._attached[bufnr] = true
-  read_service.render_snapshot(bufnr, snapshot)
-  set_new_comment_keymap(bufnr, config.keymaps and config.keymaps.diffview_new_comment)
+  async.run(function()
+    local snapshot = review_repository.attach(bufnr, review_key)
+    vim.schedule(function()
+      if not snapshot or not vim.api.nvim_buf_is_valid(bufnr) then
+        return
+      end
+      M._attached[bufnr] = true
+      read_service.render_snapshot(bufnr, snapshot)
+      set_new_comment_keymap(bufnr, config.keymaps and config.keymaps.diffview_new_comment)
+    end)
+  end)
 end
 
 -- ---------------------------------------------------------------------------
