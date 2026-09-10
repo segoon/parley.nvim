@@ -33,6 +33,49 @@ M.REVIEW_EVENT_MAP = {
   comment = "COMMENT",
 }
 
+--- GraphQL query fetching review-thread resolution state and node ids for a
+--- PR, paginated via reviewThreads(first, after: $cursor). Only the first
+--- comment of each thread is requested — its databaseId is the REST review
+--- comment id already used as parley.Discussion.id, letting us correlate
+--- GraphQL threads to REST-derived discussions.
+--- @type string
+M.REVIEW_THREADS_QUERY = [[
+query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          isResolved
+          comments(first: 1) {
+            nodes { databaseId }
+          }
+        }
+      }
+    }
+  }
+}
+]]
+
+--- @type string
+M.RESOLVE_THREAD_MUTATION = [[
+mutation($id: ID!) {
+  resolveReviewThread(input: { threadId: $id }) {
+    thread { id isResolved }
+  }
+}
+]]
+
+--- @type string
+M.UNRESOLVE_THREAD_MUTATION = [[
+mutation($id: ID!) {
+  unresolveReviewThread(input: { threadId: $id }) {
+    thread { id isResolved }
+  }
+}
+]]
+
 -- ---------------------------------------------------------------------------
 -- Helpers
 -- ---------------------------------------------------------------------------
@@ -148,6 +191,26 @@ function M.build_top_level_fields(file, anchor, body, write_context)
   return fields
 end
 
+--- Map GraphQL reviewThreads nodes into a lookup keyed by root REST comment id.
+--- Nodes without a first comment (shouldn't happen) are skipped.
+--- @param nodes table[]  raw `reviewThreads.nodes` GraphQL objects
+--- @return table<string, { node_id: string, resolved: boolean }>
+function M.map_review_thread_nodes(nodes)
+  local result = {}
+  for _, node in ipairs(nodes or {}) do
+    local comments = node.comments and node.comments.nodes or {}
+    local first = comments[1]
+    local database_id = first and first.databaseId
+    if database_id and database_id ~= vim.NIL then
+      result[tostring(database_id)] = {
+        node_id = node.id,
+        resolved = node.isResolved == true,
+      }
+    end
+  end
+  return result
+end
+
 --- Group a flat list of REST review comments into parley.Discussion[].
 ---
 --- Grouping rules:
@@ -179,7 +242,7 @@ function M.group_comments_into_discussions(comments, viewer)
         file = raw.path or "",
         line = line,
         end_line = (raw.start_line and raw.start_line ~= vim.NIL) and raw.line or nil,
-        resolved = false, -- GraphQL required; see POSTPONED.md
+        resolved = false, -- overlaid with real state from GraphQL by the provider
         comments = { comment },
       })
       by_root[root_id] = disc

@@ -292,6 +292,84 @@ function M.gh_start(self, cmd, callback)
 end
 
 -- ---------------------------------------------------------------------------
+-- GraphQL — command building + error-surfacing wrappers
+-- ---------------------------------------------------------------------------
+
+--- Build a `gh api graphql` command for a query/mutation with variables.
+--- String variables are passed via -f (untyped), everything else via -F
+--- (typed: numbers, booleans). Variables whose value is nil are omitted
+--- (e.g. an absent pagination cursor).
+---
+--- @param query string
+--- @param variables table<string, string|number|boolean|nil>
+--- @return string[]
+function M.build_graphql_cmd(query, variables)
+  local cmd = { "gh", "api", "graphql", "-f", "query=" .. query }
+  for name, value in pairs(variables or {}) do
+    if value ~= nil then
+      if type(value) == "string" then
+        cmd[#cmd + 1] = "-f"
+        cmd[#cmd + 1] = name .. "=" .. value
+      else
+        cmd[#cmd + 1] = "-F"
+        cmd[#cmd + 1] = name .. "=" .. tostring(value)
+      end
+    end
+  end
+  return cmd
+end
+
+--- @param decoded table|nil
+--- @return string|nil  joined error message, or nil if no GraphQL errors present
+local function graphql_errors(decoded)
+  if not decoded or not decoded.errors or #decoded.errors == 0 then
+    return nil
+  end
+  local messages = {}
+  for _, e in ipairs(decoded.errors) do
+    messages[#messages + 1] = (type(e) == "table" and e.message) or tostring(e)
+  end
+  return table.concat(messages, "; ")
+end
+
+--- Run a GraphQL query/mutation synchronously and return its `data` field.
+--- Raises on transport failure or GraphQL-level errors.
+---
+--- @param self parley.github.Provider
+--- @param query string
+--- @param variables table<string, string|number|boolean|nil>
+--- @return table|nil
+function M.gh_graphql(self, query, variables)
+  local decoded = M.gh_run(self, M.build_graphql_cmd(query, variables))
+  local err = graphql_errors(decoded)
+  if err then
+    error("parley.github: GraphQL error: " .. err, 0)
+  end
+  return decoded and decoded.data or nil
+end
+
+--- Start a cancellable GraphQL query/mutation request.
+--- @param self parley.github.Provider
+--- @param query string
+--- @param variables table<string, string|number|boolean|nil>
+--- @param callback fun(result: { ok: boolean, data?: table, err?: string, cancelled?: boolean }): nil
+--- @return { cancel: fun(): nil }
+function M.gh_graphql_start(self, query, variables, callback)
+  return M.gh_start(self, M.build_graphql_cmd(query, variables), function(result)
+    if not result.ok then
+      callback(result)
+      return
+    end
+    local err = graphql_errors(result.data)
+    if err then
+      callback({ ok = false, err = "parley.github: GraphQL error: " .. err })
+      return
+    end
+    callback({ ok = true, data = result.data and result.data.data or nil })
+  end)
+end
+
+-- ---------------------------------------------------------------------------
 -- fetch_viewer_login — identity resolution
 -- ---------------------------------------------------------------------------
 

@@ -58,7 +58,9 @@ does not fetch the active diff again at submission time. Refresh to load a newer
 - `:Parley discussion resolve` and `:Parley discussion reopen` transition complete
   Arcanum root issues between open and resolved. General and unavailable-location
   threads support these actions too. Dropped, non-issue, unknown, and incomplete
-  threads cannot transition. GitHub resolution/reopening remains planned.
+  threads cannot transition. GitHub resolves and reopens review threads through
+  the GraphQL API; a discussion must have been fetched in the current session
+  before it can transition (its GraphQL thread id is cached from that fetch).
 - `:Parley comment react` opens provider-owned choices. GitHub retains its reaction
   vocabulary. Arcanum offers thumbs up, thumbs down, and heart, plus removal of
   other reactions already added by the viewer. Its writes preserve the add/remove
@@ -161,7 +163,6 @@ they do not verify authentication or deployment compatibility over the network.
   and inline composition in its diff buffers. Context detection exists, but the
   current review services accept only regular file buffers. Revision/side mapping
   and float placement need a separately designed and tested integration.
-- GitHub resolution needs GraphQL integration.
 - Optional Arcanum extensions include drafts/publication, old-side or whole-file
   comment creation, and suggestions. Reading existing threads does not imply
   these creation workflows are supported.
