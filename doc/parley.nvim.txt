@@ -160,6 +160,11 @@ All Parley commands support tab completion.
 :Parley discussion reply                             *:Parley-discussion-reply*
     Reply to the selected or current comment thread.
 
+    Replies and new discussions appear immediately with a `sending…` marker.
+    Their composer closes while the request runs. Success replaces the temporary
+    comment with provider data and starts a quiet background refresh. A definite
+    failure or cancellation removes the temporary comment and restores the draft.
+
 :Parley review actions                                *:Parley-review-actions*
     Open the provider's explicit review-action picker. Arcanum offers Ship,
     Sticky ship, Unship, Block merge, and Unblock merge. Confirm the PR, loaded
@@ -672,6 +677,7 @@ Arcanum has since activated a newer diff. Refresh the review to use newer data.
 
 Missing diff/revision metadata, unavailable file entries, and failed lookups
 prevent submission; inline comments never fall back to general PR comments.
+
 The draft remains available after failure or cancellation. If a creation response
 is incomplete, check the review before retrying: the comment may have been sent.
 Cancellation after sending does not guarantee that the server discarded it.
