@@ -6,7 +6,7 @@ Inline pull request discussions for Neovim.
 
 > [!WARNING]
 > Early-stage plugin.
-> Current support includes GitHub (Git) and Arcanum (Arc) in regular file buffers, plus diffview.nvim diff buffers (see below). Live Arcanum deployment compatibility remains unverified.
+> Current support includes GitHub (Git) and Arcanum (Arc) in regular file buffers, plus diffview.nvim diff buffers.
 
 ## Features
 
@@ -298,7 +298,6 @@ provider-independent behavior tests.
 
 ## Roadmap
 
-- GitHub thread resolution/reopening via GraphQL
 - optional Arcanum drafts/publication, suggestions, and additional comment anchors
 
 See [TODO.md](TODO.md) for remaining work and
