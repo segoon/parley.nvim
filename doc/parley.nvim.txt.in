@@ -243,6 +243,7 @@ Discussion window keymaps: ~
     `R`            React to the selected comment
     `e`            Edit the selected comment
     `d`            Delete the selected comment
+    `gx`           Open the discussion in the system browser
 
 Draft/input window keymaps: ~
 
