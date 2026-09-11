@@ -64,10 +64,10 @@ does not fetch the active diff again at submission time. Refresh to load a newer
   the GraphQL API; a discussion must have been fetched in the current session
   before it can transition (its GraphQL thread id is cached from that fetch).
 - `:Parley comment react` opens provider-owned choices. GitHub retains its reaction
-  vocabulary. Arcanum offers thumbs up, thumbs down, and heart, plus removal of
-  other reactions already added by the viewer. Its writes preserve the add/remove
-  intent selected in the picker. AI comment conflicts require explicit removal
-  of an existing reaction before replacement.
+  vocabulary. Arcanum offers the seven reaction codes accepted by AI comments,
+  plus removal of other reactions already added by the viewer. Its writes preserve
+  the add/remove intent selected in the picker. AI comment conflicts require
+  explicit removal of an existing reaction before replacement.
 - Capability checks explain unsupported actions before composition or submission.
   Successful, conflicting, and uncertain action refreshes retain discussion drafts.
   Capabilities describe implementation support; server permissions still apply.

@@ -751,11 +751,13 @@ concrete catalogs and presentation logic under `lua/parley/providers/`.
 Missing methods preserve raw labels and make interactive mutations unavailable;
 there is no implicit GitHub catalog. Cached reaction data remains unchanged.
 
-GitHub retains its existing reaction choices and emoji. Arcanum offers thumbs up,
-thumbs down, and heart (:+1:, :-1:, :heart:). Other codes remain readable and can
-be removed if you added them. AI comments allow only one reaction per account;
-a conflict requires refreshing and explicitly removing your existing reaction.
-The public comment response does not identify AI comments reliably.
+GitHub retains its existing reaction choices and emoji. Arcanum offers the seven
+codes accepted by AI comments: :+1:, :heart:, :facepalm:, :confused:, :goose:,
+:thinking:, and :-1:. Other codes remain readable and can be removed if you added
+them. AI comments allow only one reaction per account; a conflict requires
+refreshing and explicitly removing your existing reaction. The public comment
+response does not identify AI comments reliably, so Parley does not offer arbitrary
+codes that would fail on those comments.
 The picker and direct reaction service reject choices that are not currently
 offered. Changing review/provider context while the picker is open requires
 reopening it before submitting.

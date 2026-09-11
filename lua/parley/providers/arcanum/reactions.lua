@@ -1,10 +1,17 @@
 --- PR-scoped reactions support inline, general, and historical comments alike.
 local transport = require("parley.providers.arcanum.transport")
 local M = {}
+-- This is the complete server-side allowlist for AI-review comments. Ordinary
+-- comments accept opaque codes, but their DTO does not reliably let us tell
+-- them apart, so additions must stay inside this safe intersection.
 local palette = {
-  { reaction = ":+1:", label = "Thumbs up", emoji = "👍" },
-  { reaction = ":-1:", label = "Thumbs down", emoji = "👎" },
-  { reaction = ":heart:", label = "Heart", emoji = "❤️" },
+  { reaction = ":+1:", label = "Like", emoji = "👍" },
+  { reaction = ":heart:", label = "Super like", emoji = "❤️" },
+  { reaction = ":facepalm:", label = "Not relevant", emoji = "🤦" },
+  { reaction = ":confused:", label = "Incorrect", emoji = "😕" },
+  { reaction = ":goose:", label = "Too wordy", emoji = "🪿" },
+  { reaction = ":thinking:", label = "Inappropriate", emoji = "🤔" },
+  { reaction = ":-1:", label = "Other", emoji = "👎" },
 }
 --- @param _self parley.Provider
 --- @param code string

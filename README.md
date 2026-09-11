@@ -113,9 +113,13 @@ issue state. Dropped, non-issue, unknown, and incomplete threads cannot transiti
 GitHub resolution remains unavailable. Unsupported provider actions explain why
 before you compose or choose them; see `:help parley-provider-capabilities`.
 
-Arcanum reactions offer thumbs up, thumbs down, and heart; other existing codes
-remain readable and removable by their author. AI comments allow one reaction
-per account; remove an existing reaction explicitly before replacing it.
+Arcanum reactions use the seven codes accepted by AI comments: like, super like,
+and five dislike reasons (not relevant, incorrect, too wordy, inappropriate, or
+other). Ordinary comments accept additional opaque codes, but Parley only offers
+the safe seven because comment data does not reliably identify AI comments. Other
+existing codes remain readable and removable by their author. AI comments allow
+one reaction per account; remove an existing reaction explicitly before replacing
+it.
 
 Use `:Parley review actions` for Ship, Sticky ship, Unship, Block merge, and
 Unblock merge. The confirmation shows the PR, loaded revision, and current verdict.

@@ -71,11 +71,13 @@ schema. Sparse API fields needed for identity, revision, or mapping are requeste
 explicitly.
 
 The reaction PR route supports comments across inline, general, and historical
-locations without substituting the current diff identity. The common codes are
-`:+1:`, `:-1:`, and `:heart:`. Other codes remain readable and viewer-owned ones
-are removable. Public comment DTOs do not reliably identify AI comments; HTTP 409
-triggers a refresh and asks for explicit removal rather than replacing another
-reaction automatically. A known conflict is distinct from an uncertain write.
+locations without substituting the current diff identity. Parley offers the full
+AI-comment allowlist: `:+1:`, `:heart:`, `:facepalm:`, `:confused:`, `:goose:`,
+`:thinking:`, and `:-1:`. Ordinary comments accept opaque codes, but public comment
+DTOs do not reliably identify AI comments, so arbitrary additions are unsafe.
+Other codes remain readable and viewer-owned ones are removable. HTTP 409 triggers
+a refresh and asks for explicit removal rather than replacing another reaction
+automatically. A known conflict is distinct from an uncertain write.
 
 The review field `min_ships_required` contains the server's **remaining approvals**
 (`minimumShipsLeft`), not its configured total. Any block produces
@@ -147,6 +149,8 @@ Contracts were checked against the local Arcadia server sources:
   defines issue-status PATCH writes.
 - [PR reaction resource](https://a.yandex-team.ru/arcadia/arcanum/server/arcanum-server-web/src/main/java/ru/yandex/arcanum/web/plugin/api/PluginPullRequestReactionResource.kt)
   defines reaction routes, permissions, and AI restrictions.
+- [AI reaction enum](https://a.yandex-team.ru/arcadia/arcanum/server/arcanum-server-web/src/main/java/ru/yandex/arcanum/web/plugin/PluginAiReaction.kt)
+  defines the seven codes accepted for AI-review comments.
 - [Review resource](https://a.yandex-team.ru/arcadia/arcanum/server/arcanum-server-web/src/main/java/ru/yandex/arcanum/web/plugin/api/PluginReviewResource.kt)
   defines ordinary/sticky actions, remaining approval counts, and active-diff selection.
 
