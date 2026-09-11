@@ -12,4 +12,6 @@ M.groups = {
 M.top_level = { "discussion", "comment", "review", "nav", "quickfix", "refresh", "diffview", "view" }
 --- @type table<string, parley.ProviderAction>
 M.issue_actions = { resolve = "resolve", reopen = "unresolve" }
+--- @type string[]
+M.discussion_filters = { "unresolved" }
 return M

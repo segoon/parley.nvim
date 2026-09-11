@@ -20,8 +20,8 @@
 
 ## UI and quality
 
-- Richer Telescope previews and issue/comment filtering; both discussion pickers
-  already exist
+- Richer Telescope previews and additional issue/comment filters; unresolved
+  filtering is available in both discussion pickers
 - Distinguish remote outdated-comment status from existing local stale-position
   indicators
 - Lua language server type warnings in validation
@@ -31,16 +31,18 @@
 
 ## Feature research backlog
 
-### Optimistic comment posting
+### Optimistic comment reconciliation
 
-Show a newly submitted comment immediately with a sending state, refresh in the
-background, and preserve actionable retry or error state if reconciliation fails.
+Optimistic posting is implemented for new discussions and replies: pending comments
+render immediately, provider results replace them, refresh runs in the background,
+and definite failure restores the draft. Add an actionable reconciliation state for
+successful provider responses that omit a created comment or cannot confirm it;
+currently the pending entry remains visible while background refresh preserves it.
 
-### Unresolved discussion navigation and filtering
+### Additional discussion filters
 
-Provide buffer-local and review-wide next/previous unresolved navigation, plus
-filters for unresolved, authored-by-me, mentions, stale, and unavailable-location
-discussions.
+Add authored-by-me, mentions, stale, and unavailable-location filters. Unresolved
+filtering and buffer-local/review-wide unresolved navigation are implemented.
 
 ### Apply review suggestions
 

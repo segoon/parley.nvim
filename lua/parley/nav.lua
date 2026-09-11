@@ -25,9 +25,43 @@ local M = {}
 --- Return a deduplicated, ascending list of 0-indexed row numbers that have
 --- at least one parley extmark in `bufnr`.
 ---
---- @param bufnr integer
+--- @param discussions parley.Discussion[]
+--- @param mappings table<string, parley.anchor.Mapping>
+--- @param filter 'unresolved'
 --- @return integer[]
-function M._unique_rows(bufnr)
+function M._mapped_rows(discussions, mappings, filter)
+  discussions = require("parley.discussion").filter(discussions, filter)
+  local seen = {}
+  local rows = {}
+  for _, discussion in ipairs(discussions) do
+    local mapping = mappings[discussion.id]
+    if mapping and mapping.local_line then
+      seen[mapping.local_line - 1] = true
+    end
+  end
+  for row in pairs(seen) do
+    rows[#rows + 1] = row
+  end
+  table.sort(rows)
+  return rows
+end
+
+--- @param bufnr integer
+--- @param filter? 'unresolved'
+--- @return integer[]
+function M._unique_rows(bufnr, filter)
+  if filter then
+    local read_service = require("parley.services.read")
+    local state = read_service.get_buffer_state(bufnr)
+    if not state then
+      return {}
+    end
+    return M._mapped_rows(
+      read_service.list_discussions(bufnr, { scope = "file" }),
+      state.mappings or state.all_mappings or {},
+      filter
+    )
+  end
   local signs = require("parley.signs")
   local ns = signs._get_ns()
   local marks = vim.api.nvim_buf_get_extmarks(bufnr, ns, 0, -1, {})
@@ -51,8 +85,9 @@ end
 --- Returns nil when no review data is available for the buffer.
 ---
 --- @param bufnr integer
+--- @param filter? 'unresolved'
 --- @return parley.Discussion[]|nil
-function M._sorted_review_discussions(bufnr)
+function M._sorted_review_discussions(bufnr, filter)
   local read_service = require("parley.services.read")
   local all = read_service.list_discussions(bufnr, { scope = "all" })
   if not all or #all == 0 then
@@ -61,9 +96,10 @@ function M._sorted_review_discussions(bufnr)
   -- Stable sort by (file, line).
   local state = require("parley.repositories.review").get(bufnr)
   local mapped = state and state.all_mappings or {}
+  local filtered = require("parley.discussion").filter(all, filter)
   local sorted = vim.tbl_filter(function(d)
     return require("parley.discussion").projectable(d) and not (mapped[d.id] and mapped[d.id].local_line == nil)
-  end, vim.deepcopy(all))
+  end, vim.deepcopy(filtered))
   table.sort(sorted, function(a, b)
     if a.file ~= b.file then
       return a.file < b.file
@@ -162,16 +198,19 @@ end
 --- the owning source buffer so that navigation works regardless of focus.
 ---
 --- @param bufnr integer  Buffer to navigate within (usually the current buffer)
-function M.buf_next(bufnr)
+--- @param opts? { filter?: 'unresolved' }
+function M.buf_next(bufnr, opts)
+  opts = opts or {}
   local original_bufnr = bufnr
   bufnr = require("parley.discussion_window").resolve_source_bufnr(bufnr)
   local window_helpers = require("parley.discussion_window.window")
   local winid = window_helpers.resolve_source_winid(bufnr, nil) or 0
 
-  local rows = M._unique_rows(bufnr)
+  local rows = M._unique_rows(bufnr, opts.filter)
 
   if #rows == 0 then
-    vim.notify("No Parley comments in this buffer", vim.log.levels.INFO)
+    local label = opts.filter == "unresolved" and "unresolved discussions" or "comments"
+    vim.notify("No Parley " .. label .. " in this buffer", vim.log.levels.INFO)
     return
   end
 
@@ -217,16 +256,19 @@ end
 --- the owning source buffer so that navigation works regardless of focus.
 ---
 --- @param bufnr integer  Buffer to navigate within (usually the current buffer)
-function M.buf_prev(bufnr)
+--- @param opts? { filter?: 'unresolved' }
+function M.buf_prev(bufnr, opts)
+  opts = opts or {}
   local original_bufnr = bufnr
   bufnr = require("parley.discussion_window").resolve_source_bufnr(bufnr)
   local window_helpers = require("parley.discussion_window.window")
   local winid = window_helpers.resolve_source_winid(bufnr, nil) or 0
 
-  local rows = M._unique_rows(bufnr)
+  local rows = M._unique_rows(bufnr, opts.filter)
 
   if #rows == 0 then
-    vim.notify("No Parley comments in this buffer", vim.log.levels.INFO)
+    local label = opts.filter == "unresolved" and "unresolved discussions" or "comments"
+    vim.notify("No Parley " .. label .. " in this buffer", vim.log.levels.INFO)
     return
   end
 
@@ -280,7 +322,9 @@ end
 --- the owning source buffer so that navigation works regardless of focus.
 ---
 --- @param bufnr integer  Source buffer (used to look up review data)
-function M.review_next(bufnr)
+--- @param opts? { filter?: 'unresolved' }
+function M.review_next(bufnr, opts)
+  opts = opts or {}
   local original_bufnr = bufnr
   bufnr = require("parley.discussion_window").resolve_source_bufnr(bufnr)
   local window_helpers = require("parley.discussion_window.window")
@@ -295,9 +339,10 @@ function M.review_next(bufnr)
     return
   end
 
-  local sorted = M._sorted_review_discussions(bufnr)
+  local sorted = M._sorted_review_discussions(bufnr, opts.filter)
   if not sorted or #sorted == 0 then
-    vim.notify("No Parley discussions with available file locations", vim.log.levels.WARN)
+    local label = opts.filter == "unresolved" and "unresolved discussions" or "discussions"
+    vim.notify("No Parley " .. label .. " with available file locations", vim.log.levels.WARN)
     return
   end
 
@@ -331,7 +376,9 @@ end
 --- the owning source buffer so that navigation works regardless of focus.
 ---
 --- @param bufnr integer  Source buffer (used to look up review data)
-function M.review_prev(bufnr)
+--- @param opts? { filter?: 'unresolved' }
+function M.review_prev(bufnr, opts)
+  opts = opts or {}
   local original_bufnr = bufnr
   bufnr = require("parley.discussion_window").resolve_source_bufnr(bufnr)
   local window_helpers = require("parley.discussion_window.window")
@@ -346,9 +393,10 @@ function M.review_prev(bufnr)
     return
   end
 
-  local sorted = M._sorted_review_discussions(bufnr)
+  local sorted = M._sorted_review_discussions(bufnr, opts.filter)
   if not sorted or #sorted == 0 then
-    vim.notify("No Parley discussions with available file locations", vim.log.levels.WARN)
+    local label = opts.filter == "unresolved" and "unresolved discussions" or "discussions"
+    vim.notify("No Parley " .. label .. " with available file locations", vim.log.levels.WARN)
     return
   end
 

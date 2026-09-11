@@ -67,6 +67,19 @@ end
 function M.is_open_issue(discussion)
   return M.issue_state(discussion) == "open"
 end
+--- Filter discussions using a provider-independent state name.
+--- @param discussions parley.Discussion[]
+--- @param filter? 'unresolved'
+--- @return parley.Discussion[]
+function M.filter(discussions, filter)
+  if filter == nil or filter == "" then
+    return discussions
+  end
+  if filter ~= "unresolved" then
+    error("parley: unknown discussion filter: " .. tostring(filter), 0)
+  end
+  return vim.tbl_filter(M.is_open_issue, discussions)
+end
 --- @param state table
 --- @param id string
 --- @return parley.Discussion|nil

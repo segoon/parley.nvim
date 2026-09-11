@@ -32,7 +32,9 @@ notifications, repository browsing, or PR administration.
    extensions list all discussions or those associated with the current file.
 5. File-associated quickfix entries use available mappings; unavailable locations
    remain invalid rows. General discussions are accessed through the pickers.
-6. Run `:Parley view` to open the active review in the system browser. Run
+6. Append `unresolved` to buffer/review navigation or the built-in discussion list
+   to work only with open issues. Telescope pickers accept the same filter option.
+7. Run `:Parley view` to open the active review in the system browser. Run
    `:Parley discussion view` to open the selected thread's canonical provider
    link, or choose a thread at the source cursor when none is selected.
 

@@ -90,7 +90,7 @@ end
 --- Default opts that enable both signs and virtual text.
 local function default_opts()
   return {
-    signs = { enabled = true, text = "▐" },
+    signs = { enabled = true, resolved = "✅", unresolved = "❗", comment = "💬" },
     virtual_text = { enabled = true, max_width = 60 },
   }
 end
@@ -120,6 +120,26 @@ describe("signs._truncate", function()
   it("handles max_width of 1 (edge case)", function()
     local result = signs._truncate("hello", 1)
     assert.equal("…", result)
+  end)
+end)
+
+describe("signs.validate", function()
+  it("accepts one- and two-cell configured signs", function()
+    assert.has_no_error(function()
+      signs.validate({ enabled = true, resolved = "✓", unresolved = "❗", comment = "💬" })
+    end)
+  end)
+
+  it("rejects empty, non-string, and over-wide configured signs", function()
+    for _, config in ipairs({
+      { enabled = true, resolved = "", unresolved = "!", comment = "c" },
+      { enabled = true, resolved = "r", unresolved = 1, comment = "c" },
+      { enabled = true, resolved = "r", unresolved = "u", comment = "wide" },
+    }) do
+      assert.has_error(function()
+        signs.validate(config)
+      end)
+    end
   end)
 end)
 
@@ -240,7 +260,42 @@ describe("signs.render", function()
   -- Sign column
   -- -------------------------------------------------------------------------
 
-  it("includes sign_text from opts when signs.enabled = true", function()
+  it("uses the configured sign for each discussion state", function()
+    local bufnr = scratch(5)
+    local unresolved = make_discussion("unresolved", "foo.lua", 1, "fix this")
+    unresolved.issue_state = "open"
+    local resolved = make_discussion("resolved", "foo.lua", 2, "done")
+    resolved.issue_state = "resolved"
+    local comment = make_discussion("comment", "foo.lua", 3, "note")
+    comment.issue_state = "not_issue"
+    local mappings = {
+      unresolved = make_mapping(1),
+      resolved = make_mapping(2),
+      comment = make_mapping(3),
+    }
+
+    signs.render(bufnr, { unresolved, resolved, comment }, mappings, default_opts())
+    local marks = all_extmarks(bufnr)
+
+    assert.equal("❗", marks[1][4].sign_text:match("^(.-)%s*$"))
+    assert.equal("✅", marks[2][4].sign_text:match("^(.-)%s*$"))
+    assert.equal("💬", marks[3][4].sign_text:match("^(.-)%s*$"))
+  end)
+
+  it("uses the comment sign for non-actionable issue states", function()
+    for _, state in ipairs({ "dropped", "unknown" }) do
+      local bufnr = scratch(2)
+      local disc = make_discussion(state, "foo.lua", 1, state)
+      disc.issue_state = state
+
+      signs.render(bufnr, { disc }, { [state] = make_mapping(1) }, default_opts())
+      local mark = all_extmarks(bufnr)[1]
+
+      assert.equal("💬", mark[4].sign_text:match("^(.-)%s*$"), "state: " .. state)
+    end
+  end)
+
+  it("keeps signs.text as a compatibility override", function()
     local bufnr = scratch(5)
     local disc = make_discussion("d1", "foo.lua", 2, "hi")
     local mappings = { ["d1"] = make_mapping(2) }
@@ -253,6 +308,26 @@ describe("signs.render", function()
     -- Neovim normalises sign_text to exactly 2 screen cells; trim trailing
     -- whitespace before comparing to the configured character.
     assert.equal("●", marks[1][4].sign_text:match("^(.-)%s*$"))
+  end)
+
+  it("prioritizes unresolved signs when discussions share a line", function()
+    local bufnr = scratch(5)
+    local resolved = make_discussion("resolved", "foo.lua", 3, "done")
+    resolved.issue_state = "resolved"
+    local comment = make_discussion("comment", "foo.lua", 3, "note")
+    comment.issue_state = "not_issue"
+    local unresolved = make_discussion("unresolved", "foo.lua", 3, "fix this")
+    unresolved.issue_state = "open"
+    local mappings = {
+      resolved = make_mapping(3),
+      comment = make_mapping(3),
+      unresolved = make_mapping(3),
+    }
+
+    signs.render(bufnr, { unresolved, resolved, comment }, mappings, default_opts())
+    local marks = all_extmarks(bufnr)
+
+    assert.same({ 30, 20, 10 }, { marks[1][4].priority, marks[2][4].priority, marks[3][4].priority })
   end)
 
   it("omits sign_text when signs.enabled = false", function()
