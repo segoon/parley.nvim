@@ -5,11 +5,6 @@
 - @README.md - the main user documentation
 - @ARCANUM_COMPATIBILITY.md - current Arcanum contracts and validation limits
 
-The original phase-by-phase implementation plan is complete. Current development
-is driven by TODO.md and continues to follow TDD, provider-independent core
-contracts, asynchronous remote operations, and the dependency policy in
-`policy.json`.
-
 ## Quick Reference
 
 **Language:** Lua. Neovim plugin. Minimum Neovim: 0.10.
@@ -25,6 +20,7 @@ contracts, asynchronous remote operations, and the dependency policy in
 - luacheck
 - luacats annotations (**MANDATORY**)
 - make test + make format + make lint
+- architecture layers in `policy.json`
 
 **Requirements**
 - `plenary.async`. No synchronous HTTP anywhere.
