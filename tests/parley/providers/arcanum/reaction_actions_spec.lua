@@ -19,17 +19,17 @@ describe("Arcanum desired reaction state", function()
   after_each(function()
     transport.http_start = saved
   end)
-  it("offers common codes and removal of the viewer's other codes", function()
+  it("offers supported codes and removal of the viewer's other codes", function()
     local choices = p:reaction_choices({}, {
       reactions = {
         { type = ":custom:", viewer_reacted = true },
         { type = ":other:", viewer_reacted = false },
       },
     })
-    assert.equals(4, #choices)
+    assert.equals(8, #choices)
     assert.equals(":+1:", choices[1].reaction)
-    assert.equals(":custom:", choices[4].reaction)
-    assert.is_true(choices[4].remove_only)
+    assert.equals(":custom:", choices[8].reaction)
+    assert.is_true(choices[8].remove_only)
   end)
   it("encodes codes and uses PR identity for every comment location", function()
     for _, present in ipairs({ true, false }) do

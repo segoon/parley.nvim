@@ -35,8 +35,8 @@ Current state: ~
 
   - Built-in providers: GitHub (git repos) and Arcanum (Arc/Arcadia repos)
   - Regular file buffers are supported
-  - diffview.nvim diff buffers are supported (head side only; see the
-    optional requirements below)
+  - diffview.nvim diff buffers support the head side and matching read-only
+    Arcanum old-side discussions (see the optional requirements below)
 
 ==============================================================================
 2. REQUIREMENTS                                      *parley-requirements*
@@ -59,9 +59,10 @@ Optional: ~
   - render-markdown.nvim — for rendered markdown in the discussion float
   - diffview.nvim (https://github.com/sindrets/diffview.nvim) — when
     installed and loaded, Parley automatically renders PR discussions and
-    lets you create new comments inside its diff buffers (head side only),
-    plus comment-count badges in its file panel. No extra setup call is
-    needed; disable with `diffview = { enabled = false }`
+    lets you create new comments in head-side diff buffers. Matching Arcanum
+    old-side discussions render read-only. It also adds comment-count badges
+    to the file panel. No extra setup call is needed; disable with
+    `diffview = { enabled = false }`
     (|parley-config-diffview|). Verified against both upstream and the
     mistricky/diffview-plus.nvim fork; not verified against other forks.
     File-panel badges only refresh live on selection/staging under the fork
@@ -389,8 +390,10 @@ workflows use DetectedReview.head_sha; write_context remains provider-private.
 
 GitHub                                               *parley-provider-github*
 
-The built-in GitHub provider uses the `gh` CLI for API calls and supports
-both github.com and GitHub Enterprise Server (GHES) instances.
+The built-in GitHub provider uses the `gh` CLI for API calls. Automatic provider
+detection currently activates for github.com remotes only. Its transport,
+credentials, and explicit constructor support configured GitHub Enterprise Server
+(GHES) instances, but arbitrary enterprise remotes are not selected automatically.
 
 Authentication: ~
 
@@ -481,11 +484,13 @@ Discussion locations and issue states: ~
 
 Arcanum threads retain nested replies, including incomplete or cyclic ancestry.
 Only open issues contribute to the unresolved count; resolved, dropped, non-issue,
-and unknown states remain distinguishable. Only verified current new-side inline
-anchors receive buffer positions. Other anchors retain their side, paths, and
-revision metadata in the discussion list and float. Navigation skips unavailable
-positions; quickfix retains file-associated entries as invalid rows and omits
-general discussions. Discussion selection and composer text survive refreshes.
+and unknown states remain distinguishable. In regular working buffers, only
+verified current new-side inline anchors receive positions. A matching old-side
+Diffview buffer can render current old-side anchors read-only. Other anchors retain
+their side, paths, and revision metadata in the discussion list and float.
+Navigation skips unavailable positions; quickfix retains file-associated entries
+as invalid rows and omits general discussions. Discussion selection and composer
+text survive refreshes.
 
 Provider options: ~
 
@@ -751,11 +756,13 @@ concrete catalogs and presentation logic under `lua/parley/providers/`.
 Missing methods preserve raw labels and make interactive mutations unavailable;
 there is no implicit GitHub catalog. Cached reaction data remains unchanged.
 
-GitHub retains its existing reaction choices and emoji. Arcanum offers thumbs up,
-thumbs down, and heart (:+1:, :-1:, :heart:). Other codes remain readable and can
-be removed if you added them. AI comments allow only one reaction per account;
-a conflict requires refreshing and explicitly removing your existing reaction.
-The public comment response does not identify AI comments reliably.
+GitHub retains its existing reaction choices and emoji. Arcanum offers the seven
+codes accepted by AI comments: :+1:, :heart:, :facepalm:, :confused:, :goose:,
+:thinking:, and :-1:. Other codes remain readable and can be removed if you added
+them. AI comments allow only one reaction per account; a conflict requires
+refreshing and explicitly removing your existing reaction. The public comment
+response does not identify AI comments reliably, so Parley does not offer arbitrary
+codes that would fail on those comments.
 The picker and direct reaction service reject choices that are not currently
 offered. Changing review/provider context while the picker is open requires
 reopening it before submitting.

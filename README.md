@@ -6,7 +6,7 @@ Inline pull request discussions for Neovim.
 
 > [!WARNING]
 > Early-stage plugin.
-> Current support includes GitHub (Git) and Arcanum (Arc) in regular file buffers, plus diffview.nvim diff buffers (see below). Live Arcanum deployment compatibility remains unverified.
+> Current support includes GitHub (Git) and Arcanum (Arc) in regular file buffers, plus diffview.nvim diff buffers.
 
 ## Features
 
@@ -97,44 +97,29 @@ independent positions. If revision content is unavailable, Parley shows stale
 approximations and reports the reason.
 
 New comments require a clean file with no unsaved edits and a local HEAD matching
-the review revision. These checks run again when you submit; a failed check keeps
-your draft. Other Arcanum API limitations still apply.
+the review revision. These checks run again on submission and preserve the draft
+on failure. Arcanum creates comments only on the loaded diff's new side.
 
 Use `:Parley discussion list` to browse every thread without Telescope. Arcanum
-nested replies and issue states are preserved. General, whole-file, old-side,
-and historical threads open in the discussion float without a guessed line.
-Replies and edits/deletions of your own comments remain available. Only open
-issues contribute to the unresolved count.
+preserves nested replies and distinct issue states. General, whole-file, old-side,
+historical, and otherwise unavailable threads open without a fabricated position.
 
-Use `:Parley discussion resolve` or `:Parley discussion reopen` to change an
-Arcanum issue between open and resolved. These commands use the selected thread
-or offer the threads at the source cursor. They preserve drafts and refresh the
-issue state. Dropped, non-issue, unknown, and incomplete threads cannot transition.
-GitHub resolution remains unavailable. Unsupported provider actions explain why
-before you compose or choose them; see `:help parley-provider-capabilities`.
+Use `:Parley discussion resolve` or `:Parley discussion reopen` to change a
+supported issue or review thread. Arcanum transitions complete root issues;
+dropped, non-issue, unknown, and incomplete threads cannot transition. Unsupported
+actions explain why before composition; see `:help parley-provider-capabilities`.
 
-Arcanum reactions offer thumbs up, thumbs down, and heart; other existing codes
-remain readable and removable by their author. AI comments allow one reaction
-per account; remove an existing reaction explicitly before replacing it.
+Arcanum's `:Parley review actions` provides Ship, Sticky ship, Unship, Block merge,
+and Unblock merge. It confirms the loaded revision and rechecks the active diff,
+but the API cannot atomically pin that diff during the write. Server permissions
+remain authoritative; unavailable review data disables these actions without
+hiding discussions.
 
-Use `:Parley review actions` for Ship, Sticky ship, Unship, Block merge, and
-Unblock merge. The confirmation shows the PR, loaded revision, and current verdict.
-Sticky ship approves future diffs until withdrawn. No review message is bundled.
-Reactions and withdrawals require `GENERIC_WRITE`; ship and block additions
-require `REVIEW_REQUEST_SHIP`. Server permissions remain authoritative.
-The active diff is rechecked after confirmation, but the API cannot atomically
-pin it during the write. Review data failures show status `unknown` and disable
-review actions until refresh; discussions remain available.
-
-Arcanum credentials are read from `ARCANUM_TOKEN`, then `ARC_OAUTH_TOKEN`, then
-`ARC_TOKEN_PATH`, then `~/.arc/token`. An unreadable or empty explicit token file
-is an error. Review loading verifies the token's API account before showing cached
-discussions; failed verification stops loading, and the local Arc login is never
-used to guess ownership. Credential changes require a refreshed session.
-
-Discovery searches successive prefix-result pages for the exact remote branch.
-Without a remote branch, Parley remains inactive. Configure a hostname with an
-optional port under `providers.arcanum.host`; do not include a URL scheme or path.
+Arcanum credentials are read from `ARCANUM_TOKEN`, `ARC_OAUTH_TOKEN`,
+`ARC_TOKEN_PATH`, or `~/.arc/token`, in that order. Review loading verifies the API
+account before restoring cached ownership; the local Arc login is diagnostic only.
+Discovery requires an exact remote-branch match. See `:help parley-provider-arcanum`
+for permissions, configuration, transport behavior, and detailed limitations.
 
 ## Telescope
 
@@ -164,7 +149,7 @@ positions remain invalid rows; general discussions are omitted. Use
 
 Optional; requires [diffview.nvim](https://github.com/sindrets/diffview.nvim) to be installed and loaded. No extra setup call is needed — parley listens for diffview's `User` autocmds automatically once both plugins are set up.
 
-Run `:Parley diffview open` to open diffview scoped to the active review's base...head range — no need to look up or type the commit range yourself. `:Parley diffview close` closes it; `:Parley diffview toggle` opens or closes depending on whether a view is already open on the current tab. Only supported for Git repositories (Arcanum/Arc reviews have no diffview equivalent).
+Run `:Parley diffview open` to open diffview scoped to the active review's base...head range — no need to look up or type the commit range yourself. `:Parley diffview close` closes it; `:Parley diffview toggle` opens or closes depending on whether a view is already open on the current tab. Automatic range construction is Git-only because the Arc VCS adapter has no diffview equivalent; attaching discussions to an existing eligible diffview buffer is provider-independent.
 
 Whichever way you open it, when a diffview diff buffer showing the PR's head revision is current, parley:
 
@@ -313,9 +298,10 @@ provider-independent behavior tests.
 
 ## Roadmap
 
-- GitHub thread resolution/reopening via GraphQL
 - optional Arcanum drafts/publication, suggestions, and additional comment anchors
 
-See [TODO.md](TODO.md) for remaining work and
-[ARCANUM_COMPATIBILITY.md](ARCANUM_COMPATIBILITY.md) for current Arcanum support
-and validation limits.
+See [TODO.md](TODO.md) for remaining work and the compatibility references for
+current provider behavior and validation limits:
+
+- [GitHub compatibility](GITHUB_COMPATIBILITY.md)
+- [Arcanum compatibility](ARCANUM_COMPATIBILITY.md)
