@@ -82,7 +82,12 @@ describe("Arc new-comment validation", function()
     assert.is_true(vim.wait(500, function()
       return compose ~= nil
     end))
-    return { set_idle = function() end, set_submitting = function() end, set_cancel = function() end }
+    return {
+      set_idle = function() end,
+      set_submitting = function() end,
+      set_cancel = function() end,
+      close = function() end,
+    }
   end
 
   it("uses the shared revision without GitHub write_context fields", function()
@@ -110,10 +115,7 @@ describe("Arc new-comment validation", function()
     snapshot.review.write_context.diff_id = 42
     reviews._seed(buf, snapshot, "arc/write")
     local instance = open()
-    local idle
-    instance.set_idle = function(message)
-      idle = message
-    end
+    local submitted_compose = compose
     composer.patch(buf, { draft = "preserve me" })
     transport.http_start = function(_, method, _, _, callback)
       assert.equals("GET", method, "Missing entries must not create general comments")
@@ -123,10 +125,10 @@ describe("Arc new-comment validation", function()
     local ok, err = pcall(function()
       compose.on_submit(instance, "preserve me")
       assert.is_true(vim.wait(500, function()
-        return idle ~= nil
+        return compose ~= submitted_compose and composer.get(buf) and composer.get(buf).draft == "preserve me"
       end))
       assert.equals("preserve me", composer.get(buf).draft)
-      assert.equals("failed", composer.get(buf).submit_state)
+      assert.equals("idle", composer.get(buf).submit_state)
       assert.matches("no inline entry", notices[#notices])
     end)
     transport.http_start = original
