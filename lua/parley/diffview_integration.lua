@@ -6,7 +6,15 @@
 --- showing the review's head revision maps PR-diff-space lines onto itself
 --- with identity, so this module aliases such buffers onto the review
 --- already active for a regular buffer in the same repository, reusing the
---- existing read/hover/write pipelines unmodified.
+--- existing read/hover/write pipelines unmodified. Identity mapping is
+--- enforced structurally, not incidentally: review_repository.attach()
+--- marks the bufnr so every view recomputation (including background
+--- refreshes of the shared review data) skips the working-tree-relative
+--- local_mappings cache regular buffers use — that cache is keyed by VCS
+--- root, shared across every buffer in the repo, and always diffs against
+--- the real working-tree file on disk, which would silently mistarget
+--- cursor-based actions (open/reply/resolve/react) the moment the file
+--- being browsed in diffview has uncommitted local edits.
 ---
 --- Only the "new" (head) side is supported: parley's own anchor semantics
 --- (discussion.projectable / providers/*/anchors.lua) never populate

@@ -612,7 +612,7 @@ describe("parley.services.read refresh", function()
   -- 7. Non-regular buffers are clear stale UI without fetching
   -- -------------------------------------------------------------------------
 
-  it("clears stale UI for a diffview buffer", function()
+  it("skips a diffview buffer entirely, without clearing it (diffview_integration.lua owns its lifecycle)", function()
     local s = setup({
       filetype = "DiffviewFiles",
       pr = SAMPLE_PR,
@@ -623,8 +623,11 @@ describe("parley.services.read refresh", function()
       return false
     end)
 
+    -- Reclassifying/clearing here would race with diffview_integration.lua's
+    -- own DiffviewDiffBufRead/DiffviewDiffBufWinEnter-driven attach for the
+    -- same bufnr and wipe out its aliased context/provider/review state.
     assert.equals(0, #s.render_calls)
-    assert.equals(1, #s.clear_calls)
+    assert.equals(0, #s.clear_calls)
     assert.equals(0, #s.provider.calls.detect_pr)
   end)
 

@@ -230,6 +230,93 @@ a.describe("parley.diffview_integration._on_diff_buf", function()
 end)
 
 -- ---------------------------------------------------------------------------
+-- review_repository identity-mapping regression
+--
+-- A diffview head-side buffer's content is byte-identical to the review's
+-- head revision, so cursor-line-based actions (open/reply/resolve/react)
+-- must resolve discussions by identity (PR-diff-space line == buffer line).
+-- Before this fix, review_repository.attach() went through the same
+-- working-tree-relative local_mappings cache regular buffers use, which is
+-- only coincidentally correct when the working tree is clean.
+-- ---------------------------------------------------------------------------
+
+a.describe("parley.diffview_integration review_repository identity mapping", function()
+  local local_mappings = require("parley.repositories.local_mappings")
+  local host_bufnr, diff_bufnr, review_key
+  local orig_local_mappings_get
+
+  a.before_each(function()
+    orig_local_mappings_get = local_mappings.get
+  end)
+
+  a.after_each(function()
+    local_mappings.get = orig_local_mappings_get
+    review_repository._identity_bufnrs[diff_bufnr] = nil
+    cleanup_buffer(host_bufnr)
+    cleanup_buffer(diff_bufnr)
+    if review_key then
+      review_repository._reviews[review_key] = nil
+      review_repository._bufnr_key[host_bufnr] = nil
+      review_repository._bufnr_key[diff_bufnr] = nil
+      review_repository._key_bufnrs[review_key] = nil
+    end
+  end)
+
+  a.it(
+    "keeps identity mapping for a diffview-attached buffer even when local_mappings would shift the line, "
+      .. "including after a background refresh recomputes sibling buffers",
+    function()
+      review_key = "identity-regression-1"
+      host_bufnr = make_host_buffer(review_key, {
+        review = { head_sha = "abc123" },
+        all_discussions = {
+          {
+            id = "d1",
+            file = "lua/foo.lua",
+            line = 5,
+            anchor = { kind = "inline", path = "lua/foo.lua", line = 5 },
+          },
+        },
+      })
+
+      diff_bufnr = vim.api.nvim_create_buf(false, true)
+      context_repository.set(diff_bufnr, {
+        kind = "regular",
+        bufnr = diff_bufnr,
+        path = nil,
+        vcs_info = SAMPLE_VCS,
+        status = "ready",
+        rel_path = "lua/foo.lua",
+      })
+
+      local snapshot = review_repository.attach(diff_bufnr, review_key)
+      assert.equals(5, snapshot.mappings.d1.local_line)
+
+      -- Simulate a dirty working tree: local_mappings would shift line 5 to
+      -- line 9 for any buffer using the ordinary working-tree-relative path.
+      local_mappings.get = function()
+        return { d1 = { local_line = 9, confidence = 0, stale = true } }
+      end
+
+      -- Trigger the same recomputation a background refresh would: this
+      -- invalidates local_mappings and recomputes every buffer attached to
+      -- review_key whose vcs_info matches (host_bufnr and diff_bufnr both).
+      review_repository.remap_async(host_bufnr)
+      vim.wait(1000, function()
+        local host_snapshot = review_repository.get(host_bufnr)
+        return host_snapshot and host_snapshot.mappings.d1 and host_snapshot.mappings.d1.local_line == 9
+      end, 20)
+
+      -- Regular buffer: picks up the shifted, working-tree-relative mapping.
+      assert.equals(9, review_repository.get(host_bufnr).mappings.d1.local_line)
+      -- Diffview-identity buffer: stays at identity, unaffected — proving
+      -- the fix is scoped per-bufnr, not a global disable of local_mappings.
+      assert.equals(5, review_repository.get(diff_bufnr).mappings.d1.local_line)
+    end
+  )
+end)
+
+-- ---------------------------------------------------------------------------
 -- :Parley diffview open|close|toggle
 -- ---------------------------------------------------------------------------
 

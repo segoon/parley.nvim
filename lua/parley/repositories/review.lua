@@ -5,6 +5,7 @@ local cache = require("parley.repositories.review_cache")
 local identity = require("parley.cache_identity")
 local context_repository = require("parley.repositories.context")
 local provider_repository = require("parley.repositories.provider")
+local semantics = require("parley.discussion")
 local ui = require("parley.runtime.ui")
 local M = {}
 --- Shared remote review data; projections live in local_mappings.
@@ -19,6 +20,16 @@ M._bufnr_key = {}
 --- review_key → set of bufnrs. Reverse index of _bufnr_key.
 --- @type table<string, table<integer, boolean>>
 M._key_bufnrs = {}
+--- Buffers whose view uses identity (PR-diff-space line == buffer line)
+--- mappings instead of the shared, working-tree-relative local_mappings
+--- cache. Used for diffview head-side buffers, whose content is
+--- byte-identical to the review's head revision, so remapping against the
+--- working tree would be simply wrong (not just imprecise) whenever the
+--- working tree has diverged from head. Checked inside compute_view so it
+--- stays correct across every recomputation trigger (attach, background
+--- refresh, remap_async), not just the initial attach.
+--- @type table<integer, boolean>
+M._identity_bufnrs = {}
 --- Reentrancy guard, keyed by review_key.
 --- @type table<string, boolean>
 M._in_flight = {}
@@ -120,6 +131,22 @@ local function compute_view(bufnr, shared)
     return { discussions = {}, mappings = {} }
   end
   local file_discussions = filter_for_file(shared.all_discussions or {}, rel_path)
+
+  if M._identity_bufnrs[bufnr] then
+    local mappings = {}
+    for _, discussion in ipairs(file_discussions) do
+      if semantics.projectable(discussion) then
+        mappings[discussion.id] = {
+          local_line = discussion.line,
+          local_end_line = discussion.end_line,
+          confidence = 1.0,
+          stale = false,
+        }
+      end
+    end
+    return { discussions = file_discussions, mappings = mappings, all_mappings = mappings }
+  end
+
   local all_mappings = local_mappings.get(ctx, shared)
   local current = context_repository.get(bufnr)
   if not current or not vim.deep_equal(current.vcs_info, ctx.vcs_info) or current.rel_path ~= rel_path then
@@ -298,6 +325,7 @@ function M.attach(bufnr, review_key)
     return nil
   end
   register_bufnr(bufnr, review_key)
+  M._identity_bufnrs[bufnr] = true
   local view = compute_view(bufnr, shared)
   if not view then
     return nil
@@ -553,6 +581,7 @@ function M.detach(bufnr, preserve_subscribers)
     M._key_bufnrs[key][bufnr] = nil
   end
   M._bufnr_key[bufnr], M._views[bufnr] = nil, nil
+  M._identity_bufnrs[bufnr] = nil
   if not preserve_subscribers then
     M._subscribers[bufnr] = nil
   end
