@@ -34,7 +34,9 @@ notifications, repository browsing, or PR administration.
    remain invalid rows. General discussions are accessed through the pickers.
 6. Run `:Parley view` to open the active review in the system browser. Run
    `:Parley discussion view` to open the selected thread's canonical provider
-   link, or choose a thread at the source cursor when none is selected.
+   link, or choose a thread at the source cursor when none is selected. Run
+   `:Parley comment view`, or press `gx` in the discussion float, to open the
+   selected comment's exact provider-owned link.
 
 The discussion float retains the selected thread across refreshes. It does not
 automatically open or follow the source cursor. Replies retain their parent IDs,

@@ -317,6 +317,10 @@ function M._dispatch_parley(fargs, bufnr, cmd_opts)
     if action == nil or action == "" then
       error("parley: expected a comment action", 0)
     end
+    if action == "view" then
+      require("parley.browser").open_comment(bufnr)
+      return
+    end
     if action == "react" then
       discussion_window.react_current_comment(bufnr)
       return

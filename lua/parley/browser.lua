@@ -86,4 +86,18 @@ function M.open_discussion(bufnr)
   })
 end
 
+--- Open the selected comment in the system browser.
+--- @param bufnr integer
+--- @return boolean
+function M.open_comment(bufnr)
+  local window = require("parley.discussion_window")
+  bufnr = window.resolve_source_bufnr(bufnr)
+  local comment = window.current_comment(bufnr)
+  if not comment then
+    M._notify("parley: select a comment before opening it in the browser", vim.log.levels.INFO)
+    return false
+  end
+  return open_url(comment.url, "comment")
+end
+
 return M

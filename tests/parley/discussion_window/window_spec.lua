@@ -19,7 +19,7 @@ describe("parley.discussion_window.window", function()
     end
   end)
 
-  it("maps gx to viewing the discussion", function()
+  it("maps gx to viewing the selected comment", function()
     local viewed_bufnr
     window.write_lines(17, instance, { "Discussion" }, {
       on_close = function() end,
@@ -41,7 +41,7 @@ describe("parley.discussion_window.window", function()
     end
 
     assert.is_not_nil(mapping)
-    assert.equals("Open Parley discussion in browser", mapping.desc)
+    assert.equals("Open Parley comment in browser", mapping.desc)
     mapping.callback()
     assert.equals(17, viewed_bufnr)
   end)

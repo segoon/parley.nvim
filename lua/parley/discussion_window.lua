@@ -205,7 +205,7 @@ local function write_lines(bufnr, instance, lines)
     on_edit = M.edit_current_comment,
     on_delete = M.delete_current_comment,
     on_view = function(src_bufnr)
-      return require("parley.browser").open_discussion(src_bufnr)
+      return require("parley.browser").open_comment(src_bufnr)
     end,
   })
 end

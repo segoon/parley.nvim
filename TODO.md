@@ -44,8 +44,8 @@ working buffer with undo support without staging or committing automatically.
 
 ### Browser link copying
 
-Add comment-level links and support copying provider-owned review, discussion,
-and comment URLs for unsupported workflows.
+Support copying provider-owned review, discussion, and comment URLs for
+unsupported workflows.
 
 ### CodeDiff integration
 
