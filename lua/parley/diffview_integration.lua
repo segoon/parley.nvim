@@ -464,6 +464,64 @@ function M.toggle(bufnr)
 end
 
 -- ---------------------------------------------------------------------------
+-- Cross-file review navigation (]C/[C, :Parley nav review-next/-prev)
+-- ---------------------------------------------------------------------------
+
+--- Switch the current diffview session to `target_path`'s head-side diff
+--- buffer and place the cursor at `target_line`. Used by nav.lua's
+--- review_next/review_prev when invoked from a diffview-aliased buffer,
+--- instead of `vim.cmd("edit ...")` — which would blow away diffview's
+--- layout (replace one side of the diff split with a plain file buffer,
+--- desyncing the file panel's selection from what's actually open).
+---
+--- Drives diffview's own file-selection API (`view:set_file_by_path`,
+--- itself `async.void`-wrapped) and waits for the resulting buffer: the
+--- switch triggers diffview's real DiffviewDiffBufRead/DiffviewDiffBufWinEnter
+--- events, which this module's own M.setup autocmds already attach via
+--- M._on_diff_buf — no separate attach logic needed here, just wait for it.
+--- @param target_path string  Repo-relative path to switch to
+--- @param target_line integer PR-diff-space line to place the cursor on
+--- @param head_sha string     The review's head commit, to identify the
+---   head-side window among the (old-side, new-side) pair diffview opens.
+--- @param timeout_ms? integer How long to wait for the switch (default 2000).
+--- @return boolean ok
+function M.goto_file(target_path, target_line, head_sha, timeout_ms)
+  local lib = M._get_lib()
+  if not lib then
+    return false
+  end
+  local view = lib.get_current_view()
+  if not view or type(view.set_file_by_path) ~= "function" then
+    return false
+  end
+
+  view:set_file_by_path(target_path, true, true)
+
+  local target_bufnr, target_winid
+  vim.wait(timeout_ms or 2000, function()
+    for _, winid in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+      local bufnr = vim.api.nvim_win_get_buf(winid)
+      local file = M._resolve_file(bufnr)
+      if file and file.path == target_path and M._is_head_side(file, head_sha) then
+        target_bufnr, target_winid = bufnr, winid
+        return M._attached[bufnr] == true
+      end
+    end
+    return false
+  end, 20)
+
+  if not target_winid or not vim.api.nvim_win_is_valid(target_winid) then
+    return false
+  end
+
+  vim.api.nvim_set_current_win(target_winid)
+  local line_count = vim.api.nvim_buf_line_count(target_bufnr)
+  local line = math.max(1, math.min(target_line, line_count))
+  vim.api.nvim_win_set_cursor(target_winid, { line, 0 })
+  return true
+end
+
+-- ---------------------------------------------------------------------------
 -- Setup
 -- ---------------------------------------------------------------------------
 

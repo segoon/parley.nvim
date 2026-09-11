@@ -752,3 +752,166 @@ a.describe("parley.diffview_integration._render_panel_badges", function()
     end
   )
 end)
+
+-- ---------------------------------------------------------------------------
+-- goto_file — cross-file review navigation from a diffview buffer
+-- ---------------------------------------------------------------------------
+
+a.describe("parley.diffview_integration.goto_file", function()
+  local winid, bufnr
+  local orig_get_lib, orig_resolve_file
+
+  a.before_each(function()
+    orig_get_lib = diffview_integration._get_lib
+    orig_resolve_file = diffview_integration._resolve_file
+  end)
+
+  a.after_each(function()
+    diffview_integration._get_lib = orig_get_lib
+    diffview_integration._resolve_file = orig_resolve_file
+    if bufnr then
+      diffview_integration._attached[bufnr] = nil
+    end
+    if winid and vim.api.nvim_win_is_valid(winid) then
+      vim.api.nvim_win_close(winid, true)
+    end
+    winid, bufnr = nil, nil
+  end)
+
+  --- Real scratch window/buffer standing in for the head-side diff window
+  --- goto_file is expected to find and focus.
+  local function make_target_window(line_count)
+    bufnr = vim.api.nvim_create_buf(false, true)
+    local lines = {}
+    for i = 1, line_count do
+      lines[i] = "l" .. i
+    end
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+    winid = vim.api.nvim_open_win(bufnr, false, {
+      relative = "editor",
+      row = 0,
+      col = 0,
+      width = 10,
+      height = line_count,
+      style = "minimal",
+      noautocmd = true,
+    })
+    return winid, bufnr
+  end
+
+  a.it("switches to the target file's head-side window and places the cursor", function()
+    make_target_window(10)
+    local set_file_calls = {}
+    local view = {
+      set_file_by_path = function(_self, path, focus, highlight)
+        set_file_calls[#set_file_calls + 1] = { path = path, focus = focus, highlight = highlight }
+      end,
+    }
+    diffview_integration._get_lib = function()
+      return {
+        get_current_view = function()
+          return view
+        end,
+      }
+    end
+    diffview_integration._resolve_file = function(b)
+      if b ~= bufnr then
+        return nil
+      end
+      return { path = "b/target.lua", rev = { type = "COMMIT", commit = "headsha" } }
+    end
+    diffview_integration._attached[bufnr] = true
+
+    local ok = diffview_integration.goto_file("b/target.lua", 5, "headsha", 500)
+
+    assert.is_true(ok)
+    assert.equals(1, #set_file_calls)
+    assert.equals("b/target.lua", set_file_calls[1].path)
+    assert.equals(winid, vim.api.nvim_get_current_win())
+    assert.equals(5, vim.api.nvim_win_get_cursor(winid)[1])
+  end)
+
+  a.it("clamps target_line to the buffer's line count", function()
+    make_target_window(3)
+    diffview_integration._get_lib = function()
+      return {
+        get_current_view = function()
+          return { set_file_by_path = function() end }
+        end,
+      }
+    end
+    diffview_integration._resolve_file = function(b)
+      if b ~= bufnr then
+        return nil
+      end
+      return { path = "b/target.lua", rev = { type = "COMMIT", commit = "headsha" } }
+    end
+    diffview_integration._attached[bufnr] = true
+
+    local ok = diffview_integration.goto_file("b/target.lua", 999, "headsha", 500)
+
+    assert.is_true(ok)
+    assert.equals(3, vim.api.nvim_win_get_cursor(winid)[1])
+  end)
+
+  a.it("returns false when diffview isn't installed", function()
+    diffview_integration._get_lib = function()
+      return nil
+    end
+
+    assert.is_false(diffview_integration.goto_file("b/target.lua", 5, "headsha", 500))
+  end)
+
+  a.it("returns false when the current view has no set_file_by_path (not a DiffView)", function()
+    diffview_integration._get_lib = function()
+      return {
+        get_current_view = function()
+          return { some_other_field = true }
+        end,
+      }
+    end
+
+    assert.is_false(diffview_integration.goto_file("b/target.lua", 5, "headsha", 500))
+  end)
+
+  a.it("returns false when no matching head-side window appears within the timeout", function()
+    diffview_integration._get_lib = function()
+      return {
+        get_current_view = function()
+          return { set_file_by_path = function() end }
+        end,
+      }
+    end
+    diffview_integration._resolve_file = function()
+      return nil
+    end
+
+    assert.is_false(diffview_integration.goto_file("b/target.lua", 5, "headsha", 100))
+  end)
+
+  a.it("waits for M._attached before switching, not just for a matching window", function()
+    make_target_window(10)
+    diffview_integration._get_lib = function()
+      return {
+        get_current_view = function()
+          return { set_file_by_path = function() end }
+        end,
+      }
+    end
+    diffview_integration._resolve_file = function(b)
+      if b ~= bufnr then
+        return nil
+      end
+      return { path = "b/target.lua", rev = { type = "COMMIT", commit = "headsha" } }
+    end
+    -- Not attached yet; attach a bit later, simulating _on_diff_buf's async flow.
+    vim.defer_fn(function()
+      diffview_integration._attached[bufnr] = true
+    end, 50)
+
+    local ok = diffview_integration.goto_file("b/target.lua", 5, "headsha", 1000)
+
+    assert.is_true(ok)
+    assert.equals(winid, vim.api.nvim_get_current_win())
+  end)
+end)

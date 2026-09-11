@@ -171,6 +171,8 @@ Whichever way you open it, when a diffview diff buffer showing the PR's head rev
 - Renders the same signs / virtual text / hover previews as regular buffers, for discussions anchored to that file
 - Lets you add a new top-level comment at the cursor line with `<leader>pc` (configurable, see `keymaps.diffview_new_comment` below)
 - Shows a 💬 comment-count badge (with `!` for unresolved threads) next to changed files in diffview's file panel
+- Supports the full discussion workflow — reply, edit, resolve/reopen, react — the same as in a regular buffer
+- `]C`/`[C` (`:Parley nav review-next/-prev`) hop between files across the whole review, switching diffview's active file and file-panel selection along with the cursor
 
 Verified against both [upstream diffview.nvim](https://github.com/sindrets/diffview.nvim) and the [`mistricky/diffview-plus.nvim`](https://github.com/mistricky/diffview-plus.nvim) fork; not verified against other forks. One difference: file-panel badges refresh live on file selection and staging under the fork (which fires extra `User` events upstream doesn't), but only after layout changes under plain upstream diffview.nvim.
 
