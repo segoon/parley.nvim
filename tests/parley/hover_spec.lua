@@ -374,6 +374,65 @@ describe("parley.hover", function()
       assert.is_nil(hover._floats[bufnr])
     end)
   end)
+
+  describe("close on window/buffer leave", function()
+    local augroup
+
+    before_each(function()
+      augroup = vim.api.nvim_create_augroup("parley_hover_spec_leave", { clear = true })
+      hover.setup(augroup)
+    end)
+
+    after_each(function()
+      vim.api.nvim_del_augroup_by_id(augroup)
+    end)
+
+    --- Open a live preview float in a fresh scratch buffer/window.
+    --- @return integer bufnr
+    local function open_float()
+      local bufnr = scratch(10)
+      vim.api.nvim_win_set_cursor(0, { 3, 0 })
+      review_repository._seed(bufnr, {
+        status = "ready",
+        discussions = { make_discussion({ line = 3 }) },
+        mappings = { d1 = { local_line = 3, stale = false, confidence = 1.0 } },
+      })
+      local config = base_config()
+      config.floating_text.hover = true
+      hover._get_config = function()
+        return config
+      end
+      discussion_window.is_open = function()
+        return false
+      end
+
+      hover._on_cursor_moved()
+      fire_hover_timer()
+      assert.is_not_nil(hover._floats[bufnr])
+      return bufnr
+    end
+
+    it("closes the preview float when leaving the source window (WinLeave)", function()
+      local bufnr = open_float()
+
+      vim.cmd("split")
+
+      assert.is_nil(hover._floats[bufnr])
+      assert.is_nil(hover._last_line[bufnr])
+
+      vim.api.nvim_win_close(0, true)
+    end)
+
+    it("closes the preview float when leaving the source buffer (BufLeave)", function()
+      local bufnr = open_float()
+      local other = vim.api.nvim_create_buf(false, true)
+
+      vim.api.nvim_set_current_buf(other)
+
+      assert.is_nil(hover._floats[bufnr])
+      assert.is_nil(hover._last_line[bufnr])
+    end)
+  end)
 end)
 
 describe("discussion_window.make_win_config focusable default", function()

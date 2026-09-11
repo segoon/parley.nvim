@@ -211,6 +211,19 @@ function M.setup(augroup)
     callback = M._on_cursor_moved,
     desc = "Parley: cursor-hover virtual text / preview float tracking",
   })
+
+  -- CursorMoved never fires when focus leaves the source buffer without a
+  -- cursor move in it (<C-w>w, :split + switch, :e another file, a mouse
+  -- click into another window), so the preview float would otherwise be
+  -- orphaned on screen. WinLeave covers window switches; BufLeave covers
+  -- switching buffers within the same window.
+  vim.api.nvim_create_autocmd({ "WinLeave", "BufLeave" }, {
+    group = augroup,
+    callback = function()
+      M.close(vim.api.nvim_get_current_buf())
+    end,
+    desc = "Parley: close hover preview float when leaving its source window/buffer",
+  })
 end
 
 --- Clean up hover state for a buffer being wiped out.
