@@ -49,6 +49,52 @@ a.describe("parley.diffview_integration._is_head_side", function()
   end)
 end)
 
+a.describe("parley.diffview_integration._matches_old_side", function()
+  local function old_side_discussion(id, file, revision, line)
+    return {
+      id = id,
+      file = file,
+      line = line,
+      anchor = { kind = "inline", path = file, side = "old", revision = revision, line = line },
+    }
+  end
+
+  a.it("is true when a discussion's old-side anchor revision matches the file's revision", function()
+    local file = { path = "a.lua", rev = { type = "COMMIT", commit = "base-sha" } }
+    local discussions = { old_side_discussion("d1", "a.lua", "base-sha", 5) }
+    assert.is_true(diffview_integration._matches_old_side(file, discussions))
+  end)
+
+  a.it("is false when no discussion's revision matches (unrelated diff)", function()
+    local file = { path = "a.lua", rev = { type = "COMMIT", commit = "unrelated-sha" } }
+    local discussions = { old_side_discussion("d1", "a.lua", "base-sha", 5) }
+    assert.is_false(diffview_integration._matches_old_side(file, discussions))
+  end)
+
+  a.it("is false when the matching discussion is for a different file", function()
+    local file = { path = "b.lua", rev = { type = "COMMIT", commit = "base-sha" } }
+    local discussions = { old_side_discussion("d1", "a.lua", "base-sha", 5) }
+    assert.is_false(diffview_integration._matches_old_side(file, discussions))
+  end)
+
+  a.it("is false for a new-side discussion even if the revision happens to match", function()
+    local file = { path = "a.lua", rev = { type = "COMMIT", commit = "head-sha" } }
+    local discussions = {
+      { id = "d1", file = "a.lua", line = 5, anchor = { kind = "inline", path = "a.lua", line = 5 } },
+    }
+    assert.is_false(diffview_integration._matches_old_side(file, discussions))
+  end)
+
+  a.it("is false when the file has no revision", function()
+    assert.is_false(diffview_integration._matches_old_side({ path = "a.lua" }, {}))
+  end)
+
+  a.it("is false with no discussions", function()
+    local file = { path = "a.lua", rev = { type = "COMMIT", commit = "base-sha" } }
+    assert.is_false(diffview_integration._matches_old_side(file, {}))
+  end)
+end)
+
 -- ---------------------------------------------------------------------------
 -- _find_host / _on_diff_buf — exercised against real repository state
 -- ---------------------------------------------------------------------------
@@ -186,7 +232,7 @@ a.describe("parley.diffview_integration._on_diff_buf", function()
     assert.equals(review_key, review_repository.key_for_bufnr(diff_bufnr))
   end)
 
-  a.it("does nothing for a base/old-side diff buffer", function()
+  a.it("does nothing for a base/old-side diff buffer with no discussion anchored there", function()
     review_key = "test-key-3"
     host_bufnr = make_host_buffer(review_key, { review = { head_sha = "abc123" }, all_discussions = {} })
     diff_bufnr = vim.api.nvim_create_buf(false, true)
@@ -211,6 +257,98 @@ a.describe("parley.diffview_integration._on_diff_buf", function()
 
     assert.is_false(rendered)
     assert.is_nil(diffview_integration._attached[diff_bufnr])
+  end)
+
+  a.it("aliases a base/old-side diff buffer with identity mapping when a discussion is anchored there", function()
+    review_key = "test-key-old-side"
+    host_bufnr = make_host_buffer(review_key, {
+      review = { head_sha = "abc123" },
+      all_discussions = {
+        {
+          id = "d1",
+          file = "lua/foo.lua",
+          line = 5,
+          anchor = { kind = "inline", path = "lua/foo.lua", side = "old", revision = "base-sha", line = 5 },
+        },
+      },
+    })
+    diff_bufnr = vim.api.nvim_create_buf(false, true)
+    diffview_integration._resolve_file = function(bufnr)
+      if bufnr ~= diff_bufnr then
+        return nil
+      end
+      return {
+        bufnr = diff_bufnr,
+        path = "lua/foo.lua",
+        absolute_path = "/repo/lua/foo.lua",
+        rev = { type = "COMMIT", commit = "base-sha" },
+      }
+    end
+
+    local rendered_bufnr, rendered_snapshot
+    require("parley.services.read").render_snapshot = function(bufnr, snapshot)
+      rendered_bufnr, rendered_snapshot = bufnr, snapshot
+    end
+
+    diffview_integration._on_diff_buf(diff_bufnr)
+    vim.wait(1000, function()
+      return rendered_bufnr ~= nil
+    end, 10)
+
+    assert.is_true(diffview_integration._attached[diff_bufnr])
+    assert.equals(diff_bufnr, rendered_bufnr)
+    assert.equals(5, rendered_snapshot.mappings.d1.local_line)
+    assert.equals("old", review_repository._identity_bufnrs[diff_bufnr])
+  end)
+
+  a.it("does not wire the new-comment keymap for an old-side diff buffer", function()
+    review_key = "test-key-old-side-keymap"
+    host_bufnr = make_host_buffer(review_key, {
+      review = { head_sha = "abc123" },
+      all_discussions = {
+        {
+          id = "d1",
+          file = "lua/foo.lua",
+          line = 5,
+          anchor = { kind = "inline", path = "lua/foo.lua", side = "old", revision = "base-sha", line = 5 },
+        },
+      },
+    })
+    diff_bufnr = vim.api.nvim_create_buf(false, true)
+    diffview_integration._resolve_file = function(bufnr)
+      if bufnr ~= diff_bufnr then
+        return nil
+      end
+      return {
+        bufnr = diff_bufnr,
+        path = "lua/foo.lua",
+        absolute_path = "/repo/lua/foo.lua",
+        rev = { type = "COMMIT", commit = "base-sha" },
+      }
+    end
+    diffview_integration._get_config = function()
+      return { diffview = { enabled = true }, keymaps = { diffview_new_comment = "<leader>pc" } }
+    end
+    local rendered = false
+    require("parley.services.read").render_snapshot = function()
+      rendered = true
+    end
+
+    diffview_integration._on_diff_buf(diff_bufnr)
+    vim.wait(1000, function()
+      return rendered
+    end, 10)
+
+    local ok = pcall(vim.api.nvim_buf_get_keymap, diff_bufnr, "n")
+    local has_keymap = false
+    if ok then
+      for _, map in ipairs(vim.api.nvim_buf_get_keymap(diff_bufnr, "n")) do
+        if map.lhs == "<leader>pc" then
+          has_keymap = true
+        end
+      end
+    end
+    assert.is_false(has_keymap)
   end)
 
   a.it("does nothing when diffview integration is disabled", function()
@@ -314,6 +452,62 @@ a.describe("parley.diffview_integration review_repository identity mapping", fun
       assert.equals(5, review_repository.get(diff_bufnr).mappings.d1.local_line)
     end
   )
+
+  a.it("attach(..., side) only includes discussions anchored to that side", function()
+    review_key = "identity-side-1"
+    host_bufnr = make_host_buffer(review_key, {
+      review = { head_sha = "abc123" },
+      all_discussions = {
+        {
+          id = "new1",
+          file = "lua/foo.lua",
+          line = 3,
+          anchor = { kind = "inline", path = "lua/foo.lua", line = 3 },
+        },
+        {
+          id = "old1",
+          file = "lua/foo.lua",
+          line = 7,
+          anchor = { kind = "inline", path = "lua/foo.lua", side = "old", revision = "base-sha", line = 7 },
+        },
+      },
+    })
+
+    local new_bufnr = vim.api.nvim_create_buf(false, true)
+    context_repository.set(new_bufnr, {
+      kind = "regular",
+      bufnr = new_bufnr,
+      path = nil,
+      vcs_info = SAMPLE_VCS,
+      status = "ready",
+      rel_path = "lua/foo.lua",
+    })
+    local old_bufnr = vim.api.nvim_create_buf(false, true)
+    context_repository.set(old_bufnr, {
+      kind = "regular",
+      bufnr = old_bufnr,
+      path = nil,
+      vcs_info = SAMPLE_VCS,
+      status = "ready",
+      rel_path = "lua/foo.lua",
+    })
+
+    local new_snapshot = review_repository.attach(new_bufnr, review_key, "new")
+    local old_snapshot = review_repository.attach(old_bufnr, review_key, "old")
+
+    assert.is_not_nil(new_snapshot.mappings.new1)
+    assert.is_nil(new_snapshot.mappings.old1)
+    assert.is_nil(old_snapshot.mappings.new1)
+    assert.is_not_nil(old_snapshot.mappings.old1)
+    assert.equals(7, old_snapshot.mappings.old1.local_line)
+
+    cleanup_buffer(new_bufnr)
+    cleanup_buffer(old_bufnr)
+    review_repository._identity_bufnrs[new_bufnr] = nil
+    review_repository._identity_bufnrs[old_bufnr] = nil
+    review_repository._bufnr_key[new_bufnr] = nil
+    review_repository._bufnr_key[old_bufnr] = nil
+  end)
 end)
 
 -- ---------------------------------------------------------------------------

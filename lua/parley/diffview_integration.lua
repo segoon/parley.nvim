@@ -16,9 +16,13 @@
 --- cursor-based actions (open/reply/resolve/react) the moment the file
 --- being browsed in diffview has uncommitted local edits.
 ---
---- Only the "new" (head) side is supported: parley's own anchor semantics
---- (discussion.projectable / providers/*/anchors.lua) never populate
---- `side == "old"` anchors, so there is nothing to render on the base side.
+--- The head/"new" side is always supported. The base/"old" side renders
+--- only when a discussion is actually anchored there (M._matches_old_side)
+--- — most providers never produce old-side anchors at all (GitHub doesn't
+--- read its REST API's LEFT/RIGHT side field), so in practice this only
+--- activates for Arcanum reviews with old-side comments. Old-side rendering
+--- is read-only: no built-in provider's write path supports creating a new
+--- comment on the old side, so the new-comment keymap stays new-side only.
 ---
 --- No dependency on diffview being configured with parley-aware `hooks`:
 --- this module listens on diffview's documented `User` autocmds, which fire
@@ -156,8 +160,39 @@ local function set_new_comment_keymap(bufnr, keymap)
   end, { buffer = bufnr, desc = "Parley: new comment (diffview)" })
 end
 
+--- True iff `file`'s revision is the exact old-side revision of at least
+--- one discussion anchored to this path. Unlike the head side (a single
+--- known head_sha), the review has no single "base sha" recorded — each
+--- old-side anchor carries its own revision (providers may anchor
+--- historical comments to different diff revisions), so matching by
+--- anchor identity is both the safest and the only available check: it
+--- can never misattach an unrelated diff (nothing matches unless a real
+--- discussion says so), and needs no extra VCS calls.
+--- @param file table vcs.File
+--- @param all_discussions parley.Discussion[]
+--- @return boolean
+function M._matches_old_side(file, all_discussions)
+  if not file.rev or not file.rev.commit or file.rev.commit == "" then
+    return false
+  end
+  local semantics = require("parley.discussion")
+  for _, discussion in ipairs(all_discussions or {}) do
+    if discussion.file == file.path then
+      local a = semantics.anchor(discussion)
+      if a.side == "old" and a.revision == file.rev.commit then
+        return true
+      end
+    end
+  end
+  return false
+end
+
 --- Handle a diffview diff buffer becoming current: resolve its identity,
---- alias it onto the host review (head side only), and render.
+--- alias it onto the host review, and render. Head-side buffers are
+--- always eligible; old-side buffers only when some discussion is
+--- actually anchored there (M._matches_old_side) — most providers never
+--- produce old-side anchors at all (see discussion.lua), so in practice
+--- this only activates for Arcanum reviews with old-side comments.
 ---
 --- review_repository.attach() may read revision/working-tree content
 --- (parley.runtime.fs), which yields internally; run it inside a plenary
@@ -189,9 +224,12 @@ function M._on_diff_buf(bufnr)
     return
   end
 
-  if not M._is_head_side(file, host_snapshot.review.head_sha) then
-    -- Base/old-side diff buffers have nothing to render: parley never
-    -- anchors discussions to side == "old".
+  local side
+  if M._is_head_side(file, host_snapshot.review.head_sha) then
+    side = "new"
+  elseif M._matches_old_side(file, host_snapshot.all_discussions) then
+    side = "old"
+  else
     return
   end
 
@@ -211,14 +249,20 @@ function M._on_diff_buf(bufnr)
   provider_repository.set(bufnr, provider_snapshot)
 
   async.run(function()
-    local snapshot = review_repository.attach(bufnr, review_key)
+    local snapshot = review_repository.attach(bufnr, review_key, side)
     vim.schedule(function()
       if not snapshot or not vim.api.nvim_buf_is_valid(bufnr) then
         return
       end
       M._attached[bufnr] = true
       read_service.render_snapshot(bufnr, snapshot)
-      set_new_comment_keymap(bufnr, config.keymaps and config.keymaps.diffview_new_comment)
+      -- Creating a new comment on the old side isn't supported by any
+      -- built-in provider's write path today (GitHub hardcodes the new
+      -- side; Arcanum's inline write path does too) — only wire the
+      -- keymap where it can actually succeed.
+      if side == "new" then
+        set_new_comment_keymap(bufnr, config.keymaps and config.keymaps.diffview_new_comment)
+      end
     end)
   end)
 end

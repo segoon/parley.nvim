@@ -204,7 +204,15 @@ function M.render(bufnr, discussions, mappings, opts, cursor_line)
     local mapping = mappings[disc.id]
 
     -- Skip if no mapping or if the anchored line was deleted locally.
-    if mapping and mapping.local_line ~= nil and require("parley.discussion").projectable(disc) then
+    -- (mapping.local_line ~= nil already implies the discussion is
+    -- projectable in whatever space the caller computed mappings for —
+    -- anchor.map_discussions only ever sets local_line for a discussion
+    -- that passed discussion.projectable(); review_repository's diffview
+    -- identity mode applies its own equivalent, side-aware check. A
+    -- second, side-blind projectable() re-check here would incorrectly
+    -- exclude old-side discussions that a diffview old-side buffer
+    -- legitimately maps.)
+    if mapping and mapping.local_line ~= nil then
       local stale = mapping.stale
       local hl_sign = stale and HL_STALE_SIGN or HL_SIGN
       local hl_vtext_meta = stale and HL_STALE_VTEXT_META or HL_VTEXT_META

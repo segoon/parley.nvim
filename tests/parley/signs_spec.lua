@@ -516,6 +516,39 @@ describe("signs.render", function()
     -- Extmark still placed; virt_lines may be empty but no crash
     assert.equal(1, #all_extmarks(bufnr))
   end)
+
+  -- -------------------------------------------------------------------------
+  -- Old-side discussions (diffview old-side identity mapping)
+  -- -------------------------------------------------------------------------
+  -- render() must not re-derive projectability from discussion.projectable(),
+  -- which always excludes side == "old" (it's meant for regular,
+  -- working-tree-relative buffers). A caller that already computed a valid
+  -- mapping for an old-side discussion — e.g. review_repository's diffview
+  -- old-side identity mode — must have it rendered like any other mapped
+  -- discussion; mapping.local_line ~= nil is the only signal render() should
+  -- trust.
+
+  it("renders an old-side discussion when the caller already produced a mapping for it", function()
+    local bufnr = scratch(5)
+    local disc = model.new_discussion({
+      id = "d1",
+      anchor = { kind = "inline", path = "foo.lua", side = "old", revision = "base-sha", line = 2 },
+      comments = {
+        model.new_comment({
+          id = "c-d1",
+          author = "alice",
+          body = model.new_body({ text = "old-side comment", format = "plaintext" }),
+          created_at = "2024-01-01T00:00:00Z",
+          updated_at = "2024-01-01T00:00:00Z",
+        }),
+      },
+    })
+    local mappings = { ["d1"] = make_mapping(2) }
+
+    signs.render(bufnr, { disc }, mappings, default_opts())
+
+    assert.equal(1, #all_extmarks(bufnr))
+  end)
 end)
 
 -- ---------------------------------------------------------------------------

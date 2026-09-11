@@ -65,8 +65,11 @@ describe("Arcanum discussion semantics", function()
     assert.equals("cycle", cycle[1].ancestry)
   end)
   it("distinguishes current new-side anchors from old-side and historical anchors", function()
-    local current, old, historical =
-      group({ raw(1) })[1], group({ raw(2, nil, "old") })[1], group({ raw(3, nil, "new", "41") })[1]
+    local current, old, historical, historical_old =
+      group({ raw(1) })[1],
+      group({ raw(2, nil, "old") })[1],
+      group({ raw(3, nil, "new", "41") })[1],
+      group({ raw(4, nil, "old", "41") })[1]
     assert.equals("new.lua", current.file)
     assert.equals("old.lua", old.file)
     assert.equals("before", old.anchor.revision)
@@ -74,8 +77,15 @@ describe("Arcanum discussion semantics", function()
     assert.equals("42", current.anchor.diff_id)
     assert.equals("old.lua", current.anchor.before_path)
     assert.is_nil(current.anchor.unavailable_reason)
-    assert.is_not_nil(old.anchor.unavailable_reason)
+    -- A current (non-historical) old-side anchor is readable — e.g. for
+    -- diffview's old-side diff buffer — even though it can never be
+    -- written to (see write_context/capabilities' separate side=="new"
+    -- write-eligibility gate, unaffected by this).
+    assert.is_nil(old.anchor.unavailable_reason)
     assert.is_not_nil(historical.anchor.unavailable_reason)
+    -- A historical/stale-diff old-side anchor still isn't rendered, same
+    -- staleness check as the new-side case.
+    assert.is_not_nil(historical_old.anchor.unavailable_reason)
   end)
   it("recognizes whole-file -1 and general anchors without inventing positions", function()
     local file, general = raw(1), raw(2)

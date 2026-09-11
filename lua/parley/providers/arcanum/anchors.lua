@@ -64,16 +64,25 @@ function M.map(raw, review)
   end
   local context = review and review.write_context or {}
   local target = xid and (xid:match("^%d+%-(%d+)$") or xid:match("^(%d+)$"))
+  -- Old-side anchors are readable (e.g. for diffview's old-side diff
+  -- buffer) once they pass the same historical/stale-diff check new-side
+  -- anchors already get; they still don't imply write eligibility, which
+  -- write_context/capabilities gate separately (post_top_level_comment
+  -- requires side == "new" regardless of unavailable_reason here).
   if file.diff_entry_encrypted == true or before.encrypted == true or after.encrypted == true then
     result.unavailable_reason = "Encrypted file"
-  elseif side == "old" then
-    result.unavailable_reason = "Old-side location"
-  elseif entry.content_id_after == vim.NIL or (next(entry) ~= nil and not after_path) then
+  elseif side == "new" and (entry.content_id_after == vim.NIL or (next(entry) ~= nil and not after_path)) then
     result.unavailable_reason = "File absent from the new side"
+  elseif side == "old" and (entry.content_id_before == vim.NIL or (next(entry) ~= nil and not before_path)) then
+    result.unavailable_reason = "File absent from the old side"
   elseif not target or not context.diff_id or tonumber(target) ~= context.diff_id then
     result.unavailable_reason = "Historical or unverified diff"
-  elseif not review or not text(review.head_sha) or side ~= "new" then
-    result.unavailable_reason = "Revision or side unavailable"
+  elseif side == "new" and (not review or not text(review.head_sha)) then
+    result.unavailable_reason = "Revision unavailable"
+  elseif side == "old" and not text(before.commit_id) then
+    result.unavailable_reason = "Revision unavailable"
+  elseif side ~= "old" and side ~= "new" then
+    result.unavailable_reason = "Side unavailable"
   end
   return result
 end

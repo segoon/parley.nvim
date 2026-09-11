@@ -176,7 +176,7 @@ Whichever way you open it, when a diffview diff buffer showing the PR's head rev
 
 Verified against both [upstream diffview.nvim](https://github.com/sindrets/diffview.nvim) and the [`mistricky/diffview-plus.nvim`](https://github.com/mistricky/diffview-plus.nvim) fork; not verified against other forks. One difference: file-panel badges refresh live on file selection and staging under the fork (which fires extra `User` events upstream doesn't), but only after layout changes under plain upstream diffview.nvim.
 
-Only the head/"new" side of a diff is supported — parley never anchors discussions to the base/"old" side, so base-revision diff buffers render nothing. Disable the integration entirely with:
+The head/"new" side is always supported. The base/"old" side renders read-only when a comment is actually anchored there — currently only Arcanum ever anchors comments to the old side (GitHub's provider mapping doesn't capture that data); creating a *new* comment on the old side isn't supported by either provider's write path. Disable the integration entirely with:
 
 ```lua
 require("parley").setup({

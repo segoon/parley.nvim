@@ -22,13 +22,20 @@ M._bufnr_key = {}
 M._key_bufnrs = {}
 --- Buffers whose view uses identity (PR-diff-space line == buffer line)
 --- mappings instead of the shared, working-tree-relative local_mappings
---- cache. Used for diffview head-side buffers, whose content is
---- byte-identical to the review's head revision, so remapping against the
---- working tree would be simply wrong (not just imprecise) whenever the
---- working tree has diverged from head. Checked inside compute_view so it
---- stays correct across every recomputation trigger (attach, background
+--- cache. Used for diffview diff buffers, whose content is byte-identical
+--- to a specific revision, so remapping against the working tree would be
+--- simply wrong (not just imprecise) whenever the working tree has
+--- diverged from that revision. Checked inside compute_view so it stays
+--- correct across every recomputation trigger (attach, background
 --- refresh, remap_async), not just the initial attach.
---- @type table<integer, boolean>
+---
+--- The value is which side of the diff the buffer represents ("new" for
+--- diffview's head-side buffer, "old" for its base-side buffer), since an
+--- anchor's own side must match: a discussion anchored to the old side
+--- only has a meaningful identity-mapped position in an old-side buffer,
+--- and vice versa. Most discussions are new-side only (parley's built-in
+--- providers mostly don't produce old-side anchors; see discussion.lua).
+--- @type table<integer, "new"|"old">
 M._identity_bufnrs = {}
 --- Reentrancy guard, keyed by review_key.
 --- @type table<string, boolean>
@@ -132,10 +139,24 @@ local function compute_view(bufnr, shared)
   end
   local file_discussions = filter_for_file(shared.all_discussions or {}, rel_path)
 
-  if M._identity_bufnrs[bufnr] then
+  local identity_side = M._identity_bufnrs[bufnr]
+  if identity_side then
     local mappings = {}
     for _, discussion in ipairs(file_discussions) do
-      if semantics.projectable(discussion) then
+      local a = semantics.anchor(discussion)
+      local disc_side = a.side == "old" and "old" or "new"
+      -- Same conditions as semantics.projectable(), except side is matched
+      -- against the buffer's own side instead of hardcoding "new" — an
+      -- old-side anchor only has a meaningful position in an old-side
+      -- buffer, and projectable() itself always excludes side == "old"
+      -- (it's meant for regular, working-tree-relative buffers).
+      if
+        a.kind == "inline"
+        and semantics.valid_path(a.path)
+        and semantics.valid_line(a.line)
+        and not a.unavailable_reason
+        and disc_side == identity_side
+      then
         mappings[discussion.id] = {
           local_line = discussion.line,
           local_end_line = discussion.end_line,
@@ -318,14 +339,17 @@ end
 --- provider_repository snapshot for `bufnr`.
 --- @param bufnr integer
 --- @param review_key string
+--- @param side? "new"|"old" Which side of the diff `bufnr` represents;
+---   defaults to "new" (defaulting keeps this backward compatible with
+---   the original head-side-only caller).
 --- @return table|nil composite snapshot, or nil if the view couldn't be computed
-function M.attach(bufnr, review_key)
+function M.attach(bufnr, review_key, side)
   local shared = M._reviews[review_key]
   if not shared then
     return nil
   end
   register_bufnr(bufnr, review_key)
-  M._identity_bufnrs[bufnr] = true
+  M._identity_bufnrs[bufnr] = side or "new"
   local view = compute_view(bufnr, shared)
   if not view then
     return nil
