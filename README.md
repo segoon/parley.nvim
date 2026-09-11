@@ -254,7 +254,7 @@ This checks:
 - Neovim version
 - provider-specific tools (`git`/`gh` or `arc`/`curl`)
 - `plenary.async`
-- cache directory setup
+- cache directory setup and used size
 - optional integrations
 - whether the current buffer is in a supported repository
 - local credential availability and, for Arcanum, the token source and configured host

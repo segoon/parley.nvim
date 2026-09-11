@@ -32,6 +32,9 @@ describe("delegated health diagnostics", function()
     health._filewritable = function()
       return 1
     end
+    health._directory_size = function()
+      return 1572864
+    end
     health._get_buf_props = function()
       return props
     end
@@ -115,6 +118,31 @@ describe("delegated health diagnostics", function()
     end
     health.check()
     expect("error", "Neovim >= 0.10 is required")
+  end)
+
+  it("reports the space used by the cache directory", function()
+    health.check()
+    expect("ok", "cache_dir exists and is writable: /tmp/parley-cache (1.50 Mb)")
+  end)
+
+  it("keeps reporting the cache directory when its size cannot be read", function()
+    health._directory_size = function()
+      return nil
+    end
+    health.check()
+    expect("ok", "cache_dir exists and is writable: /tmp/parley-cache")
+  end)
+
+  it("sums files in nested cache directories", function()
+    local root = vim.fn.tempname()
+    vim.fn.mkdir(root .. "/nested", "p")
+    vim.fn.writefile({ "abc" }, root .. "/first.json", "b")
+    vim.fn.writefile({ "12345" }, root .. "/nested/second.json", "b")
+
+    assert.equals(8, saved._directory_size(root))
+    assert.is_nil(saved._directory_size(root .. "/missing"))
+
+    vim.fn.delete(root, "rf")
   end)
 
   it("handles an unavailable health-report source without detecting", function()

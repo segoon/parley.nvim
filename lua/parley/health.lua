@@ -2,6 +2,8 @@
 
 local M = {}
 
+local uv = vim.uv or vim.loop
+
 --- @type table|nil
 M._health = nil
 
@@ -52,6 +54,60 @@ M._alternate_buf = function()
   return vim.fn.bufnr("#")
 end
 
+--- Return the total size of regular files below a directory without following
+--- symbolic links. A nil result means that the directory could not be scanned
+--- completely, so callers should avoid presenting a partial total.
+--- @param path string
+--- @return integer|nil
+local function directory_size(path)
+  local request = uv.fs_scandir(path)
+  if not request then
+    return nil
+  end
+
+  local total = 0
+  while true do
+    local name, entry_type = uv.fs_scandir_next(request)
+    if not name then
+      break
+    end
+
+    local entry_path = path .. "/" .. name
+    if entry_type == "directory" then
+      local nested_size = directory_size(entry_path)
+      if nested_size == nil then
+        return nil
+      end
+      total = total + nested_size
+    elseif entry_type == "file" then
+      local stat = uv.fs_stat(entry_path)
+      if not stat then
+        return nil
+      end
+      total = total + stat.size
+    elseif entry_type == nil then
+      local stat = uv.fs_lstat(entry_path)
+      if not stat then
+        return nil
+      end
+      if stat.type == "directory" then
+        local nested_size = directory_size(entry_path)
+        if nested_size == nil then
+          return nil
+        end
+        total = total + nested_size
+      elseif stat.type == "file" then
+        total = total + stat.size
+      end
+    end
+  end
+
+  return total
+end
+
+--- @type fun(path: string): integer|nil
+M._directory_size = directory_size
+
 --- @return table
 local function health_api()
   return M._health or vim.health
@@ -79,6 +135,16 @@ end
 --- @return boolean
 local function path_writable(path)
   return type(path) == "string" and path ~= "" and is_true(M._filewritable(path))
+end
+
+--- @param path string
+--- @return string
+local function cache_size_suffix(path)
+  local ok, bytes = pcall(M._directory_size, path)
+  if not ok or type(bytes) ~= "number" or bytes < 0 then
+    return ""
+  end
+  return string.format(" (%.2f Mb)", bytes / (1024 * 1024))
 end
 
 local function check_runtime()
@@ -127,10 +193,11 @@ local function check_configuration()
   end
 
   if dir_exists(cache_dir) then
+    local size_suffix = cache_size_suffix(cache_dir)
     if path_writable(cache_dir) then
-      health.ok("cache_dir exists and is writable: " .. cache_dir)
+      health.ok("cache_dir exists and is writable: " .. cache_dir .. size_suffix)
     else
-      health.warn("cache_dir exists but is not writable: " .. cache_dir)
+      health.warn("cache_dir exists but is not writable: " .. cache_dir .. size_suffix)
     end
     return parley, config
   end
