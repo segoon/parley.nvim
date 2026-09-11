@@ -214,6 +214,12 @@ describe("parley.providers.arcanum.mapping — map_comment", function()
     assert.equals("2024-01-02T10:00:00Z", comment.updated_at)
   end)
 
+  it("maps the provider-returned canonical URL", function()
+    local raw = make_raw_comment({ url = "https://arcanum.example/review/42#comment-100" })
+    local comment = mapping.map_comment(raw, "")
+    assert.equals("https://arcanum.example/review/42#comment-100", comment.url)
+  end)
+
   it("sets parent_comment_id=nil for root comments (reply_to_id is NIL)", function()
     local raw = make_raw_comment({ reply_to_id = vim.NIL })
     local comment = mapping.map_comment(raw, "")

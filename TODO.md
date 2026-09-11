@@ -31,14 +31,6 @@
 
 ## Feature research backlog
 
-### Optimistic comment reconciliation
-
-Optimistic posting is implemented for new discussions and replies: pending comments
-render immediately, provider results replace them, refresh runs in the background,
-and definite failure restores the draft. Add an actionable reconciliation state for
-successful provider responses that omit a created comment or cannot confirm it;
-currently the pending entry remains visible while background refresh preserves it.
-
 ### Additional discussion filters
 
 Add authored-by-me, mentions, stale, and unavailable-location filters. Unresolved
@@ -49,10 +41,10 @@ filtering and buffer-local/review-wide unresolved navigation are implemented.
 Recognize provider suggestion blocks, preview their patches, and apply them to the
 working buffer with undo support without staging or committing automatically.
 
-### Browser deep links
+### Browser link copying
 
-Open the active review, discussion, or comment in the provider UI and support
-copying provider-owned URLs for unsupported workflows.
+Support copying provider-owned review, discussion, and comment URLs for
+unsupported workflows.
 
 ### CodeDiff integration
 

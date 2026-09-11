@@ -9,6 +9,7 @@ describe("browser actions", function()
   local saved_notify
   local state
   local selected
+  local selected_comment
   local choose
   local opened
   local notifications
@@ -23,6 +24,7 @@ describe("browser actions", function()
       all_discussions = {},
     }
     selected = nil
+    selected_comment = nil
     choose = nil
     opened = {}
     notifications = {}
@@ -35,6 +37,9 @@ describe("browser actions", function()
       end,
       current_discussion = function()
         return selected
+      end,
+      current_comment = function()
+        return selected_comment
       end,
       open_current_line = function(_, opts)
         choose = opts.on_select
@@ -133,6 +138,27 @@ describe("browser actions", function()
     assert.is_false(browser.open_review(7))
     assert.same({
       { message = "parley: could not open review: no handler", level = vim.log.levels.WARN },
+    }, notifications)
+  end)
+
+  it("opens the selected comment from a Parley float", function()
+    selected_comment = { id = "reply", url = "https://example.test/review/42#reply" }
+    assert.is_true(browser.open_comment(99))
+    assert.same({ "https://example.test/review/42#reply" }, opened)
+  end)
+
+  it("requires a selected comment", function()
+    assert.is_false(browser.open_comment(7))
+    assert.same({
+      { message = "parley: select a comment before opening it in the browser", level = vim.log.levels.INFO },
+    }, notifications)
+  end)
+
+  it("reports a missing exact comment link", function()
+    selected_comment = { id = "reply" }
+    assert.is_false(browser.open_comment(7))
+    assert.same({
+      { message = "parley: comment link is unavailable", level = vim.log.levels.INFO },
     }, notifications)
   end)
 end)

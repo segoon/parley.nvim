@@ -181,6 +181,10 @@ All Parley commands support tab completion.
     if absent, or remove one you already added. Arcanum preserves the chosen
     add/remove intent even if the local snapshot refreshes before submission.
 
+:Parley comment view                                 *:Parley-comment-view*
+    Open the selected comment's exact provider-owned link with the system URL
+    handler. Requires an open discussion window and an available canonical URL.
+
 :Parley comment edit                                 *:Parley-comment-edit*
     Edit the selected comment. Only works on your own comments.
 
@@ -251,6 +255,7 @@ Discussion window keymaps: ~
     `R`            React to the selected comment
     `e`            Edit the selected comment
     `d`            Delete the selected comment
+    `gx`           Open the selected comment in the system browser
 
 Draft/input window keymaps: ~
 

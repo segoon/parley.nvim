@@ -4,7 +4,7 @@ local M = {}
 M.groups = {
   review = { "actions" },
   discussion = { "open", "close", "toggle", "new", "reply", "list", "resolve", "reopen", "view" },
-  comment = { "react", "edit", "delete" },
+  comment = { "react", "edit", "delete", "view" },
   nav = { "buf-next", "buf-prev", "review-next", "review-prev" },
   diffview = { "open", "close", "toggle" },
 }

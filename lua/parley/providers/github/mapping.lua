@@ -141,6 +141,7 @@ function M.map_rest_comment(raw, viewer)
     reactions = M.map_rest_reactions(raw.reactions),
     is_own = (raw.user and raw.user.login == viewer) or false,
     parent_comment_id = parent_id,
+    url = type(raw.html_url) == "string" and raw.html_url or nil,
   })
 end
 
@@ -239,7 +240,7 @@ function M.group_comments_into_discussions(comments, viewer)
       end
       local disc = model.new_discussion({
         id = root_id,
-        url = type(raw.html_url) == "string" and raw.html_url or nil,
+        url = comment.url,
         file = raw.path or "",
         line = line,
         end_line = (raw.start_line and raw.start_line ~= vim.NIL) and raw.line or nil,

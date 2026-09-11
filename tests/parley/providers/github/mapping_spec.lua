@@ -48,8 +48,19 @@ describe("parley.providers.github.mapping — map_review_thread_nodes", function
   end)
 end)
 
-describe("parley.providers.github.mapping — discussion URLs", function()
-  it("maps the root review comment canonical URL onto the discussion", function()
+describe("parley.providers.github.mapping — comment URLs", function()
+  it("maps each review comment canonical URL", function()
+    local comment = mapping.map_rest_comment({
+      id = 1002,
+      body = "Reply",
+      user = { login = "alice" },
+      html_url = "https://github.com/owner/repo/pull/42#discussion_r1002",
+    }, "alice")
+
+    assert.equals("https://github.com/owner/repo/pull/42#discussion_r1002", comment.url)
+  end)
+
+  it("maps the root comment URL onto the discussion", function()
     local discussions = mapping.group_comments_into_discussions({
       {
         id = 1001,
@@ -64,5 +75,6 @@ describe("parley.providers.github.mapping — discussion URLs", function()
     }, "alice")
 
     assert.equals("https://github.com/owner/repo/pull/42#discussion_r1001", discussions[1].url)
+    assert.equals(discussions[1].comments[1].url, discussions[1].url)
   end)
 end)
