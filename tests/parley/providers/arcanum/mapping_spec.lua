@@ -319,6 +319,19 @@ describe("parley.providers.arcanum.mapping — group_comments_into_discussions",
     assert.same({}, result)
   end)
 
+  it("maps a provider-returned root URL onto the discussion", function()
+    local comments = {
+      make_raw_comment({
+        id = 1,
+        anchor = make_anchor("f.lua", 1),
+        reply_to_id = vim.NIL,
+        url = "https://arcanum.example/review/42#comment-1",
+      }),
+    }
+    local result = mapping.group_comments_into_discussions(comments, "")
+    assert.equals("https://arcanum.example/review/42#comment-1", result[1].url)
+  end)
+
   it("creates one discussion per root comment", function()
     local comments = {
       make_raw_comment({ id = 1, anchor = make_anchor("a.lua", 1), reply_to_id = vim.NIL }),

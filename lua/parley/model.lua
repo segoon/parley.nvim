@@ -65,6 +65,7 @@ local KNOWN_REVIEW_STATUSES = {
 --- @field anchor? parley.DiscussionAnchor Explicit remote anchor; legacy file/line providers remain supported.
 --- @field issue_state? parley.IssueState
 --- @field ancestry? string Missing-parent or cyclic ancestry diagnostic.
+--- @field url? string Canonical provider-supplied browser URL for the root thread.
 --- @field file     string|nil             Repo-relative file path
 --- @field line     integer|nil            Start line (1-indexed, in PR diff space)
 --- @field end_line integer|nil        nil = single line
@@ -148,6 +149,9 @@ end
 --- @return parley.Discussion
 function M.new_discussion(opts)
   assert(type(opts.id) == "string", "discussion.id must be a string")
+  if opts.url ~= nil then
+    assert(type(opts.url) == "string", "discussion.url must be a string")
+  end
   if opts.anchor == nil then
     assert(type(opts.file) == "string", "discussion.file must be a string")
     assert(type(opts.line) == "number", "discussion.line must be a number")
@@ -175,6 +179,7 @@ function M.new_discussion(opts)
     anchor = opts.anchor,
     issue_state = opts.issue_state,
     ancestry = opts.ancestry,
+    url = opts.url,
     file = file,
     line = line,
     end_line = end_line,

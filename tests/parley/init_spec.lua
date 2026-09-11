@@ -10,12 +10,12 @@ local progress_popup = require("parley.progress_popup")
 describe("parley command completion", function()
   it("returns top-level groups for the first argument", function()
     local items = parley._complete_parley("", ":Parley ")
-    assert.same({ "discussion", "comment", "review", "nav", "quickfix", "refresh", "diffview" }, items)
+    assert.same({ "discussion", "comment", "review", "nav", "quickfix", "refresh", "diffview", "view" }, items)
   end)
 
   it("returns discussion actions for the second argument", function()
     local items = parley._complete_parley("", ":Parley discussion ")
-    assert.same({ "open", "close", "toggle", "new", "reply", "list", "resolve", "reopen" }, items)
+    assert.same({ "open", "close", "toggle", "new", "reply", "list", "resolve", "reopen", "view" }, items)
   end)
 
   it("returns comment actions for the second argument", function()
@@ -282,6 +282,7 @@ describe("parley command dispatch", function()
   local saved_quickfix
   local saved_write
   local saved_diffview_integration
+  local saved_browser
 
   before_each(function()
     saved_discussion = package.loaded["parley.discussion_window"]
@@ -289,6 +290,7 @@ describe("parley command dispatch", function()
     saved_quickfix = package.loaded["parley.quickfix"]
     saved_write = package.loaded["parley.services.write"]
     saved_diffview_integration = package.loaded["parley.diffview_integration"]
+    saved_browser = package.loaded["parley.browser"]
   end)
 
   after_each(function()
@@ -297,6 +299,7 @@ describe("parley command dispatch", function()
     package.loaded["parley.quickfix"] = saved_quickfix
     package.loaded["parley.services.write"] = saved_write
     package.loaded["parley.diffview_integration"] = saved_diffview_integration
+    package.loaded["parley.browser"] = saved_browser
   end)
 
   it("dispatches discussion and comment actions", function()
@@ -397,6 +400,26 @@ describe("parley command dispatch", function()
     parley._dispatch_parley({ "quickfix" }, 31)
 
     assert.same({ 31 }, calls)
+  end)
+
+  it("dispatches review and discussion browser actions", function()
+    local calls = {}
+    package.loaded["parley.browser"] = {
+      open_review = function(bufnr)
+        calls[#calls + 1] = { action = "review", bufnr = bufnr }
+      end,
+      open_discussion = function(bufnr)
+        calls[#calls + 1] = { action = "discussion", bufnr = bufnr }
+      end,
+    }
+
+    parley._dispatch_parley({ "view" }, 35)
+    parley._dispatch_parley({ "discussion", "view" }, 36)
+
+    assert.same({
+      { action = "review", bufnr = 35 },
+      { action = "discussion", bufnr = 36 },
+    }, calls)
   end)
 
   it("dispatches diffview open/close/toggle", function()

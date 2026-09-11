@@ -15,7 +15,7 @@ integration changes. See [README](README.md) for setup, the
 | Authentication | Read supported token sources and verify the API viewer before restoring cached ownership | The local Arc login is diagnostic only |
 | Discussions | Preserve nested, orphaned, and cyclic replies, reactions, issue states, and explicit anchor metadata | Unavailable locations remain readable without fabricated positions |
 | Inline comments | Create new-side line and range comments using the loaded V2 diff | Requires a clean file, matching HEAD, and an entry in the loaded diff |
-| Comment actions | Reply, edit, delete, react, resolve, and reopen | Only complete open/resolved root issues can transition; ownership and permissions still apply |
+| Comment actions | Reply, edit, delete, react, resolve, reopen, and open provider-returned canonical links | Only complete open/resolved root issues can transition; missing exact links are reported |
 | Review actions | Ship, sticky ship, unship, block merge, and unblock merge | No generic review-message transaction |
 | Refresh and cache | Async manual, buffer-entry, post-write, and periodic refresh with account-isolated caches | Polling skips busy or hidden reviews and does not discover new PRs |
 | Diffview | Render and act on head-side discussions; render matching old-side Arcanum anchors read-only | New comments are new-side only; automatic `:Parley diffview open` range construction is Git-only |
