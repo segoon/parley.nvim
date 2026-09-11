@@ -1,6 +1,5 @@
 # Remaining work
 
-- checkhealth cache_dir: add used size like (xxx Mb)
 - on reply/new discussion: immediatelly add the comment, refresh in background
 
 - :Parley view - open browser with PR
