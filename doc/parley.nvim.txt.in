@@ -35,8 +35,8 @@ Current state: ~
 
   - Built-in providers: GitHub (git repos) and Arcanum (Arc/Arcadia repos)
   - Regular file buffers are supported
-  - diffview.nvim diff buffers are supported (head side only; see the
-    optional requirements below)
+  - diffview.nvim diff buffers support the head side and matching read-only
+    Arcanum old-side discussions (see the optional requirements below)
 
 ==============================================================================
 2. REQUIREMENTS                                      *parley-requirements*
@@ -59,9 +59,10 @@ Optional: ~
   - render-markdown.nvim — for rendered markdown in the discussion float
   - diffview.nvim (https://github.com/sindrets/diffview.nvim) — when
     installed and loaded, Parley automatically renders PR discussions and
-    lets you create new comments inside its diff buffers (head side only),
-    plus comment-count badges in its file panel. No extra setup call is
-    needed; disable with `diffview = { enabled = false }`
+    lets you create new comments in head-side diff buffers. Matching Arcanum
+    old-side discussions render read-only. It also adds comment-count badges
+    to the file panel. No extra setup call is needed; disable with
+    `diffview = { enabled = false }`
     (|parley-config-diffview|). Verified against both upstream and the
     mistricky/diffview-plus.nvim fork; not verified against other forks.
     File-panel badges only refresh live on selection/staging under the fork
@@ -481,11 +482,13 @@ Discussion locations and issue states: ~
 
 Arcanum threads retain nested replies, including incomplete or cyclic ancestry.
 Only open issues contribute to the unresolved count; resolved, dropped, non-issue,
-and unknown states remain distinguishable. Only verified current new-side inline
-anchors receive buffer positions. Other anchors retain their side, paths, and
-revision metadata in the discussion list and float. Navigation skips unavailable
-positions; quickfix retains file-associated entries as invalid rows and omits
-general discussions. Discussion selection and composer text survive refreshes.
+and unknown states remain distinguishable. In regular working buffers, only
+verified current new-side inline anchors receive positions. A matching old-side
+Diffview buffer can render current old-side anchors read-only. Other anchors retain
+their side, paths, and revision metadata in the discussion list and float.
+Navigation skips unavailable positions; quickfix retains file-associated entries
+as invalid rows and omits general discussions. Discussion selection and composer
+text survive refreshes.
 
 Provider options: ~
 

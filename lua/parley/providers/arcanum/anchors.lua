@@ -1,4 +1,4 @@
---- Preserve Arcanum anchor identities; only verified current new-side lines project.
+--- Preserve Arcanum anchor identities; only verified current-revision lines project.
 local semantics = require("parley.discussion")
 local M = {}
 --- @param value any

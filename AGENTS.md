@@ -3,6 +3,12 @@
 - @PROJECT.md - the core concept, the project goals, user scenarios
 - @TODO.md - the plans
 - @README.md - the main user documentation
+- @ARCANUM_COMPATIBILITY.md - current Arcanum contracts and validation limits
+
+The original phase-by-phase implementation plan is complete. Current development
+is driven by TODO.md and continues to follow TDD, provider-independent core
+contracts, asynchronous remote operations, and the dependency policy in
+`policy.json`.
 
 ## Quick Reference
 

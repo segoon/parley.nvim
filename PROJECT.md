@@ -159,7 +159,7 @@ they do not verify authentication or deployment compatibility over the network.
 | Configuration | `require("parley").setup({})`; lazy.nvim or another plugin manager |
 | Testing | Plenary tests with mocked providers/HTTP and real Neovim UI fixtures |
 
-## Future goals and remaining risks
+## Limitations and future goals
 
 - Diffview integration (`lua/parley/diffview_integration.lua`) covers rendering,
   hover, comment creation, cross-file navigation, and `:Parley diffview
