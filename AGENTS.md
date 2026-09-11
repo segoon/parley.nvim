@@ -28,7 +28,7 @@
 
 ## Development
 
-- Never call `git`, it is run manually by the user
+- do not call `git` unless explicitly requested by the user
 - TDD
 - DRY, KISS, SOLID
 - UI quality is paramount
