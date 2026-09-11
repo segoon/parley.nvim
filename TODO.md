@@ -28,3 +28,4 @@
 - Broader command/option/highlight documentation coverage and reference validation
 - Test isolation for pending callbacks and subscriptions
 - Dependency restrictions for source-directory access
+
