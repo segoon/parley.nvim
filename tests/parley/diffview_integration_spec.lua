@@ -535,3 +535,220 @@ a.describe("parley.diffview_integration open/close/toggle", function()
     assert.same({ { "open", { "main...abc123" } } }, calls)
   end)
 end)
+
+-- ---------------------------------------------------------------------------
+-- _render_panel_badges — component-tree identity matching, not text search
+-- ---------------------------------------------------------------------------
+
+local PANEL_NS = vim.api.nvim_create_namespace("parley_diffview_panel")
+
+--- @param listing_style "list"|"tree"
+--- @param components table fake FilePanel.components
+--- @param files table[] fake vcs.File list, order defines view.panel.files:iter()
+--- @return table view, integer panel_bufnr
+local function make_panel_view(listing_style, components, files)
+  local panel_bufnr = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(panel_bufnr, 0, -1, false, { "l1", "l2", "l3", "l4", "l5" })
+  local panel_winid = vim.api.nvim_open_win(panel_bufnr, false, {
+    relative = "editor",
+    row = 0,
+    col = 0,
+    width = 10,
+    height = 5,
+    style = "minimal",
+    noautocmd = true,
+  })
+  return {
+    panel = {
+      winid = panel_winid,
+      listing_style = listing_style,
+      components = components,
+      files = {
+        iter = function()
+          local i = 0
+          return function()
+            i = i + 1
+            if files[i] then
+              return i, files[i]
+            end
+          end
+        end,
+      },
+    },
+  },
+    panel_bufnr
+end
+
+--- A fake tree-style root RenderComponent: `deep_some` walks a fixed list
+--- of leaf { context = ... } tables, matching RenderComponent:deep_some's
+--- contract (callback returning true stops the walk).
+--- @param leaves table[]
+local function fake_tree_root(leaves)
+  return {
+    deep_some = function(_self, callback)
+      for _, leaf in ipairs(leaves) do
+        if callback(leaf) then
+          return true
+        end
+      end
+      return false
+    end,
+  }
+end
+
+a.describe("parley.diffview_integration._render_panel_badges", function()
+  local host_bufnr, review_key, panel_winid
+  local orig_get_config, orig_get_lib, orig_find_host
+
+  a.before_each(function()
+    orig_get_config = diffview_integration._get_config
+    orig_get_lib = diffview_integration._get_lib
+    orig_find_host = diffview_integration._find_host
+    diffview_integration._get_config = function()
+      return { diffview = { enabled = true, file_panel_badges = true } }
+    end
+  end)
+
+  a.after_each(function()
+    diffview_integration._get_config = orig_get_config
+    diffview_integration._get_lib = orig_get_lib
+    diffview_integration._find_host = orig_find_host
+    if panel_winid and vim.api.nvim_win_is_valid(panel_winid) then
+      vim.api.nvim_win_close(panel_winid, true)
+    end
+    panel_winid = nil
+    cleanup_buffer(host_bufnr)
+    if review_key then
+      review_repository._reviews[review_key] = nil
+      review_repository._bufnr_key[host_bufnr] = nil
+      review_repository._key_bufnrs[review_key] = nil
+    end
+  end)
+
+  --- @param view table
+  local function stub_view(view)
+    diffview_integration._get_lib = function()
+      return {
+        get_current_view = function()
+          return view
+        end,
+      }
+    end
+  end
+
+  --- Seed a host review with discussions for the given files.
+  --- @param files_with_discussions string[]
+  local function seed_review(files_with_discussions)
+    review_key = "panel-badge-key"
+    local all_discussions = {}
+    for _, path in ipairs(files_with_discussions) do
+      all_discussions[#all_discussions + 1] = { id = path, file = path, line = 1 }
+    end
+    host_bufnr = make_host_buffer(review_key, {
+      review = { head_sha = "abc123" },
+      all_discussions = all_discussions,
+    })
+    diffview_integration._find_host = function()
+      return host_bufnr, review_key
+    end
+  end
+
+  a.it(
+    "places each same-basename file's badge on its OWN row (list style) — "
+      .. "the exact case text-matching got wrong",
+    function()
+      local file_a = { path = "a/foo.lua", absolute_path = "/repo/a/foo.lua" }
+      local file_b = { path = "b/foo.lua", absolute_path = "/repo/b/foo.lua" }
+      seed_review({ "a/foo.lua", "b/foo.lua" })
+
+      local view, panel_bufnr = make_panel_view("list", {
+        conflicting = { files = {} },
+        working = {
+          files = {
+            { comp = { context = file_a, lstart = 1 } },
+            { comp = { context = file_b, lstart = 3 } },
+          },
+        },
+        staged = { files = {} },
+      }, { file_a, file_b })
+      panel_winid = view.panel.winid
+      stub_view(view)
+
+      diffview_integration._render_panel_badges()
+
+      local marks = vim.api.nvim_buf_get_extmarks(panel_bufnr, PANEL_NS, 0, -1, {})
+      local rows = {}
+      for _, mark in ipairs(marks) do
+        rows[#rows + 1] = mark[2]
+      end
+      table.sort(rows)
+      assert.same({ 1, 3 }, rows)
+    end
+  )
+
+  a.it("finds the file's row via deep_some (tree style)", function()
+    local file_a = { path = "a/foo.lua", absolute_path = "/repo/a/foo.lua" }
+    seed_review({ "a/foo.lua" })
+
+    local view, panel_bufnr = make_panel_view("tree", {
+      conflicting = { files = { comp = fake_tree_root({}) } },
+      working = { files = { comp = fake_tree_root({ { context = file_a, lstart = 2 } }) } },
+      staged = { files = { comp = fake_tree_root({}) } },
+    }, { file_a })
+    panel_winid = view.panel.winid
+    stub_view(view)
+
+    diffview_integration._render_panel_badges()
+
+    local marks = vim.api.nvim_buf_get_extmarks(panel_bufnr, PANEL_NS, 0, -1, {})
+    assert.equals(1, #marks)
+    assert.equals(2, marks[1][2])
+  end)
+
+  a.it("skips a file with no discussions", function()
+    local file_a = { path = "a/foo.lua", absolute_path = "/repo/a/foo.lua" }
+    local file_c = { path = "c/bar.lua", absolute_path = "/repo/c/bar.lua" }
+    seed_review({ "a/foo.lua" })
+
+    local view, panel_bufnr = make_panel_view("list", {
+      conflicting = { files = {} },
+      working = {
+        files = {
+          { comp = { context = file_a, lstart = 1 } },
+          { comp = { context = file_c, lstart = 2 } },
+        },
+      },
+      staged = { files = {} },
+    }, { file_a, file_c })
+    panel_winid = view.panel.winid
+    stub_view(view)
+
+    diffview_integration._render_panel_badges()
+
+    local marks = vim.api.nvim_buf_get_extmarks(panel_bufnr, PANEL_NS, 0, -1, {})
+    assert.equals(1, #marks)
+    assert.equals(1, marks[1][2])
+  end)
+
+  a.it(
+    "skips a file with discussions whose row can't be found (e.g. a collapsed directory), without erroring",
+    function()
+      local file_a = { path = "a/foo.lua", absolute_path = "/repo/a/foo.lua" }
+      seed_review({ "a/foo.lua" })
+
+      -- file_a has a discussion but no matching component anywhere in the tree.
+      local view, panel_bufnr = make_panel_view("list", {
+        conflicting = { files = {} },
+        working = { files = {} },
+        staged = { files = {} },
+      }, { file_a })
+      panel_winid = view.panel.winid
+      stub_view(view)
+
+      diffview_integration._render_panel_badges()
+
+      local marks = vim.api.nvim_buf_get_extmarks(panel_bufnr, PANEL_NS, 0, -1, {})
+      assert.equals(0, #marks)
+    end
+  )
+end)

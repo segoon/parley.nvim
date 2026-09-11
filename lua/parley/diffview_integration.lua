@@ -236,9 +236,58 @@ local function panel_ns()
   return M._panel_ns
 end
 
+--- Find the rendered row (0-indexed) of `file`'s component in the file
+--- panel, by object identity against diffview's own component tree — not
+--- by searching rendered text, which breaks on same-named files in
+--- different directories or any change to how diffview renders a line.
+--- `view.panel.files:iter()` yields the same FileEntry/vcs.File objects
+--- the component tree's `.context` fields reference, so `==` identity
+--- comparison is reliable. Mirrors diffview's own
+--- FilePanel:highlight_file() traversal, minus its UI side effects
+--- (expanding collapsed directories, redrawing): if a file's parent
+--- directory is collapsed, it has no rendered line to badge, so returning
+--- nil (skip) is correct, not a shortfall to work around.
+--- @param panel table diffview FilePanel
+--- @param file table vcs.File
+--- @return integer|nil
+local function find_panel_file_row(panel, file)
+  local components = panel.components
+  if not components then
+    return nil
+  end
+  local file_sets = { components.conflicting, components.working, components.staged }
+  if panel.listing_style == "list" then
+    for _, set in ipairs(file_sets) do
+      for _, comp_struct in ipairs(set and set.files or {}) do
+        if comp_struct.comp.context == file then
+          return comp_struct.comp.lstart
+        end
+      end
+    end
+  else
+    for _, set in ipairs(file_sets) do
+      local comp_struct = set and set.files
+      if comp_struct and comp_struct.comp then
+        local row
+        comp_struct.comp:deep_some(function(cur)
+          if cur.context == file then
+            row = cur.lstart
+            return true
+          end
+          return false
+        end)
+        if row then
+          return row
+        end
+      end
+    end
+  end
+  return nil
+end
+
 --- Render comment-count badges next to changed files in the diffview file
---- panel, matched by searching the panel buffer's rendered text for each
---- file's basename (the panel has no addressable per-entry line API).
+--- panel, placed at each file's real rendered row per its component-tree
+--- identity (find_panel_file_row), not by text search.
 function M._render_panel_badges()
   local config = M._get_config()
   if not config or not config.diffview or not config.diffview.enabled or not config.diffview.file_panel_badges then
@@ -300,22 +349,16 @@ function M._render_panel_badges()
     return
   end
 
-  local lines = vim.api.nvim_buf_get_lines(panel_bufnr, 0, -1, false)
-  local used_lines = {}
   for _, file in view.panel.files:iter() do
     local entry = file.path and by_file[file.path]
     if entry then
-      local needle = vim.fn.fnamemodify(file.path, ":t")
-      for lnum, text in ipairs(lines) do
-        if not used_lines[lnum] and text:find(needle, 1, true) then
-          used_lines[lnum] = true
-          local badge = string.format("💬%d%s", entry.count, entry.unresolved and "!" or "")
-          vim.api.nvim_buf_set_extmark(panel_bufnr, ns, lnum - 1, 0, {
-            virt_text = { { " " .. badge, "ParleyVirtualTextMeta" } },
-            virt_text_pos = "eol",
-          })
-          break
-        end
+      local row = find_panel_file_row(view.panel, file)
+      if row then
+        local badge = string.format("💬%d%s", entry.count, entry.unresolved and "!" or "")
+        vim.api.nvim_buf_set_extmark(panel_bufnr, ns, row, 0, {
+          virt_text = { { " " .. badge, "ParleyVirtualTextMeta" } },
+          virt_text_pos = "eol",
+        })
       end
     end
   end
