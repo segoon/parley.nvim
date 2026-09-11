@@ -241,7 +241,8 @@ function M.render(bufnr, discussions, mappings, opts, cursor_line)
           local bar_l = { "│ ", hl_vtext }
           local bar_r = { " │", hl_vtext }
 
-          local meta_text = string.format("%s · %s", first.author, format_comment_timestamp(first.created_at))
+          local timestamp = first.pending and "sending…" or format_comment_timestamp(first.created_at)
+          local meta_text = string.format("%s · %s", first.author, timestamp)
           ext_opts.virt_lines = {
             { bar_l, { M._pad_to_width(M._truncate(meta_text, width), width), hl_vtext_meta }, bar_r },
           }

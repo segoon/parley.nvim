@@ -84,7 +84,8 @@ local function render_discussion(discussion, mapping, out, ranges, deps)
     local indent = string.rep("  ", depth)
     local start_line = #out + 1
 
-    out[#out + 1] = string.format("%s- **%s** · %s", indent, comment.author, deps.format_timestamp(comment.created_at))
+    local timestamp = comment.pending and "sending…" or deps.format_timestamp(comment.created_at)
+    out[#out + 1] = string.format("%s- **%s** · %s", indent, comment.author, timestamp)
     for _, line in ipairs(split_lines(comment.body.text)) do
       out[#out + 1] = string.format("%s  %s", indent, line)
     end

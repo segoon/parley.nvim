@@ -34,6 +34,7 @@ local function save_seams()
   vim.bo[1].modified = false
   saved.refresh = read_service.refresh
   saved.review_refresh = review_repository.refresh
+  saved.review_refresh_async = review_repository.refresh_async
   saved.review_invalidate = review_repository.invalidate
   saved.notify = write_service._notify
   saved.defer = write_service._defer
@@ -48,6 +49,7 @@ local function restore_seams()
   write_service._refresh_context = saved.refresh_context
   read_service.refresh = saved.refresh
   review_repository.refresh = saved.review_refresh
+  review_repository.refresh_async = saved.review_refresh_async
   review_repository.invalidate = saved.review_invalidate
   write_service._notify = saved.notify
   write_service._defer = saved.defer
@@ -193,7 +195,7 @@ describe("parley.services.write", function()
         review_repository.invalidate = function(bufnr, opts)
           invalidate_calls[#invalidate_calls + 1] = { bufnr = bufnr, opts = opts }
         end
-        review_repository.refresh = function(bufnr, opts)
+        review_repository.refresh_async = function(bufnr, opts)
           refresh_calls[#refresh_calls + 1] = { bufnr = bufnr, opts = opts }
         end
 
@@ -216,6 +218,47 @@ describe("parley.services.write", function()
       end
     )
   end
+
+  it("publishes a pending top-level comment before provider acknowledgement", function()
+    local provider = mock_provider.new({ pr = SAMPLE_PR })
+    local provider_callback
+    provider.begin_post_top_level_comment = function(self, review, file, anchor, body, callback)
+      local comment = self:post_top_level_comment(review, file, anchor, body)
+      provider_callback = function()
+        callback({ ok = true, comment = comment })
+      end
+      return { cancel = function() end }
+    end
+    local opened, opened_discussion
+    seed_context(provider)
+    package.loaded["parley.discussion_window"] = {
+      show_new_comment_input = function(_bufnr, opts)
+        opened = { opts = opts, instance = fake_instance(99) }
+        return opened.instance
+      end,
+      open_discussion = function(_bufnr, discussion_id)
+        opened_discussion = discussion_id
+      end,
+    }
+    review_repository.invalidate = function() end
+    review_repository.refresh_async = function() end
+
+    write_service.open_new_comment_input(1, { line = 5 })
+    opened.opts.on_submit(opened.instance, "pending draft")
+
+    local pending = review_repository.get(1)
+    assert.is_true(opened.instance.closed)
+    assert.equals(1, #pending.all_discussions)
+    assert.is_true(pending.all_discussions[1].comments[1].pending)
+    assert.equals("pending draft", pending.all_discussions[1].comments[1].body.text)
+    assert.equals(pending.all_discussions[1].id, opened_discussion)
+    assert.equals("running", progress_ui_state.list()[1].state)
+
+    provider_callback()
+    local confirmed = review_repository.get(1)
+    assert.equals("success", progress_ui_state.list()[1].state)
+    assert.is_nil(confirmed.all_discussions[1].comments[1].pending)
+  end)
 
   it("closes the composer before starting the success refresh", function()
     local provider = mock_provider.new({ pr = SAMPLE_PR })
@@ -253,7 +296,7 @@ describe("parley.services.write", function()
       open_current_line = function() end,
     }
     review_repository.invalidate = function(_bufnr, _opts) end
-    review_repository.refresh = function(_bufnr, _opts)
+    review_repository.refresh_async = function(_bufnr, _opts)
       refresh_saw_closed = opened.instance.closed == true
       local progress_entries = progress_ui_state.list()
       refresh_progress_message = progress_entries[1] and progress_entries[1].message or nil
@@ -266,7 +309,7 @@ describe("parley.services.write", function()
       return #provider.calls.post_top_level_comment == 1
     end))
     assert.is_true(refresh_saw_closed)
-    assert.equals("Refreshing discussion", refresh_progress_message)
+    assert.equals("Comment sent", refresh_progress_message)
     assert.is_true(opened.instance.closed)
   end)
 
@@ -319,8 +362,9 @@ describe("parley.services.write", function()
         status = "ready",
         stale = false,
         review = SAMPLE_REVIEW,
-        discussions = {},
-        mappings = {},
+        all_discussions = provider.state.discussions,
+        discussions = provider.state.discussions,
+        mappings = { d1 = { local_line = 10, confidence = 1.0, stale = false } },
         pr = SAMPLE_PR,
         head_sha = "deadbeef",
       })
@@ -333,7 +377,7 @@ describe("parley.services.write", function()
         open_current_line = function() end,
       }
       review_repository.invalidate = function(_bufnr) end
-      review_repository.refresh = function(_bufnr, _opts) end
+      review_repository.refresh_async = function(_bufnr, _opts) end
 
       write_service.open_reply_input(1, provider.state.discussions[1], provider.state.discussions[1].comments[2])
       opened.opts.on_submit(opened.instance, "reply draft")

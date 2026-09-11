@@ -6,6 +6,7 @@ local identity = require("parley.cache_identity")
 local context_repository = require("parley.repositories.context")
 local provider_repository = require("parley.repositories.provider")
 local semantics = require("parley.discussion")
+local pending_comments = require("parley.repositories.review_pending")
 local ui = require("parley.runtime.ui")
 local M = {}
 --- Shared remote review data; projections live in local_mappings.
@@ -209,6 +210,10 @@ end
 --- @param shared table|nil
 --- @param is_valid? fun(): boolean
 local function publish_shared(review_key, shared, is_valid)
+  local current = M._reviews[review_key]
+  if shared and current then
+    pending_comments.preserve(current, shared, build_summary)
+  end
   M._reviews[review_key] = shared
   local bufnrs = M._key_bufnrs[review_key]
   if not bufnrs then
@@ -664,6 +669,11 @@ function M.subscribe(bufnr, cb)
 end
 
 M._seed = require("parley.repositories.review_seed")(M, register_bufnr, build_summary)
+local mutations = require("parley.repositories.review_mutations")(M, composite, notify_subscribers, build_summary)
+M.stage_comment = mutations.stage_comment
+M.confirm_comment = mutations.confirm_comment
+M.rollback_comment = mutations.rollback_comment
+M.refresh_source = mutations.refresh_source
 
 --- @param bufnr integer
 --- @return table|nil Shared review key, read activity, and associated buffers.

@@ -153,6 +153,10 @@ end
 --- @param notify fun(message: string, level: integer)
 --- @return boolean
 function M.select(bufnr, line, comment, picker, notify)
+  if comment.pending then
+    notify("Wait for the pending comment to finish sending before reacting", vim.log.levels.INFO)
+    return false
+  end
   local ctx, expected = M.context(bufnr), M.capture(bufnr)
   if not ctx then
     notify("Parley review context is unavailable", vim.log.levels.INFO)

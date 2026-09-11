@@ -224,7 +224,7 @@ end
 
 --- Open an input window for a new top-level comment.
 --- @param bufnr integer
---- @param opts? { line?: integer, range?: integer, line1?: integer, line2?: integer }
+--- @param opts? { line?: integer, range?: integer, line1?: integer, line2?: integer, initial_text?: string }
 function M.open_new_comment_input(bufnr, opts)
   opts = opts or {}
   local write_context, err = resolve_write_context(bufnr)
@@ -288,11 +288,12 @@ function M.open_new_comment_input(bufnr, opts)
       visible = true,
       submit_state = "idle",
       target_line = anchor,
-      draft = "",
+      draft = opts.initial_text or "",
     })
 
     require("parley.discussion_window").show_new_comment_input(bufnr, {
       cursor_line = target_line,
+      initial_text = opts.initial_text,
       status = "Drafting top-level comment. Press <C-s> to send, or <Esc>s in normal mode. q closes.",
       on_submit = function(instance, text)
         if M._validating[bufnr] or M._operations[bufnr] then
@@ -360,7 +361,28 @@ function M.open_new_comment_input(bufnr, opts)
               failed = "Comment failed",
               cancelled = "Comment cancelled",
             },
-            { cursor_line = target_line }
+            {
+              cursor_line = target_line,
+              optimistic = {
+                stage = function()
+                  return review_repository.stage_comment(bufnr, {
+                    kind = "new",
+                    file = write_context.rel_path,
+                    anchor = anchor,
+                    body = body,
+                  })
+                end,
+                confirm = function(token, result)
+                  return review_repository.confirm_comment(token, result.comment)
+                end,
+                rollback = function(token)
+                  review_repository.rollback_comment(token)
+                end,
+                restore = function()
+                  M.open_new_comment_input(bufnr, vim.tbl_extend("force", {}, opts, { initial_text = text }))
+                end,
+              },
+            }
           )
         end)
         return true
@@ -369,13 +391,18 @@ function M.open_new_comment_input(bufnr, opts)
   end)
 end
 
---- Open an input window for a reply.
 --- @param bufnr integer
 --- @param discussion parley.Discussion|nil
 --- @param parent_comment parley.Comment|nil
-function M.open_reply_input(bufnr, discussion, parent_comment)
+--- @param opts? { initial_text?: string }
+function M.open_reply_input(bufnr, discussion, parent_comment, opts)
+  opts = opts or {}
   if not discussion or not parent_comment then
     M._notify("Open a Parley discussion before replying", vim.log.levels.INFO)
+    return false
+  end
+  if parent_comment.pending then
+    M._notify("Wait for the pending comment to finish sending before replying", vim.log.levels.INFO)
     return false
   end
   local write_context, err = resolve_write_context(bufnr)
@@ -398,12 +425,13 @@ function M.open_reply_input(bufnr, discussion, parent_comment)
     submit_state = "idle",
     target_discussion_id = discussion.id,
     target_parent_comment_id = parent_comment.id,
-    draft = "",
+    draft = opts.initial_text or "",
   })
 
   require("parley.discussion_window").show_reply_input(bufnr, {
     parent_comment_id = parent_comment.id,
     title = "New reply:",
+    initial_text = opts.initial_text,
     status = "Drafting reply. Press <C-s> to send, or <Esc>s in normal mode. q closes.",
     on_submit = function(instance, text)
       if not allowed(bufnr, "reply", write_context, instance) then
@@ -447,7 +475,29 @@ function M.open_reply_input(bufnr, discussion, parent_comment)
           failed = "Reply failed",
           cancelled = "Reply cancelled",
         },
-        { cursor_line = target_line, discussion_id = discussion.id }
+        {
+          cursor_line = target_line,
+          discussion_id = discussion.id,
+          optimistic = {
+            stage = function()
+              return review_repository.stage_comment(bufnr, {
+                kind = "reply",
+                discussion_id = discussion.id,
+                parent_comment_id = parent_comment.id,
+                body = body,
+              })
+            end,
+            confirm = function(token, result)
+              return review_repository.confirm_comment(token, result.comment)
+            end,
+            rollback = function(token)
+              review_repository.rollback_comment(token)
+            end,
+            restore = function()
+              M.open_reply_input(bufnr, discussion, parent_comment, { initial_text = text })
+            end,
+          },
+        }
       )
     end,
   })
@@ -460,6 +510,10 @@ end
 function M.open_edit_input(bufnr, discussion, comment)
   if not discussion or not comment then
     M._notify("Open a Parley discussion before editing", vim.log.levels.INFO)
+    return false
+  end
+  if comment.pending then
+    M._notify("Wait for the pending comment to finish sending before editing", vim.log.levels.INFO)
     return false
   end
   local write_context, err = resolve_write_context(bufnr)
