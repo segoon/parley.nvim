@@ -188,6 +188,17 @@ describe("parley.model.new_comment", function()
     assert.equals("c0", c.parent_comment_id)
   end)
 
+  it("accepts an optional canonical URL", function()
+    local c = make_comment({ url = "https://example.test/review/1#comment-1" })
+    assert.equals("https://example.test/review/1#comment-1", c.url)
+  end)
+
+  it("rejects a non-string canonical URL", function()
+    assert.has_error(function()
+      make_comment({ url = 42 })
+    end, "comment.url must be a string")
+  end)
+
   it("asserts on missing id", function()
     assert.has_error(function()
       make_comment(nil, { "id" })

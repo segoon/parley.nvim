@@ -31,11 +31,6 @@
 
 ## Feature research backlog
 
-### Optimistic comment posting
-
-Show a newly submitted comment immediately with a sending state, refresh in the
-background, and preserve actionable retry or error state if reconciliation fails.
-
 ### Unresolved discussion navigation and filtering
 
 Provide buffer-local and review-wide next/previous unresolved navigation, plus
@@ -47,10 +42,10 @@ discussions.
 Recognize provider suggestion blocks, preview their patches, and apply them to the
 working buffer with undo support without staging or committing automatically.
 
-### Browser deep links
+### Browser link copying
 
-Open the active review, discussion, or comment in the provider UI and support
-copying provider-owned URLs for unsupported workflows.
+Support copying provider-owned review, discussion, and comment URLs for
+unsupported workflows.
 
 ### CodeDiff integration
 

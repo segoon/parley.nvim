@@ -98,6 +98,7 @@ function M.map_comment(raw, viewer)
     reactions = reactions,
     is_own = (author == viewer and viewer ~= "") or false,
     parent_comment_id = parent_id,
+    url = type(raw.url) == "string" and raw.url or nil,
   })
 end
 

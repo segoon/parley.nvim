@@ -32,7 +32,7 @@ function M.group(raw_comments, viewer, review, map_comment)
     local raw = raw_by_id[root.id]
     discussions[#discussions + 1] = model.new_discussion({
       id = root.id,
-      url = type(raw.url) == "string" and raw.url or nil,
+      url = root.url,
       anchor = anchors.map(raw.anchor, review),
       issue_state = issue_state(raw.issue_status),
       comments = ordered,

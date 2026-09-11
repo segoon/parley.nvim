@@ -20,7 +20,7 @@ describe("parley command completion", function()
 
   it("returns comment actions for the second argument", function()
     local items = parley._complete_parley("", ":Parley comment ")
-    assert.same({ "react", "edit", "delete" }, items)
+    assert.same({ "react", "edit", "delete", "view" }, items)
   end)
 
   it("returns nav actions for the second argument", function()
@@ -402,7 +402,7 @@ describe("parley command dispatch", function()
     assert.same({ 31 }, calls)
   end)
 
-  it("dispatches review and discussion browser actions", function()
+  it("dispatches review, discussion, and comment browser actions", function()
     local calls = {}
     package.loaded["parley.browser"] = {
       open_review = function(bufnr)
@@ -411,14 +411,19 @@ describe("parley command dispatch", function()
       open_discussion = function(bufnr)
         calls[#calls + 1] = { action = "discussion", bufnr = bufnr }
       end,
+      open_comment = function(bufnr)
+        calls[#calls + 1] = { action = "comment", bufnr = bufnr }
+      end,
     }
 
     parley._dispatch_parley({ "view" }, 35)
     parley._dispatch_parley({ "discussion", "view" }, 36)
+    parley._dispatch_parley({ "comment", "view" }, 37)
 
     assert.same({
       { action = "review", bufnr = 35 },
       { action = "discussion", bufnr = 36 },
+      { action = "comment", bufnr = 37 },
     }, calls)
   end)
 

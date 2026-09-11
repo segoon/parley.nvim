@@ -199,20 +199,13 @@ M.discussions_for_line = discussions_for_line
 ---@param lines string[]
 local function write_lines(bufnr, instance, lines)
   window_helpers.write_lines(bufnr, instance, lines, {
-    on_close = function(src_bufnr)
-      return M.close(src_bufnr)
-    end,
-    on_reply = function(src_bufnr)
-      return M.reply_current_line(src_bufnr)
-    end,
-    on_react = function(src_bufnr)
-      return M.react_current_comment(src_bufnr)
-    end,
-    on_edit = function(src_bufnr)
-      return M.edit_current_comment(src_bufnr)
-    end,
-    on_delete = function(src_bufnr)
-      return M.delete_current_comment(src_bufnr)
+    on_close = M.close,
+    on_reply = M.reply_current_line,
+    on_react = M.react_current_comment,
+    on_edit = M.edit_current_comment,
+    on_delete = M.delete_current_comment,
+    on_view = function(src_bufnr)
+      return require("parley.browser").open_comment(src_bufnr)
     end,
   })
 end

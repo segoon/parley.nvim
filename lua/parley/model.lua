@@ -57,6 +57,7 @@ local KNOWN_REVIEW_STATUSES = {
 --- @field is_own            boolean            Current auth user is the author
 --- @field parent_comment_id string|nil         nil = root; non-nil = reply
 --- @field pending?           boolean            Local optimistic comment awaiting provider confirmation
+--- @field url?               string             Canonical provider-supplied browser URL
 
 --- A discussion anchored to a specific file location in a PR.
 --- Comments are stored as a flat list ordered by created_at; renderers
@@ -129,6 +130,9 @@ function M.new_comment(opts)
   assert(type(opts.body) == "table", "comment.body must be a parley.Body table")
   assert(type(opts.created_at) == "string", "comment.created_at must be a string")
   assert(type(opts.updated_at) == "string", "comment.updated_at must be a string")
+  if opts.url ~= nil then
+    assert(type(opts.url) == "string", "comment.url must be a string")
+  end
   return {
     id = opts.id,
     author = opts.author,
@@ -139,6 +143,7 @@ function M.new_comment(opts)
     is_own = opts.is_own or false,
     parent_comment_id = opts.parent_comment_id or nil,
     pending = opts.pending or nil,
+    url = opts.url,
   }
 end
 

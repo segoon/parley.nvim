@@ -20,7 +20,7 @@
 - stylua
 - luacheck
 - luacats annotations (**MANDATORY**)
-- make test + make format + make lint
+- make doc + make test + make format + make lint
 - architecture layers in `policy.json`
 
 **Requirements**
