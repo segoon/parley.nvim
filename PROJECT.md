@@ -2,7 +2,7 @@
 
 A Neovim plugin for reading, writing, and navigating pull request discussions
 without leaving the editor. Built-in providers support GitHub with Git and
-Arcanum with Arc in regular file buffers, plus diffview-plus.nvim diff buffers
+Arcanum with Arc in regular file buffers, plus diffview.nvim diff buffers
 (head side only; see README.md § Diffview integration).
 
 ## Problem and goals

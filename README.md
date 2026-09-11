@@ -6,7 +6,7 @@ Inline pull request discussions for Neovim.
 
 > [!WARNING]
 > Early-stage plugin.
-> Current support includes GitHub (Git) and Arcanum (Arc) in regular file buffers, plus diffview-plus.nvim diff buffers (see below). Live Arcanum deployment compatibility remains unverified.
+> Current support includes GitHub (Git) and Arcanum (Arc) in regular file buffers, plus diffview.nvim diff buffers (see below). Live Arcanum deployment compatibility remains unverified.
 
 ## Features
 
@@ -45,7 +45,7 @@ Optional:
 
 - [`nvim-telescope/telescope.nvim`](https://github.com/nvim-telescope/telescope.nvim) — enables the `parley_discussions` / `parley_discussions_file` pickers (see [Telescope](#telescope))
 - [`MeanderingProgrammer/render-markdown.nvim`](https://github.com/MeanderingProgrammer/render-markdown.nvim) — renders comment bodies as Markdown in the discussion window
-- [diffview-plus.nvim](https://github.com/mistricky/diffview-plus.nvim) (a `diffview.nvim` fork) — when installed, parley automatically renders PR discussions, and lets you create new comments, inside its diff buffers, plus comment-count badges in its file panel (see [Diffview integration](#diffview-integration)). No extra configuration is required beyond having the plugin loaded; disable with `diffview = { enabled = false }`. Not verified against other `diffview.nvim` forks.
+- [diffview.nvim](https://github.com/sindrets/diffview.nvim) — when installed, parley automatically renders PR discussions, and lets you create new comments, inside its diff buffers, plus comment-count badges in its file panel (see [Diffview integration](#diffview-integration)). No extra configuration is required beyond having the plugin loaded; disable with `diffview = { enabled = false }`. Verified against both upstream and the [`mistricky/diffview-plus.nvim`](https://github.com/mistricky/diffview-plus.nvim) fork; not verified against other forks.
 
 ## Installation
 
@@ -59,7 +59,7 @@ Optional:
     -- Optional:
     -- "nvim-telescope/telescope.nvim",
     -- "MeanderingProgrammer/render-markdown.nvim",
-    -- "mistricky/diffview-plus.nvim",
+    -- "sindrets/diffview.nvim",
   },
   opts = {},
 }
@@ -162,7 +162,7 @@ positions remain invalid rows; general discussions are omitted. Use
 
 ## Diffview integration
 
-Optional; requires [diffview-plus.nvim](https://github.com/mistricky/diffview-plus.nvim) to be installed and loaded. No extra setup call is needed — parley listens for diffview's `User` autocmds automatically once both plugins are set up.
+Optional; requires [diffview.nvim](https://github.com/sindrets/diffview.nvim) to be installed and loaded. No extra setup call is needed — parley listens for diffview's `User` autocmds automatically once both plugins are set up.
 
 Run `:Parley diffview open` to open diffview scoped to the active review's base...head range — no need to look up or type the commit range yourself. `:Parley diffview close` closes it; `:Parley diffview toggle` opens or closes depending on whether a view is already open on the current tab. Only supported for Git repositories (Arcanum/Arc reviews have no diffview equivalent).
 
@@ -171,6 +171,8 @@ Whichever way you open it, when a diffview diff buffer showing the PR's head rev
 - Renders the same signs / virtual text / hover previews as regular buffers, for discussions anchored to that file
 - Lets you add a new top-level comment at the cursor line with `<leader>pc` (configurable, see `keymaps.diffview_new_comment` below)
 - Shows a 💬 comment-count badge (with `!` for unresolved threads) next to changed files in diffview's file panel
+
+Verified against both [upstream diffview.nvim](https://github.com/sindrets/diffview.nvim) and the [`mistricky/diffview-plus.nvim`](https://github.com/mistricky/diffview-plus.nvim) fork; not verified against other forks. One difference: file-panel badges refresh live on file selection and staging under the fork (which fires extra `User` events upstream doesn't), but only after layout changes under plain upstream diffview.nvim.
 
 Only the head/"new" side of a diff is supported — parley never anchors discussions to the base/"old" side, so base-revision diff buffers render nothing. Disable the integration entirely with:
 
