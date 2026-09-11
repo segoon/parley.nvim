@@ -280,6 +280,26 @@ function M._dispatch_parley(fargs, bufnr, cmd_opts)
     error("parley: unknown nav action: " .. tostring(action), 0)
   end
 
+  if group == "diffview" then
+    local diffview_integration = require("parley.diffview_integration")
+    if action == nil or action == "" then
+      error("parley: expected a diffview action", 0)
+    end
+    if action == "open" then
+      diffview_integration.open(bufnr)
+      return
+    end
+    if action == "close" then
+      diffview_integration.close(bufnr)
+      return
+    end
+    if action == "toggle" then
+      diffview_integration.toggle(bufnr)
+      return
+    end
+    error("parley: unknown diffview action: " .. tostring(action), 0)
+  end
+
   if group == "comment" then
     local discussion_window = require("parley.discussion_window")
     if action == nil or action == "" then

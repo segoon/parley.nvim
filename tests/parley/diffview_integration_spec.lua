@@ -79,7 +79,10 @@ local function make_host_buffer(review_key, shared)
 end
 
 local function cleanup_buffer(bufnr)
-  if bufnr and vim.api.nvim_buf_is_valid(bufnr) then
+  if not bufnr then
+    return
+  end
+  if vim.api.nvim_buf_is_valid(bufnr) then
     vim.api.nvim_buf_delete(bufnr, { force = true })
   end
   context_repository.invalidate(bufnr)
@@ -223,5 +226,225 @@ a.describe("parley.diffview_integration._on_diff_buf", function()
     diffview_integration._on_diff_buf(diff_bufnr)
 
     assert.is_false(resolve_called)
+  end)
+end)
+
+-- ---------------------------------------------------------------------------
+-- :Parley diffview open|close|toggle
+-- ---------------------------------------------------------------------------
+
+--- @return parley.VcsAdapter
+local function stub_vcs_adapter(diffview_range)
+  return {
+    head = function()
+      return {}
+    end,
+    show = function()
+      return {}
+    end,
+    status = function()
+      return {}
+    end,
+    dirty = function()
+      return false
+    end,
+    diff = function()
+      return {}
+    end,
+    diffview_range = diffview_range,
+  }
+end
+
+--- @return table[] calls, table dv_stub
+local function make_dv_stub()
+  local calls = {}
+  return calls,
+    {
+      open = function(args)
+        calls[#calls + 1] = { "open", args }
+      end,
+      close = function()
+        calls[#calls + 1] = { "close" }
+      end,
+    }
+end
+
+a.describe("parley.diffview_integration open/close/toggle", function()
+  local adapters = require("parley.vcs.adapters")
+  local host_bufnr, review_key
+  local orig_get_diffview_api, orig_notify, orig_get_lib
+
+  a.before_each(function()
+    adapters.reset()
+    orig_get_diffview_api = diffview_integration._get_diffview_api
+    orig_notify = diffview_integration._notify
+    orig_get_lib = diffview_integration._get_lib
+  end)
+
+  a.after_each(function()
+    diffview_integration._get_diffview_api = orig_get_diffview_api
+    diffview_integration._notify = orig_notify
+    diffview_integration._get_lib = orig_get_lib
+    adapters.reset()
+    cleanup_buffer(host_bufnr)
+    if review_key then
+      review_repository._reviews[review_key] = nil
+      review_repository._bufnr_key[host_bufnr] = nil
+      review_repository._key_bufnrs[review_key] = nil
+    end
+    host_bufnr, review_key = nil, nil
+  end)
+
+  a.it("open: resolves the base...head range via the VCS adapter and opens diffview", function()
+    review_key = "diffview-open-1"
+    host_bufnr = make_host_buffer(review_key, {
+      review = { head_sha = "abc123", pr = { base_branch = "main" } },
+      all_discussions = {},
+    })
+    adapters.register(
+      "git",
+      stub_vcs_adapter(function(base, head)
+        return { base .. "..." .. head, "--imply-local" }
+      end)
+    )
+    local calls, dv = make_dv_stub()
+    diffview_integration._get_diffview_api = function()
+      return dv
+    end
+
+    diffview_integration.open(host_bufnr)
+
+    assert.same({ { "open", { "main...abc123", "--imply-local" } } }, calls)
+  end)
+
+  a.it("open: notifies and does nothing when diffview isn't installed", function()
+    diffview_integration._get_diffview_api = function()
+      return nil
+    end
+    local messages = {}
+    diffview_integration._notify = function(msg, level)
+      messages[#messages + 1] = { msg, level }
+    end
+
+    diffview_integration.open(1)
+
+    assert.equals(1, #messages)
+  end)
+
+  a.it("open: notifies and does nothing when the VCS adapter has no diffview_range", function()
+    review_key = "diffview-open-2"
+    host_bufnr = make_host_buffer(review_key, {
+      review = { head_sha = "abc123", pr = { base_branch = "main" } },
+      all_discussions = {},
+    })
+    adapters.register("git", stub_vcs_adapter(nil))
+    local calls, dv = make_dv_stub()
+    diffview_integration._get_diffview_api = function()
+      return dv
+    end
+    local messages = {}
+    diffview_integration._notify = function(msg, level)
+      messages[#messages + 1] = { msg, level }
+    end
+
+    diffview_integration.open(host_bufnr)
+
+    assert.equals(0, #calls)
+    assert.equals(1, #messages)
+  end)
+
+  a.it("open: notifies when base branch or head commit is missing", function()
+    review_key = "diffview-open-3"
+    host_bufnr = make_host_buffer(review_key, {
+      review = { head_sha = "", pr = { base_branch = "main" } },
+      all_discussions = {},
+    })
+    adapters.register(
+      "git",
+      stub_vcs_adapter(function(base, head)
+        return { base, head }
+      end)
+    )
+    local calls, dv = make_dv_stub()
+    diffview_integration._get_diffview_api = function()
+      return dv
+    end
+    local messages = {}
+    diffview_integration._notify = function(msg, level)
+      messages[#messages + 1] = { msg, level }
+    end
+
+    diffview_integration.open(host_bufnr)
+
+    assert.equals(0, #calls)
+    assert.equals(1, #messages)
+  end)
+
+  a.it("close: closes diffview when installed", function()
+    local calls, dv = make_dv_stub()
+    diffview_integration._get_diffview_api = function()
+      return dv
+    end
+
+    diffview_integration.close(1)
+
+    assert.same({ { "close" } }, calls)
+  end)
+
+  a.it("close: no-ops when diffview isn't installed", function()
+    diffview_integration._get_diffview_api = function()
+      return nil
+    end
+
+    diffview_integration.close(1)
+  end)
+
+  a.it("toggle: closes an already-open view without resolving a range for the buffer", function()
+    local calls, dv = make_dv_stub()
+    diffview_integration._get_diffview_api = function()
+      return dv
+    end
+    diffview_integration._get_lib = function()
+      return {
+        get_current_view = function()
+          return { fake = true }
+        end,
+      }
+    end
+
+    -- bufnr 999 has no review context at all; toggle must not touch it
+    -- because a view is already open, so close must win regardless.
+    diffview_integration.toggle(999)
+
+    assert.same({ { "close" } }, calls)
+  end)
+
+  a.it("toggle: opens scoped to the review when no view is currently open", function()
+    review_key = "diffview-toggle-1"
+    host_bufnr = make_host_buffer(review_key, {
+      review = { head_sha = "abc123", pr = { base_branch = "main" } },
+      all_discussions = {},
+    })
+    adapters.register(
+      "git",
+      stub_vcs_adapter(function(base, head)
+        return { base .. "..." .. head }
+      end)
+    )
+    local calls, dv = make_dv_stub()
+    diffview_integration._get_diffview_api = function()
+      return dv
+    end
+    diffview_integration._get_lib = function()
+      return {
+        get_current_view = function()
+          return nil
+        end,
+      }
+    end
+
+    diffview_integration.toggle(host_bufnr)
+
+    assert.same({ { "open", { "main...abc123" } } }, calls)
   end)
 end)

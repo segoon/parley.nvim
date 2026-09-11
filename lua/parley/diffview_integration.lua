@@ -1,6 +1,6 @@
---- parley.diffview_integration — PR discussions inside diffview-plus.nvim.
+--- parley.diffview_integration — PR discussions inside diffview.nvim.
 ---
---- diffview-plus.nvim opens read-only "diff buffers" showing the exact
+--- diffview.nvim opens read-only "diff buffers" showing the exact
 --- content of a single revision. Comments are never local-edit-remapped
 --- there (unlike regular buffers, see anchor.lua): a diffview diff buffer
 --- showing the review's head revision maps PR-diff-space lines onto itself
@@ -35,7 +35,7 @@ end
 -- ---------------------------------------------------------------------------
 
 --- diffview.lib seam; replace in tests to avoid requiring a real diffview
---- install. Returns nil when diffview-plus.nvim isn't installed.
+--- install. Returns nil when diffview.nvim isn't installed.
 --- @type fun(): table|nil
 M._get_lib = function()
   local ok, lib = pcall(require, "diffview.lib")
@@ -311,6 +311,105 @@ function M._render_panel_badges()
       end
     end
   end
+end
+
+-- ---------------------------------------------------------------------------
+-- :Parley diffview open|close|toggle
+-- ---------------------------------------------------------------------------
+
+--- Notify hook; replace in tests.
+--- @type fun(msg: string, level: integer)
+M._notify = function(msg, level)
+  vim.notify(msg, level)
+end
+
+--- diffview's top-level open/close/toggle API seam; replace in tests to
+--- avoid requiring a real diffview install.
+--- @type fun(): table|nil
+M._get_diffview_api = function()
+  local ok, dv = pcall(require, "diffview")
+  if not ok then
+    return nil
+  end
+  return dv
+end
+
+--- Resolve the diffview `:DiffviewOpen` args for the PR review active in
+--- `bufnr`, via the VCS adapter already resolved for that buffer's
+--- repository. Never branches on a specific VCS name: an adapter that has
+--- no diffview equivalent (e.g. Arc) simply omits `diffview_range`.
+--- @param bufnr integer
+--- @return string[]|nil args, string|nil err
+function M._resolve_range_args(bufnr)
+  local context, err = require("parley.services.write_context").get(bufnr)
+  if not context then
+    return nil, err
+  end
+  local adapter, adapter_err = require("parley.vcs.adapters").get(context.vcs_info)
+  if not adapter then
+    return nil, adapter_err
+  end
+  if not adapter.diffview_range then
+    return nil, "Parley: diffview integration is not supported for this VCS"
+  end
+  local base, head = context.review.pr.base_branch, context.review.head_sha
+  if base == "" or head == "" then
+    return nil, "Parley: review is missing a base branch or head commit"
+  end
+  return adapter.diffview_range(base, head)
+end
+
+--- Open diffview scoped to the PR review active in `bufnr`.
+--- @param bufnr integer
+function M.open(bufnr)
+  local dv = M._get_diffview_api()
+  if not dv then
+    M._notify("Parley: diffview.nvim is not installed", vim.log.levels.WARN)
+    return
+  end
+  local args, err = M._resolve_range_args(bufnr)
+  if not args then
+    M._notify(err, vim.log.levels.WARN)
+    return
+  end
+  dv.open(args)
+end
+
+--- Close the diffview open on the current tabpage, if any.
+--- @param _bufnr integer
+function M.close(_bufnr)
+  local dv = M._get_diffview_api()
+  if not dv then
+    return
+  end
+  dv.close()
+end
+
+--- Toggle diffview: close it if one is open on the current tabpage,
+--- otherwise open it scoped to the PR review active in `bufnr`.
+---
+--- Checks for an open view first rather than delegating to diffview's own
+--- `toggle(args)`, so that closing an already-open view never depends on
+--- successfully resolving a range for `bufnr` (which may no longer have an
+--- active review by the time the user wants to close the view).
+--- @param bufnr integer
+function M.toggle(bufnr)
+  local dv = M._get_diffview_api()
+  if not dv then
+    M._notify("Parley: diffview.nvim is not installed", vim.log.levels.WARN)
+    return
+  end
+  local lib = M._get_lib()
+  if lib and lib.get_current_view() then
+    dv.close()
+    return
+  end
+  local args, err = M._resolve_range_args(bufnr)
+  if not args then
+    M._notify(err, vim.log.levels.WARN)
+    return
+  end
+  dv.open(args)
 end
 
 -- ---------------------------------------------------------------------------

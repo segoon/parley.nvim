@@ -164,7 +164,9 @@ positions remain invalid rows; general discussions are omitted. Use
 
 Optional; requires [diffview-plus.nvim](https://github.com/mistricky/diffview-plus.nvim) to be installed and loaded. No extra setup call is needed — parley listens for diffview's `User` autocmds automatically once both plugins are set up.
 
-When you open a diffview diff buffer (e.g. `:DiffviewOpen`) showing the PR's head revision, parley:
+Run `:Parley diffview open` to open diffview scoped to the active review's base...head range — no need to look up or type the commit range yourself. `:Parley diffview close` closes it; `:Parley diffview toggle` opens or closes depending on whether a view is already open on the current tab. Only supported for Git repositories (Arcanum/Arc reviews have no diffview equivalent).
+
+Whichever way you open it, when a diffview diff buffer showing the PR's head revision is current, parley:
 
 - Renders the same signs / virtual text / hover previews as regular buffers, for discussions anchored to that file
 - Lets you add a new top-level comment at the cursor line with `<leader>pc` (configurable, see `keymaps.diffview_new_comment` below)

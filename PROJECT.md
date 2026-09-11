@@ -161,8 +161,8 @@ they do not verify authentication or deployment compatibility over the network.
 ## Future goals and remaining risks
 
 - Diffview integration (`lua/parley/diffview_integration.lua`) covers rendering,
-  hover, and comment creation on the head/"new" side of a diff buffer only;
-  base/"old"-side rendering, a `:Parley diffview open` convenience command, and
+  hover, comment creation, and `:Parley diffview open|close|toggle` on the
+  head/"new" side of a diff buffer only; base/"old"-side rendering and
   navigation across diffview's file panel remain future work.
 - Optional Arcanum extensions include drafts/publication, old-side or whole-file
   comment creation, and suggestions. Reading existing threads does not imply

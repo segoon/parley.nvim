@@ -190,6 +190,20 @@ All Parley commands support tab completion.
     positions remain invalid rows; general discussions are omitted. Use
     `:Parley discussion list` to access every thread.
 
+:Parley diffview open                                *:Parley-diffview-open*
+    Open diffview-plus.nvim scoped to the active review's base...head range
+    (resolved via the current buffer's VCS adapter; requires
+    diffview-plus.nvim, see |parley-requirements|). Only supported for Git
+    repositories.
+
+:Parley diffview close                               *:Parley-diffview-close*
+    Close the diffview view open on the current tabpage. A silent no-op if
+    none is open.
+
+:Parley diffview toggle                              *:Parley-diffview-toggle*
+    Close the diffview view on the current tabpage if one is open, otherwise
+    open it as `:Parley diffview open` would.
+
 ==============================================================================
 5. KEYMAPS                                           *parley-keymaps*
 

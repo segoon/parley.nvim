@@ -123,3 +123,39 @@ a.describe("VCS adapter registry", function()
     vcs.register_adapter("custom", adapter())
   end)
 end)
+
+a.describe("VCS adapter registry — optional diffview_range", function()
+  local adapters = require("parley.vcs.adapters")
+
+  a.before_each(function()
+    adapters.reset()
+  end)
+
+  a.after_each(function()
+    adapters.reset()
+  end)
+
+  a.it("passes through an optional diffview_range method when present", function()
+    local custom = adapter()
+    custom.diffview_range = function(base, head)
+      return { base .. "..." .. head }
+    end
+    adapters.register("custom", custom)
+    local registered = adapters.get({ vcs = "custom", root = "/checkout" })
+    assert.same({ "main...abc123" }, registered.diffview_range("main", "abc123"))
+  end)
+
+  a.it("omits diffview_range when the adapter doesn't implement it", function()
+    adapters.register("custom", adapter())
+    local registered = adapters.get({ vcs = "custom", root = "/checkout" })
+    assert.is_nil(registered.diffview_range)
+  end)
+
+  a.it("rejects a non-function diffview_range", function()
+    local custom = adapter()
+    custom.diffview_range = "invalid"
+    assert.has_error(function()
+      adapters.register("custom", custom)
+    end)
+  end)
+end)
