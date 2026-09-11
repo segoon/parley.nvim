@@ -28,3 +28,48 @@
 - Broader command/option/highlight documentation coverage and reference validation
 - Test isolation for pending callbacks and subscriptions
 - Dependency restrictions for source-directory access
+
+## Feature research backlog
+
+### Optimistic comment posting
+
+Show a newly submitted comment immediately with a sending state, refresh in the
+background, and preserve actionable retry or error state if reconciliation fails.
+
+### Unresolved discussion navigation and filtering
+
+Provide buffer-local and review-wide next/previous unresolved navigation, plus
+filters for unresolved, authored-by-me, mentions, stale, and unavailable-location
+discussions.
+
+### Apply review suggestions
+
+Recognize provider suggestion blocks, preview their patches, and apply them to the
+working buffer with undo support without staging or committing automatically.
+
+### Browser deep links
+
+Open the active review, discussion, or comment in the provider UI and support
+copying provider-owned URLs for unsupported workflows.
+
+### CodeDiff integration
+
+Render and navigate Parley discussions in CodeDiff PR and revision buffers,
+synchronize its file explorer, and follow its documented lifecycle events.
+
+### Pending review and batch submission
+
+Accumulate supported inline comments and submit them together with an approve,
+comment, or request-changes verdict while preserving drafts and explicit
+cancellation state.
+
+### Outdated and stale discussion recovery
+
+Distinguish remotely outdated comments from approximate local mappings and offer
+the original diff, best current match, or a linked replacement-comment workflow.
+
+### Public discussion integration API
+
+Expose provider-neutral lifecycle events and read-only queries for active review
+identity and per-file, per-line, and unresolved discussion counts so other UI
+plugins do not depend on Parley internals.
