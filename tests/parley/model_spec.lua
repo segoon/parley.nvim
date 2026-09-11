@@ -252,6 +252,21 @@ describe("parley.model.new_discussion", function()
     assert.equals(15, d.end_line)
   end)
 
+  it("accepts an optional canonical URL", function()
+    local d = make_discussion({ url = "https://example.test/review/1#discussion" })
+    assert.equals("https://example.test/review/1#discussion", d.url)
+  end)
+
+  it("keeps old discussions without a URL compatible", function()
+    assert.is_nil(make_discussion().url)
+  end)
+
+  it("rejects a non-string canonical URL", function()
+    assert.has_error(function()
+      make_discussion({ url = 42 })
+    end, "discussion.url must be a string")
+  end)
+
   it("asserts on missing id", function()
     assert.has_error(function()
       make_discussion(nil, { "id" })

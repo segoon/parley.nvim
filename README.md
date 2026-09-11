@@ -13,6 +13,7 @@ Inline pull request discussions for Neovim.
 - Detect the active PR for the current branch on GitHub / Yandex Arcanum
 - Render commented lines with signs and virtual text
 - Open a floating discussion window for the current line
+- Open the active review or current discussion in the system browser
 - Add new top-level comments on a line or range
 - Reply to, edit, delete, and react to comments
 - Navigate commented lines within a buffer (`]c` / `[c`) or across the whole review (`]C` / `[C`)
@@ -87,6 +88,8 @@ require("parley").setup({
 4. Use `]c` / `[c` to move between commented lines in the buffer, or `]C` / `[C` to jump across all files in the review.
 5. Use `:Parley discussion toggle` to open the discussion window for the current line.
 6. Use `:Parley quickfix` for file-associated discussions or `:Parley discussion list` for every thread.
+7. Use `:Parley view` to open the review in your browser, or `:Parley discussion view`
+   to open the selected discussion's canonical provider link.
 
 If no matching PR is found, Parley stays silent and inactive.
 
@@ -108,6 +111,12 @@ Use `:Parley discussion resolve` or `:Parley discussion reopen` to change a
 supported issue or review thread. Arcanum transitions complete root issues;
 dropped, non-issue, unknown, and incomplete threads cannot transition. Unsupported
 actions explain why before composition; see `:help parley-provider-capabilities`.
+
+Use `:Parley view` to open the active review with the system URL handler.
+`:Parley discussion view` opens the thread selected in the discussion float, or
+uses the current-line chooser when no thread is selected. Discussion links are
+opened only when the provider returned an exact canonical URL; they never fall
+back to the general review page.
 
 Arcanum's `:Parley review actions` provides Ship, Sticky ship, Unship, Block merge,
 and Unblock merge. It confirms the loaded revision and rechecks the active diff,

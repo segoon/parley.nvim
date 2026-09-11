@@ -47,3 +47,22 @@ describe("parley.providers.github.mapping — map_review_thread_nodes", function
     assert.same({}, mapping.map_review_thread_nodes(nil))
   end)
 end)
+
+describe("parley.providers.github.mapping — discussion URLs", function()
+  it("maps the root review comment canonical URL onto the discussion", function()
+    local discussions = mapping.group_comments_into_discussions({
+      {
+        id = 1001,
+        path = "src/foo.lua",
+        line = 10,
+        body = "Root",
+        user = { login = "alice" },
+        created_at = "2024-01-01T10:00:00Z",
+        updated_at = "2024-01-01T10:00:00Z",
+        html_url = "https://github.com/owner/repo/pull/42#discussion_r1001",
+      },
+    }, "alice")
+
+    assert.equals("https://github.com/owner/repo/pull/42#discussion_r1001", discussions[1].url)
+  end)
+end)

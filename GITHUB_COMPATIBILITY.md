@@ -13,7 +13,7 @@ and [TODO](TODO.md) for unfinished work.
 | Authentication | Resolve host-appropriate environment tokens or `gh`'s `hosts.yml` token | Interactive login, SSO, and keyring behavior remain owned by `gh` |
 | Discussions | Read paginated REST review comments and group roots with replies | GraphQL resolution metadata is overlaid separately |
 | Inline comments | Create new-side line and range comments | Requires a clean file, matching HEAD, and changed lines in the loaded review |
-| Comment actions | Reply, edit, delete, react, resolve, and reopen | Resolution requires a GraphQL thread ID from a successful discussion fetch |
+| Comment actions | Reply, edit, delete, react, resolve, reopen, and open canonical thread links | Resolution requires a GraphQL thread ID from a successful discussion fetch |
 | Review submission | Approve, request changes, or comment with a body | The explicit review-action picker is not implemented for GitHub |
 | Refresh and cache | Use shared async refresh and account-isolated review caches | Missing stable local credential identity disables persistent caching |
 | Diffview | Construct the Git base...head range, render head-side discussions, create comments, and navigate files | Existing mapping does not retain GitHub old-side metadata |

@@ -116,6 +116,10 @@ All Parley commands support tab completion.
     Force a re-fetch of PR discussions for the current buffer. Shows a
     progress popup while the request is in flight.
 
+:Parley view                                         *:Parley-view*
+    Open the active review with the system URL handler. Uses the currently
+    loaded review snapshot and does not trigger a refresh.
+
 :Parley discussion resolve                          *:Parley-discussion-resolve*
     Resolve the selected open issue. With no selected thread, choose a discussion
     at the source cursor using the existing line picker.
@@ -135,6 +139,11 @@ All Parley commands support tab completion.
 
 :Parley discussion open                              *:Parley-discussion-open*
     Open the discussion window for the current line.
+
+:Parley discussion view                              *:Parley-discussion-view*
+    Open the selected discussion's canonical provider link with the system URL
+    handler. With no selected thread, choose a discussion at the source cursor.
+    An unavailable exact link is reported and never falls back to the review URL.
 
 :Parley discussion close                             *:Parley-discussion-close*
     Close the discussion window.

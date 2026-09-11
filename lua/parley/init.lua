@@ -200,6 +200,14 @@ function M._dispatch_parley(fargs, bufnr, cmd_opts)
     return
   end
 
+  if group == "view" then
+    if action ~= nil and action ~= "" then
+      error("parley: view does not accept subcommands", 0)
+    end
+    require("parley.browser").open_review(bufnr)
+    return
+  end
+
   if group == "review" then
     if action ~= "actions" then
       error("parley: expected review actions", 0)
@@ -227,6 +235,10 @@ function M._dispatch_parley(fargs, bufnr, cmd_opts)
     end
     if action == "list" then
       require("parley.discussion_picker").open(bufnr)
+      return
+    end
+    if action == "view" then
+      require("parley.browser").open_discussion(bufnr)
       return
     end
     if action == "open" then

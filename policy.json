@@ -11,6 +11,7 @@
         "vim.keymap.set",
         "vim.cmd",
         "vim.cmd.%",
+        "vim.ui.open",
         "vim.notify",
         "vim.fn.confirm",
         "vim.fn.strdisplaywidth",
@@ -218,6 +219,7 @@
     "app": {
       "modules": [
         "lua/parley/async_operation.lua",
+        "lua/parley/browser.lua",
         "lua/parley/diffview_integration.lua",
         "lua/parley/discussion_window.lua",
         "lua/parley/discussion_picker.lua",
