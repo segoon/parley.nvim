@@ -14,6 +14,7 @@ local function make_comment(opts)
     reactions = opts.reactions or {},
     is_own = opts.is_own or false,
     parent_comment_id = opts.parent_comment_id,
+    pending = opts.pending,
   })
 end
 
@@ -97,6 +98,12 @@ describe("parley.discussion_window.render", function()
     assert.same({ "(no comments in the discussion yet)" }, lines)
     assert.same({}, ranges)
     assert.equals("unresolved", title)
+  end)
+
+  it("renders pending comments with a sending marker", function()
+    local discussion = make_discussion({ comments = { make_comment({ pending = true, author = "you" }) } })
+    local lines = render.render_lines({ discussion }, {}, { format_timestamp = formatter })
+    assert.equals("- **you** · sending…", lines[1])
   end)
 
   it("builds reaction picker items with counts and viewer state", function()

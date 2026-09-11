@@ -28,6 +28,24 @@ return function(M)
     end)
   end
 
+  --- Reconcile an acknowledged optimistic write without extending its visible
+  --- progress lifecycle. A regular host buffer is used for diffview aliases.
+  --- @param bufnr integer
+  local function refresh_in_background(bufnr)
+    local source = review_repository.refresh_source(bufnr)
+    review_repository.invalidate(bufnr, { preserve_snapshot = true })
+    if source then
+      review_repository.refresh_async(source, { force = true })
+    end
+  end
+
+  --- @param bufnr integer
+  local function render_current_snapshot(bufnr)
+    if vim.api.nvim_buf_is_valid(bufnr) then
+      pcall(require("parley.services.read").render_snapshot, bufnr, review_repository.get(bufnr))
+    end
+  end
+
   ---@param state 'success'|'failed'|'cancelled'
   ---@return integer
   local function progress_timeout(state)
@@ -224,7 +242,10 @@ return function(M)
   --- ): parley.CancelHandle
   --- @param status_text string
   --- @param progress_texts { running: string, refreshing: string, success: string, failed: string, cancelled: string }
-  --- @param success_opts? { cursor_line?: integer }
+  --- @param success_opts? { cursor_line?: integer, discussion_id?: string,
+  ---   optimistic?: { stage: fun(): parley.PendingCommentToken|nil, string|nil,
+  ---     confirm: fun(token: parley.PendingCommentToken, result: parley.WriteResult): string|nil, string|nil,
+  ---     rollback: fun(token: parley.PendingCommentToken): nil, restore: fun(): nil } }
   local function run_submit(bufnr, instance, starter, status_text, progress_texts, success_opts)
     success_opts = success_opts or {}
     if M._operations[bufnr] ~= nil then
@@ -232,12 +253,44 @@ return function(M)
       return false
     end
 
+    local optimistic = success_opts.optimistic
+    local pending_token
+    if optimistic then
+      local ok, token, err = pcall(optimistic.stage)
+      if not ok or not token then
+        local message = not ok and tostring(token) or err or "Could not stage comment"
+        instance.set_idle(message .. ". Draft preserved.")
+        M._notify(message, vim.log.levels.WARN)
+        return false
+      end
+      pending_token = token
+      render_current_snapshot(bufnr)
+    end
+
     local progress = start_progress(bufnr, progress_texts.running)
     composer_ui_state.patch(bufnr, { submit_state = "submitting", error = nil })
-    instance.set_submitting(status_text)
+    if optimistic then
+      close_input(instance, function() end)
+      if vim.api.nvim_buf_is_valid(bufnr) then
+        pcall(require("parley.discussion_window").open_discussion, bufnr, pending_token.discussion_id)
+      end
+    else
+      instance.set_submitting(status_text)
+    end
 
-    start_operation(bufnr, { progress = progress, input = instance }, starter, function(result)
+    start_operation(bufnr, { progress = progress, input = optimistic and nil or instance }, starter, function(result)
       if result.cancelled then
+        if optimistic then
+          optimistic.rollback(pending_token)
+          render_current_snapshot(bufnr)
+          optimistic.restore()
+          if result.uncertain then
+            M._notify(result.err or "Check the review before retrying.", vim.log.levels.WARN)
+          end
+          finish_progress(progress, bufnr, "cancelled", progress_texts.cancelled)
+          refresh_in_background(bufnr)
+          return
+        end
         composer_ui_state.patch(bufnr, { submit_state = "idle" })
         instance.set_idle(
           (result.uncertain and (result.err or "Check the review before retrying.") or "Request cancelled.")
@@ -249,6 +302,17 @@ return function(M)
       end
 
       if not result.ok then
+        if optimistic then
+          optimistic.rollback(pending_token)
+          render_current_snapshot(bufnr)
+          optimistic.restore()
+          finish_progress(progress, bufnr, "failed", progress_texts.failed)
+          M._notify(result.err or "parley: request failed", vim.log.levels.WARN)
+          if result.uncertain or result.refresh then
+            refresh_in_background(bufnr)
+          end
+          return
+        end
         composer_ui_state.patch(bufnr, { submit_state = "failed", error = result.err or "parley: request failed" })
         instance.set_idle(
           (result.uncertain and (result.err or "Check the review before retrying.") or "Request failed.")
@@ -256,6 +320,29 @@ return function(M)
         )
         finish_progress(progress, bufnr, "failed", progress_texts.failed)
         M._notify(result.err or "parley: request failed", vim.log.levels.WARN)
+        return
+      end
+
+      if optimistic then
+        if result.comment == nil then
+          finish_progress(progress, bufnr, "success", progress_texts.success)
+          refresh_in_background(bufnr)
+          return
+        end
+        local ok, discussion_id, err = pcall(optimistic.confirm, pending_token, result)
+        if not ok or not discussion_id then
+          local message = not ok and tostring(discussion_id) or err or "Provider returned no created comment"
+          finish_progress(progress, bufnr, "success", progress_texts.success)
+          M._notify(message, vim.log.levels.WARN)
+          refresh_in_background(bufnr)
+          return
+        end
+        render_current_snapshot(bufnr)
+        finish_progress(progress, bufnr, "success", progress_texts.success)
+        if vim.api.nvim_buf_is_valid(bufnr) then
+          pcall(require("parley.discussion_window").open_discussion, bufnr, discussion_id)
+        end
+        refresh_in_background(bufnr)
         return
       end
 

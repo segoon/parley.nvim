@@ -101,7 +101,11 @@ approximations and reports the reason.
 
 New comments require a clean file with no unsaved edits and a local HEAD matching
 the review revision. These checks run again on submission and preserve the draft
-on failure. Arcanum creates comments only on the loaded diff's new side.
+on failure. Replies and new discussions appear immediately with a sending marker;
+the composer closes while the request runs. Success replaces the temporary entry
+with provider data and refreshes quietly in the background. A definite failure or
+cancellation removes it and restores the draft. Arcanum creates comments only on
+the loaded diff's new side.
 
 Use `:Parley discussion list` to browse every thread without Telescope. Arcanum
 preserves nested replies and distinct issue states. General, whole-file, old-side,

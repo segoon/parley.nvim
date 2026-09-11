@@ -11,7 +11,13 @@ for _, mode in ipairs({ "submit", "action" }) do
   describe("write operation " .. mode, function()
     local hooks, ops, instance, saved, refreshed, closed, notices
     before_each(function()
-      saved = { reviews.refresh, reviews.invalidate, package.loaded["parley.discussion_window"] }
+      saved = {
+        reviews.refresh,
+        reviews.invalidate,
+        package.loaded["parley.discussion_window"],
+        reviews.refresh_async,
+        reviews.refresh_source,
+      }
       package.loaded["parley.discussion_window"] = { open_current_line = function() end }
       saved.gh_available, saved.executable, saved.notify = transport._gh_available, transport._executable, vim.notify
       refreshed, closed, notices = 0, 0, {}
@@ -19,6 +25,12 @@ for _, mode in ipairs({ "submit", "action" }) do
         refreshed = refreshed + 1
       end
       reviews.invalidate = function() end
+      reviews.refresh_async = function()
+        refreshed = refreshed + 1
+      end
+      reviews.refresh_source = function()
+        return 1
+      end
       progress.clear()
       composer.set(1, { draft = "keep me" })
       hooks = {
@@ -53,6 +65,7 @@ for _, mode in ipairs({ "submit", "action" }) do
       end)
       reviews.refresh, reviews.invalidate = saved[1], saved[2]
       package.loaded["parley.discussion_window"] = saved[3]
+      reviews.refresh_async, reviews.refresh_source = saved[4], saved[5]
       transport._gh_available, transport._executable, vim.notify = saved.gh_available, saved.executable, saved.notify
       progress.clear()
       composer.clear(1)
@@ -310,6 +323,79 @@ for _, mode in ipairs({ "submit", "action" }) do
       assert.is_truthy(notices[1]:find("cancel failed", 1, true))
     end)
     if mode == "submit" then
+      it("stages before the provider starts and confirms without awaiting refresh", function()
+        local callback, confirmed, restored, rolled_back = nil, 0, 0, 0
+        local token = { discussion_id = "pending" }
+        local success_opts = {
+          optimistic = {
+            stage = function()
+              return token
+            end,
+            confirm = function(received, result)
+              assert.equals(token, received)
+              assert.equals("server", result.comment.id)
+              confirmed = confirmed + 1
+              return "server"
+            end,
+            rollback = function()
+              rolled_back = rolled_back + 1
+            end,
+            restore = function()
+              restored = restored + 1
+            end,
+          },
+        }
+        assert.is_true(ops.run_submit(1, instance, function(cb)
+          callback = cb
+          assert.equals(1, closed)
+          assert.equals("running", progress.list()[1].state)
+          return { cancel = function() end }
+        end, "submitting", texts, success_opts))
+        assert.equals(1, closed)
+        assert.equals(0, confirmed)
+        callback({ ok = true, comment = { id = "server" } })
+        assert.equals(1, confirmed)
+        assert.equals(0, rolled_back)
+        assert.equals(0, restored)
+        assert.equals(1, refreshed)
+        assert.equals("success", progress.list()[1].state)
+      end)
+
+      it("rolls back an optimistic failure and restores the composer", function()
+        local callback, restored, rolled_back = nil, 0, 0
+        assert.is_true(ops.run_submit(
+          1,
+          instance,
+          function(cb)
+            callback = cb
+            return { cancel = function() end }
+          end,
+          "submitting",
+          texts,
+          {
+            optimistic = {
+              stage = function()
+                return { discussion_id = "pending" }
+              end,
+              confirm = function()
+                error("must not confirm")
+              end,
+              rollback = function()
+                rolled_back = rolled_back + 1
+              end,
+              restore = function()
+                restored = restored + 1
+              end,
+            },
+          }
+        ))
+        callback({ ok = false, err = "nope" })
+        assert.equals(1, rolled_back)
+        assert.equals(1, restored)
+        assert.equals(0, refreshed)
+        assert.equals("failed", progress.list()[1].state)
+      end)
+
       it("binds composer cancellation to the original operation", function()
         local callback
         run(function(cb)

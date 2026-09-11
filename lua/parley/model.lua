@@ -56,6 +56,7 @@ local KNOWN_REVIEW_STATUSES = {
 --- @field reactions         parley.Reaction[]
 --- @field is_own            boolean            Current auth user is the author
 --- @field parent_comment_id string|nil         nil = root; non-nil = reply
+--- @field pending?           boolean            Local optimistic comment awaiting provider confirmation
 
 --- A discussion anchored to a specific file location in a PR.
 --- Comments are stored as a flat list ordered by created_at; renderers
@@ -137,6 +138,7 @@ function M.new_comment(opts)
     reactions = opts.reactions or {},
     is_own = opts.is_own or false,
     parent_comment_id = opts.parent_comment_id or nil,
+    pending = opts.pending or nil,
   }
 end
 

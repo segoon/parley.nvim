@@ -49,8 +49,12 @@ and a generic tree renderer handles nested and incomplete discussion graphs.
    and every selected line must belong to the changed new side of the review.
 3. Compose Markdown in the input window; submit with `s` in normal mode or
    `<C-s>` in insert mode. Checks run before composition and again on submission.
-4. Failed lookups or validation preserve the draft. Inline posting never silently
-   changes into a general comment. After an uncertain write or cancellation,
+4. Replies and new discussions appear immediately as pending comments. The
+   composer closes while the request runs; success replaces the pending entry
+   with provider data and refreshes the review quietly in the background.
+5. Definite failures and cancellations remove the pending entry and restore the
+   draft. Failed lookups or validation also preserve the draft. Inline posting
+   never silently changes into a general comment. After an uncertain write or cancellation,
    check the review before retrying; cancelling a process cannot undo a server write.
 
 ### Resolve discussions and react

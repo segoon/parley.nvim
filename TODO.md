@@ -1,7 +1,5 @@
 # Remaining work
 
-- on reply/new discussion: immediatelly add the comment, refresh in background
-
 - :Parley diffview open - must close current herdr sidebar (if any), undo on close
 
 ## Review workflows

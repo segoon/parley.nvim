@@ -18,6 +18,10 @@ return function(M, operations, resolve_write_context, notify_context_error, allo
       M._notify("Open a Parley discussion before reacting", vim.log.levels.INFO)
       return false
     end
+    if comment.pending then
+      M._notify("Wait for the pending comment to finish sending before reacting", vim.log.levels.INFO)
+      return false
+    end
     local write_context, err = resolve_write_context(bufnr)
     if not write_context then
       notify_context_error(err)
@@ -86,6 +90,10 @@ return function(M, operations, resolve_write_context, notify_context_error, allo
   function M.delete_comment(bufnr, cursor_line, comment)
     if not comment then
       M._notify("Open a Parley discussion before deleting", vim.log.levels.INFO)
+      return false
+    end
+    if comment.pending then
+      M._notify("Wait for the pending comment to finish sending before deleting", vim.log.levels.INFO)
       return false
     end
     local write_context, err = resolve_write_context(bufnr)
