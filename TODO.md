@@ -5,6 +5,7 @@
 
 - :Parley view - open browser with PR
 - :Parley discussion view - open browser on the current discussion page
+- :Parley diffview open - must close current herdr sidebar (if any), undo on close
 
 ## Review workflows
 
