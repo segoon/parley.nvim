@@ -2,6 +2,7 @@ local model = require("parley.model")
 local entries = require("parley.discussion_entries")
 local render = require("parley.discussion_window.render")
 local read = require("parley.services.read")
+local semantics = require("parley.discussion")
 
 --- @param kind string
 --- @param id? string
@@ -23,6 +24,30 @@ local function discussion(kind, id)
     },
   })
 end
+
+describe("discussion filtering", function()
+  it("keeps only open issues for the unresolved filter", function()
+    local unresolved = discussion("inline", "open")
+    unresolved.issue_state = "open"
+    local resolved = discussion("inline", "resolved")
+    resolved.issue_state = "resolved"
+    local comment = discussion("inline", "comment")
+    comment.issue_state = "not_issue"
+
+    assert.same({ unresolved }, semantics.filter({ resolved, comment, unresolved }, "unresolved"))
+  end)
+
+  it("returns all discussions when no filter is requested", function()
+    local discussions = { discussion("inline", "one"), discussion("inline", "two") }
+    assert.equals(discussions, semantics.filter(discussions))
+  end)
+
+  it("rejects unknown filters", function()
+    assert.has_error(function()
+      semantics.filter({}, "surprising")
+    end)
+  end)
+end)
 
 describe("review-wide discussion UI", function()
   local saved, buf, state, picker, opened, edits
@@ -94,6 +119,21 @@ describe("review-wide discussion UI", function()
     end
     assert.equals(2, #opened)
     assert.same({}, edits)
+  end)
+  it("filters the built-in list to unresolved discussions", function()
+    local unresolved = discussion("inline", "open")
+    unresolved.issue_state = "open"
+    local resolved = discussion("inline", "resolved")
+    resolved.issue_state = "resolved"
+    state.all_discussions = { resolved, unresolved }
+    local selected, prompt
+    picker._select = function(items, opts, _callback)
+      selected, prompt = items, opts.prompt
+    end
+
+    assert.is_true(picker.open(buf, { filter = "unresolved" }))
+    assert.same({ unresolved }, selected)
+    assert.equals("Unresolved review discussions", prompt)
   end)
   it("keeps issue states and cyclic comments visible", function()
     local d = discussion("general")

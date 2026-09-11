@@ -111,6 +111,9 @@ the loaded diff's new side.
 Use `:Parley discussion list` to browse every thread without Telescope. Arcanum
 preserves nested replies and distinct issue states. General, whole-file, old-side,
 historical, and otherwise unavailable threads open without a fabricated position.
+Append `unresolved` to show only open issues: `:Parley discussion list unresolved`.
+The same filter works with buffer-local and review-wide navigation, for example
+`:Parley nav buf-next unresolved` and `:Parley nav review-prev unresolved`.
 
 Use `:Parley discussion resolve` or `:Parley discussion reopen` to change a
 supported issue or review thread. Arcanum transitions complete root issues;
@@ -147,6 +150,8 @@ When `telescope = true` (the default) and Telescope is installed, Parley loads t
 require("telescope").extensions.parley_discussions.parley_discussions()
 -- Show all discussions in the current PR limited to the current file
 require("telescope").extensions.parley_discussions_file.parley_discussions_file()
+-- Pass the same filter to either picker to show only open issues
+require("telescope").extensions.parley_discussions.parley_discussions({ filter = "unresolved" })
 ```
 
 ## Quickfix
@@ -223,6 +228,11 @@ Common options:
 require("parley").setup({
   refresh_interval = 300,          -- seconds between polling rounds; 0 disables
   telescope = false,              -- disable Telescope extensions
+  signs = {
+    resolved = "✅",
+    unresolved = "❗",
+    comment = "💬",
+  },
   keymaps = {
     buf_next    = "]c",   -- "" to disable
     buf_prev    = "[c",
@@ -231,6 +241,11 @@ require("parley").setup({
   },
 })
 ```
+
+When several discussions share a line, unresolved discussions take precedence,
+followed by comments and resolved discussions. Each sign must occupy at most two
+display cells. The former `signs.text` option remains available as a compatibility
+override that uses one glyph for every state.
 
 See `:help parley-configuration` for the full reference with all defaults.
 `refresh_interval` defaults to 300 seconds; set it to `0` to disable polling.

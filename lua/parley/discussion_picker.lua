@@ -65,18 +65,21 @@ function M.open_selection(source, value, hooks)
 end
 
 --- @param bufnr integer
+--- @param opts? { filter?: 'unresolved' }
 --- @return boolean
-function M.open(bufnr)
+function M.open(bufnr, opts)
+  opts = opts or {}
   bufnr = require("parley.discussion_window").resolve_source_bufnr(bufnr)
   local read = require("parley.services.read")
   local state = read.get_buffer_state(bufnr)
-  local discussions = read.list_discussions(bufnr, { scope = "all" })
+  local discussions = require("parley.discussion").filter(read.list_discussions(bufnr, { scope = "all" }), opts.filter)
   if not state or not state.pr or not state.vcs_info or #discussions == 0 then
-    M._notify("No Parley discussions in the active review", vim.log.levels.INFO)
+    local label = opts.filter == "unresolved" and "unresolved discussions" or "discussions"
+    M._notify("No Parley " .. label .. " in the active review", vim.log.levels.INFO)
     return false
   end
   M._select(discussions, {
-    prompt = "Review discussions",
+    prompt = opts.filter == "unresolved" and "Unresolved review discussions" or "Review discussions",
     source_winid = vim.fn.bufwinid(bufnr),
     render_item = function(d)
       return entries.label(d, state.vcs_info.root, state.all_mappings)

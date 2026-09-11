@@ -73,9 +73,11 @@ describe("parley Telescope integration", function()
       end,
       list_discussions = function(_bufnr, opts)
         if opts and opts.scope == "all" then
+          local resolved = make_discussion("d2", "src/bar.lua", 20, "bar")
+          resolved.issue_state = "resolved"
           return {
             make_discussion("d1", "src/foo.lua", 10, "foo"),
-            make_discussion("d2", "src/bar.lua", 20, "bar"),
+            resolved,
           }
         end
         return { make_discussion("d1", "src/foo.lua", 10, "foo") }
@@ -125,6 +127,10 @@ describe("parley Telescope integration", function()
     assert.is_true(captured.found)
     assert.equals(2, #captured.finder.results)
     assert.equals("Parley Discussions", captured.spec.prompt_title)
+
+    telescope_integration.discussions({ filter = "unresolved" })
+    assert.equals(1, #captured.finder.results)
+    assert.equals("Parley Unresolved Discussions", captured.spec.prompt_title)
 
     telescope_integration.discussions_file()
     assert.equals(1, #captured.finder.results)

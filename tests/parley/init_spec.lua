@@ -28,6 +28,11 @@ describe("parley command completion", function()
     assert.same({ "buf-next", "buf-prev", "review-next", "review-prev" }, items)
   end)
 
+  it("completes the unresolved discussion filter", function()
+    assert.same({ "unresolved" }, parley._complete_parley("", ":Parley discussion list "))
+    assert.same({ "unresolved" }, parley._complete_parley("un", ":Parley nav review-next un"))
+  end)
+
   it("returns diffview actions for the second argument", function()
     local items = parley._complete_parley("", ":Parley diffview ")
     assert.same({ "open", "close", "toggle" }, items)
@@ -359,32 +364,32 @@ describe("parley command dispatch", function()
     }, calls)
   end)
 
-  it("dispatches nav buf-next/buf-prev/review-next/review-prev", function()
+  it("dispatches nav buf-next/buf-prev/review-next/review-prev with optional filters", function()
     local calls = {}
     package.loaded["parley.nav"] = {
-      buf_next = function(bufnr)
-        calls[#calls + 1] = { action = "buf-next", bufnr = bufnr }
+      buf_next = function(bufnr, opts)
+        calls[#calls + 1] = { action = "buf-next", bufnr = bufnr, opts = opts }
       end,
       buf_prev = function(bufnr)
         calls[#calls + 1] = { action = "buf-prev", bufnr = bufnr }
       end,
-      review_next = function(bufnr)
-        calls[#calls + 1] = { action = "review-next", bufnr = bufnr }
+      review_next = function(bufnr, opts)
+        calls[#calls + 1] = { action = "review-next", bufnr = bufnr, opts = opts }
       end,
       review_prev = function(bufnr)
         calls[#calls + 1] = { action = "review-prev", bufnr = bufnr }
       end,
     }
 
-    parley._dispatch_parley({ "nav", "buf-next" }, 21)
+    parley._dispatch_parley({ "nav", "buf-next", "unresolved" }, 21)
     parley._dispatch_parley({ "nav", "buf-prev" }, 22)
-    parley._dispatch_parley({ "nav", "review-next" }, 23)
+    parley._dispatch_parley({ "nav", "review-next", "unresolved" }, 23)
     parley._dispatch_parley({ "nav", "review-prev" }, 24)
 
     assert.same({
-      { action = "buf-next", bufnr = 21 },
+      { action = "buf-next", bufnr = 21, opts = { filter = "unresolved" } },
       { action = "buf-prev", bufnr = 22 },
-      { action = "review-next", bufnr = 23 },
+      { action = "review-next", bufnr = 23, opts = { filter = "unresolved" } },
       { action = "review-prev", bufnr = 24 },
     }, calls)
   end)

@@ -25,8 +25,11 @@ local M = {}
 --- @field diffview          parley.DiffviewConfig
 
 --- @class parley.SignsConfig
---- @field enabled  boolean
---- @field text     string  Gutter sign character
+--- @field enabled     boolean
+--- @field resolved    string  Gutter sign for resolved discussions
+--- @field unresolved  string  Gutter sign for unresolved discussions
+--- @field comment     string  Gutter sign for comments and non-actionable discussions
+--- @field text?       string  Deprecated compatibility override for every discussion state
 
 --- @class parley.VirtualTextConfig
 --- @field enabled   boolean
@@ -80,7 +83,9 @@ local defaults = {
   telescope = true,
   signs = {
     enabled = true,
-    text = "▐",
+    resolved = "✅",
+    unresolved = "❗",
+    comment = "💬",
   },
   virtual_text = {
     enabled = true,
@@ -179,6 +184,16 @@ function M._complete_parley(arg_lead, cmd_line)
   if #args == 2 and not trailing_space then
     return filter_prefix(PARLEY_GROUPS[args[1]] or {}, arg_lead)
   end
+  if #args == 2 and trailing_space then
+    if (args[1] == "discussion" and args[2] == "list") or args[1] == "nav" then
+      return commands.discussion_filters
+    end
+  end
+  if #args == 3 and not trailing_space then
+    if (args[1] == "discussion" and args[2] == "list") or args[1] == "nav" then
+      return filter_prefix(commands.discussion_filters, arg_lead)
+    end
+  end
   return {}
 end
 
@@ -234,7 +249,8 @@ function M._dispatch_parley(fargs, bufnr, cmd_opts)
       return
     end
     if action == "list" then
-      require("parley.discussion_picker").open(bufnr)
+      local filter = fargs[3]
+      require("parley.discussion_picker").open(bufnr, filter and { filter = filter } or nil)
       return
     end
     if action == "view" then
@@ -274,19 +290,23 @@ function M._dispatch_parley(fargs, bufnr, cmd_opts)
       error("parley: expected a nav action", 0)
     end
     if action == "buf-next" then
-      nav_mod.buf_next(bufnr)
+      local filter = fargs[3]
+      nav_mod.buf_next(bufnr, filter and { filter = filter } or nil)
       return
     end
     if action == "buf-prev" then
-      nav_mod.buf_prev(bufnr)
+      local filter = fargs[3]
+      nav_mod.buf_prev(bufnr, filter and { filter = filter } or nil)
       return
     end
     if action == "review-next" then
-      nav_mod.review_next(bufnr)
+      local filter = fargs[3]
+      nav_mod.review_next(bufnr, filter and { filter = filter } or nil)
       return
     end
     if action == "review-prev" then
-      nav_mod.review_prev(bufnr)
+      local filter = fargs[3]
+      nav_mod.review_prev(bufnr, filter and { filter = filter } or nil)
       return
     end
     error("parley: unknown nav action: " .. tostring(action), 0)
@@ -363,6 +383,7 @@ function M.setup(opts)
   local config = vim.tbl_deep_extend("force", vim.deepcopy(defaults), { providers = providers.defaults() }, opts or {})
   local periodic = require("parley.periodic_refresh")
   periodic.validate(config.refresh_interval)
+  signs.validate(config.signs)
   M.config = config
 
   require("parley.debug").tracing_enable(M.config.debug)

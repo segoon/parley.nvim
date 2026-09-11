@@ -2,7 +2,7 @@
 ---
 --- Places Neovim extmarks on buffer lines that have PR discussion anchors.
 --- Each extmark carries:
----   • a gutter sign (sign_text)         — configurable character, default "▐"
+---   • a state-aware gutter sign         — configurable resolved/unresolved/comment glyph
 ---   • virtual lines below the comment   — author/timestamp metadata plus body
 ---
 --- Highlight groups (defined with default = true so users can override):
@@ -20,6 +20,7 @@
 ---   signs.clear(bufnr)
 
 local model = require("parley.model")
+local discussion_semantics = require("parley.discussion")
 local ui = require("parley.runtime.ui")
 local timestamp_format = require("parley.timestamp")
 
@@ -53,6 +54,42 @@ local HL_VTEXT_META = "ParleyVirtualTextMeta"
 local HL_STALE_VTEXT_META = "ParleyStaleVirtualTextMeta"
 local HL_VTEXT = "ParleyVirtualText"
 local HL_STALE_VTEXT = "ParleyStaleVirtualText"
+
+--- Resolve the configured sign and its display priority for a discussion.
+--- Higher priority states win when several discussions share a source line.
+--- `text` is retained as a compatibility override for the former single-sign
+--- configuration.
+--- @param discussion parley.Discussion
+--- @param config parley.SignsConfig
+--- @return string sign_text
+--- @return integer priority
+local function sign_decoration(discussion, config)
+  local state = discussion_semantics.issue_state(discussion)
+  if state == "open" then
+    return config.text or config.unresolved, 30
+  end
+  if state == "resolved" then
+    return config.text or config.resolved, 10
+  end
+  return config.text or config.comment, 20
+end
+
+--- Validate state-aware sign configuration before it reaches the extmark API.
+--- Neovim sign text must occupy one or two display cells.
+--- @param config parley.SignsConfig
+function M.validate(config)
+  for _, field in ipairs({ "resolved", "unresolved", "comment" }) do
+    local value = config[field]
+    if type(value) ~= "string" or value == "" or vim.fn.strdisplaywidth(value) > 2 then
+      error(string.format("parley: signs.%s must be a non-empty string no wider than 2 cells", field), 0)
+    end
+  end
+  if config.text ~= nil then
+    if type(config.text) ~= "string" or config.text == "" or vim.fn.strdisplaywidth(config.text) > 2 then
+      error("parley: signs.text must be a non-empty string no wider than 2 cells", 0)
+    end
+  end
+end
 
 --- Define parley highlight groups, linking them to built-in groups.
 ---
@@ -224,7 +261,7 @@ function M.render(bufnr, discussions, mappings, opts, cursor_line)
 
       -- Gutter sign.
       if opts.signs.enabled then
-        ext_opts.sign_text = opts.signs.text
+        ext_opts.sign_text, ext_opts.priority = sign_decoration(disc, opts.signs)
         ext_opts.sign_hl_group = hl_sign
       end
 

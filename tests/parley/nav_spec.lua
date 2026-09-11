@@ -140,6 +140,25 @@ describe("nav._unique_rows", function()
   end)
 end)
 
+describe("nav._mapped_rows", function()
+  it("returns deduplicated mapped rows for unresolved discussions", function()
+    local discussions = {
+      { id = "resolved", file = "a.lua", line = 2, issue_state = "resolved", comments = {} },
+      { id = "open-one", file = "a.lua", line = 4, issue_state = "open", comments = {} },
+      { id = "comment", file = "a.lua", line = 5, issue_state = "not_issue", comments = {} },
+      { id = "open-two", file = "a.lua", line = 4, issue_state = "open", comments = {} },
+    }
+    local mappings = {
+      resolved = { local_line = 2 },
+      ["open-one"] = { local_line = 4 },
+      comment = { local_line = 5 },
+      ["open-two"] = { local_line = 4 },
+    }
+
+    assert.same({ 3 }, nav._mapped_rows(discussions, mappings, "unresolved"))
+  end)
+end)
+
 -- ---------------------------------------------------------------------------
 -- _sorted_review_discussions
 -- ---------------------------------------------------------------------------
@@ -183,6 +202,27 @@ describe("nav._sorted_review_discussions", function()
     assert.equal(10, result[2].line)
     assert.equal("b.lua", result[3].file)
     assert.equal(5, result[3].line)
+  end)
+
+  it("filters review navigation to unresolved discussions", function()
+    package.loaded["parley.services.read"] = {
+      list_discussions = function(_bufnr, _opts)
+        return {
+          { id = "resolved", file = "a.lua", line = 1, issue_state = "resolved", comments = {} },
+          { id = "open", file = "a.lua", line = 2, issue_state = "open", comments = {} },
+          { id = "comment", file = "a.lua", line = 3, issue_state = "not_issue", comments = {} },
+        }
+      end,
+    }
+
+    local result = nav._sorted_review_discussions(1, "unresolved")
+
+    assert.same(
+      { "open" },
+      vim.tbl_map(function(d)
+        return d.id
+      end, result)
+    )
   end)
 end)
 
@@ -316,6 +356,33 @@ describe("nav.buf_next", function()
     set_cursor(1)
     nav.buf_next(bufnr)
     assert.equal(4, cursor_row())
+  end)
+
+  it("skips resolved discussions when filtered to unresolved", function()
+    local saved_read = package.loaded["parley.services.read"]
+    local bufnr = scratch(10)
+    package.loaded["parley.services.read"] = {
+      get_buffer_state = function()
+        return {
+          mappings = {
+            resolved = { local_line = 3 },
+            unresolved = { local_line = 7 },
+          },
+        }
+      end,
+      list_discussions = function()
+        return {
+          { id = "resolved", issue_state = "resolved", comments = {} },
+          { id = "unresolved", issue_state = "open", comments = {} },
+        }
+      end,
+    }
+    set_cursor(1)
+
+    nav.buf_next(bufnr, { filter = "unresolved" })
+
+    package.loaded["parley.services.read"] = saved_read
+    assert.equal(7, cursor_row())
   end)
 end)
 
@@ -495,6 +562,29 @@ describe("nav.review_next", function()
     assert.equal(3, cursor_row())
     assert.equal(0, #cmd_calls)
     assert.equal(0, #notify_calls)
+  end)
+
+  it("skips resolved discussions when filtered to unresolved", function()
+    local bufnr = scratch(20)
+    local discussions = {
+      { id = "resolved", file = "a.lua", line = 3, issue_state = "resolved", comments = {} },
+      { id = "unresolved", file = "a.lua", line = 10, issue_state = "open", comments = {} },
+    }
+    local mappings = {
+      resolved = { local_line = 3 },
+      unresolved = { local_line = 10 },
+    }
+    setup_review_stubs(
+      { rel_path = "a.lua", vcs_info = { root = "/repo" } },
+      { [bufnr] = { mappings = mappings } },
+      discussions
+    )
+    set_cursor(1)
+
+    nav.review_next(bufnr, { filter = "unresolved" })
+
+    assert.equal(10, cursor_row())
+    assert.equal(0, #cmd_calls)
   end)
 
   it("advances to the next discussion in the same file", function()

@@ -137,6 +137,10 @@ All Parley commands support tab completion.
     a discussion float attached to the source buffer without jumping to a line.
     Replies and your own comment edits/deletions remain available in that float.
 
+:Parley discussion list unresolved        *:Parley-discussion-list-unresolved*
+    List only unresolved discussions in the active review. Non-issue comments,
+    resolved discussions, and other non-actionable states are omitted.
+
 :Parley discussion open                              *:Parley-discussion-open*
     Open the discussion window for the current line.
 
@@ -191,19 +195,23 @@ All Parley commands support tab completion.
 :Parley nav buf-next                                 *:Parley-nav-buf-next*
     Jump to the next commented line in the current buffer.
     Wraps around at the end.
+    Append `unresolved` to visit only lines with unresolved discussions.
 
 :Parley nav buf-prev                                 *:Parley-nav-buf-prev*
     Jump to the previous commented line in the current buffer.
     Wraps around at the start.
+    Append `unresolved` to visit only lines with unresolved discussions.
 
 :Parley nav review-next                              *:Parley-nav-review-next*
     Jump to the next comment across all files in the review.
     Discussions are ordered by (file, line). When the next comment is in a
     different file, that file is opened with `:edit`. Wraps around at the end.
+    Append `unresolved` to visit only unresolved discussions.
 
 :Parley nav review-prev                              *:Parley-nav-review-prev*
     Jump to the previous comment across all files in the review.
     Mirror of `:Parley nav review-next`. Wraps around at the start.
+    Append `unresolved` to visit only unresolved discussions.
 
 :Parley quickfix                                     *:Parley-quickfix*
     Fill and open the quickfix list with file-associated discussions from the
@@ -277,6 +285,9 @@ Parley registers two extensions on setup:
 Usage: >lua
     require("telescope").extensions.parley_discussions.parley_discussions()
     require("telescope").extensions.parley_discussions_file.parley_discussions_file()
+    require("telescope").extensions.parley_discussions.parley_discussions({
+      filter = "unresolved",
+    })
 <
 
 Selecting a located entry opens the file, refreshes Parley state, navigates to
@@ -325,6 +336,15 @@ With the built-in statusline: >vim
 <parley-configuration-end>
 
 Provider defaults are merged separately; see |parley-providers|.
+
+Discussion signs: ~
+
+The default gutter signs distinguish resolved discussions (`✅`), unresolved
+discussions (`❗`), and comments or non-actionable discussions (`💬`). When
+several discussions share a line, unresolved takes precedence over comment,
+which takes precedence over resolved. Each configured sign must be a non-empty
+string occupying at most two display cells. The former `signs.text` setting is
+accepted as a compatibility override for all three states.
 
 Periodic refresh: ~
 

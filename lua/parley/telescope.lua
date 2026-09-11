@@ -71,7 +71,11 @@ local function open_picker(scope, prompt_title, opts)
     return false
   end
 
-  local discussions = read_service.list_discussions(bufnr, { scope = scope })
+  local discussions =
+    require("parley.discussion").filter(read_service.list_discussions(bufnr, { scope = scope }), opts.filter)
+  if opts.filter == "unresolved" then
+    prompt_title = prompt_title:gsub("^Parley ", "Parley Unresolved ")
+  end
   pickers
     .new(opts, {
       prompt_title = prompt_title,

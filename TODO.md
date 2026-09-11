@@ -20,8 +20,8 @@
 
 ## UI and quality
 
-- Richer Telescope previews and issue/comment filtering; both discussion pickers
-  already exist
+- Richer Telescope previews and additional issue/comment filters; unresolved
+  filtering is available in both discussion pickers
 - Distinguish remote outdated-comment status from existing local stale-position
   indicators
 - Lua language server type warnings in validation
@@ -31,11 +31,10 @@
 
 ## Feature research backlog
 
-### Unresolved discussion navigation and filtering
+### Additional discussion filters
 
-Provide buffer-local and review-wide next/previous unresolved navigation, plus
-filters for unresolved, authored-by-me, mentions, stale, and unavailable-location
-discussions.
+Add authored-by-me, mentions, stale, and unavailable-location filters. Unresolved
+filtering and buffer-local/review-wide unresolved navigation are implemented.
 
 ### Apply review suggestions
 
