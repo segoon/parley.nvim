@@ -32,6 +32,7 @@
 - When fixing a bug, search for similar bugs in the nearby code
 - When found a bug, elaborate whether it is possible to redesign the system to make such bugs impossible
 - max *.lua file size = 600 lines
+- core modules must not depend on providers; use DI to reverse the dependency direction if required
 
 ## Documentation
 
