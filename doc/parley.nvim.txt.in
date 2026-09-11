@@ -390,8 +390,10 @@ workflows use DetectedReview.head_sha; write_context remains provider-private.
 
 GitHub                                               *parley-provider-github*
 
-The built-in GitHub provider uses the `gh` CLI for API calls and supports
-both github.com and GitHub Enterprise Server (GHES) instances.
+The built-in GitHub provider uses the `gh` CLI for API calls. Automatic provider
+detection currently activates for github.com remotes only. Its transport,
+credentials, and explicit constructor support configured GitHub Enterprise Server
+(GHES) instances, but arbitrary enterprise remotes are not selected automatically.
 
 Authentication: ~
 

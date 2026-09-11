@@ -3,6 +3,7 @@
 - @PROJECT.md - the core concept, the project goals, user scenarios
 - @TODO.md - the plans
 - @README.md - the main user documentation
+- @GITHUB_COMPATIBILITY.md - current GitHub contracts and validation limits
 - @ARCANUM_COMPATIBILITY.md - current Arcanum contracts and validation limits
 
 ## Quick Reference

@@ -11,11 +11,11 @@ integration changes. See [README](README.md) for setup, the
 
 | Workflow | Behavior | Limits |
 |---|---|---|
-| Discovery | Detect Arc repositories and find an exact remote-branch match across paginated prefix-search results | No remote branch means inactive |
+| Discovery | Detect Arc repositories and find an exact remote-branch match across paginated prefix-search results | No remote branch means inactive; malformed or nonprogressing pages fail |
 | Authentication | Read supported token sources and verify the API viewer before restoring cached ownership | The local Arc login is diagnostic only |
-| Discussions | Preserve nested replies, reactions, issue states, and explicit anchor metadata | Unavailable locations remain readable without fabricated positions |
+| Discussions | Preserve nested, orphaned, and cyclic replies, reactions, issue states, and explicit anchor metadata | Unavailable locations remain readable without fabricated positions |
 | Inline comments | Create new-side line and range comments using the loaded V2 diff | Requires a clean file, matching HEAD, and an entry in the loaded diff |
-| Comment actions | Reply, edit, delete, react, resolve, and reopen | Ownership, issue state, and server permissions still apply |
+| Comment actions | Reply, edit, delete, react, resolve, and reopen | Only complete open/resolved root issues can transition; ownership and permissions still apply |
 | Review actions | Ship, sticky ship, unship, block merge, and unblock merge | No generic review-message transaction |
 | Refresh and cache | Async manual, buffer-entry, post-write, and periodic refresh with account-isolated caches | Polling skips busy or hidden reviews and does not discover new PRs |
 | Diffview | Render and act on head-side discussions; render matching old-side Arcanum anchors read-only | New comments are new-side only; automatic `:Parley diffview open` range construction is Git-only |
@@ -58,6 +58,11 @@ general comment. Review actions do recheck the active diff before mutation, but
 the server cannot atomically pin that diff; a newly activated diff can still win
 the race between the check and the write.
 
+The explicit review-action picker offers ship, sticky ship, unship, block merge,
+and unblock merge. Confirmation includes the loaded PR, revision, current viewer
+verdict, and sticky semantics. Approval or block withdrawal requires the matching
+viewer verdict. Generic review submission with a bundled message is unsupported.
+
 `min_ships_required` is interpreted as the number of remaining approvals. Any
 block produces `changes_requested`; otherwise zero produces `approved`, a positive
 value produces `pending`, and missing or malformed review data produces `unknown`.
@@ -66,7 +71,13 @@ Unknown status disables review actions without hiding discussions.
 Parley offers the seven reaction codes accepted by AI comments: `:+1:`, `:heart:`,
 `:facepalm:`, `:confused:`, `:goose:`, `:thinking:`, and `:-1:`. Other codes remain
 readable and can be removed when owned by the viewer. A conflict requires refresh
-and explicit removal rather than automatic replacement.
+and explicit removal rather than automatic replacement. Reaction writes preserve
+the add/remove state selected in the picker rather than recomputing a toggle after
+the selection is made.
+
+Issue resolution changes only complete root issues between `open` and `resolved`.
+Dropped, non-issue, unknown, incomplete, and cyclic discussions remain readable
+but cannot transition.
 
 ## Transport and write safety
 

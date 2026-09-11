@@ -300,6 +300,8 @@ provider-independent behavior tests.
 
 - optional Arcanum drafts/publication, suggestions, and additional comment anchors
 
-See [TODO.md](TODO.md) for remaining work and
-[ARCANUM_COMPATIBILITY.md](ARCANUM_COMPATIBILITY.md) for current Arcanum support
-and validation limits.
+See [TODO.md](TODO.md) for remaining work and the compatibility references for
+current provider behavior and validation limits:
+
+- [GitHub compatibility](GITHUB_COMPATIBILITY.md)
+- [Arcanum compatibility](ARCANUM_COMPATIBILITY.md)
