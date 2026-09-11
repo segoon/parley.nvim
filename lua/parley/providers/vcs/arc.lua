@@ -28,6 +28,10 @@ local adapter = {
   diff = function(base, head, path)
     return { "arc", "diff", "--base", "--git", "--no-color", "--unified=0", base, head, "--", path }
   end,
+  -- diffview-plus.nvim understands git revspecs only; Arc has no equivalent.
+  diffview_range = function()
+    return nil
+  end,
 }
 
 return adapter

@@ -22,6 +22,7 @@ local M = {}
 --- @field keymaps           parley.KeymapsConfig
 --- @field providers         table<string, table>  Provider-specific options
 --- @field debug             boolean  Write trace logs to stdpath("log")/parley.log
+--- @field diffview          parley.DiffviewConfig
 
 --- @class parley.SignsConfig
 --- @field enabled  boolean
@@ -65,6 +66,11 @@ local M = {}
 --- @field buf_prev    string  Jump to previous commented line in buffer
 --- @field review_next string  Jump to next comment in the whole review
 --- @field review_prev string  Jump to previous comment in the whole review
+--- @field diffview_new_comment string  New top-level comment from a diffview diff buffer
+
+--- @class parley.DiffviewConfig
+--- @field enabled           boolean  No-ops when diffview-plus.nvim isn't installed
+--- @field file_panel_badges boolean  Show comment-count badges in diffview's file panel
 
 --- @type parley.Config
 local defaults = {
@@ -114,6 +120,11 @@ local defaults = {
     buf_prev = "[c",
     review_next = "]C",
     review_prev = "[C",
+    diffview_new_comment = "<leader>pc",
+  },
+  diffview = {
+    enabled = true,
+    file_panel_badges = true,
   },
   providers = {},
 }
@@ -269,6 +280,26 @@ function M._dispatch_parley(fargs, bufnr, cmd_opts)
     error("parley: unknown nav action: " .. tostring(action), 0)
   end
 
+  if group == "diffview" then
+    local diffview_integration = require("parley.diffview_integration")
+    if action == nil or action == "" then
+      error("parley: expected a diffview action", 0)
+    end
+    if action == "open" then
+      diffview_integration.open(bufnr)
+      return
+    end
+    if action == "close" then
+      diffview_integration.close(bufnr)
+      return
+    end
+    if action == "toggle" then
+      diffview_integration.toggle(bufnr)
+      return
+    end
+    error("parley: unknown diffview action: " .. tostring(action), 0)
+  end
+
   if group == "comment" then
     local discussion_window = require("parley.discussion_window")
     if action == nil or action == "" then
@@ -406,6 +437,7 @@ function M.setup(opts)
   })
 
   require("parley.hover").setup(augroup)
+  require("parley.diffview_integration").setup(augroup)
 
   vim.api.nvim_create_user_command("Parley", function(cmd_opts)
     M._dispatch_parley(cmd_opts.fargs, vim.api.nvim_get_current_buf(), cmd_opts)

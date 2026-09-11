@@ -87,6 +87,20 @@ M._vcs_detect = vcs.detect
 -- Public API
 -- ---------------------------------------------------------------------------
 
+--- True iff `bufnr` is a diffview.nvim-managed buffer, per observable
+--- filetype/name only (no VCS detection, no coroutine required). Pure,
+--- synchronous subset of classify()'s diffview check — used by callers that
+--- need a cheap pre-check before running (or to skip) the full async
+--- classification, notably services/read.lua's generic BufEnter refresh,
+--- which must never reclassify or clear state on a buffer that
+--- diffview_integration.lua already owns and aliases separately.
+--- @param bufnr integer
+--- @return boolean
+function M.is_diffview_buffer(bufnr)
+  local props = M._get_buf_props(bufnr)
+  return DIFFVIEW_FILETYPES[props.filetype] == true or vim.startswith(props.name, DIFFVIEW_NAME_PREFIX)
+end
+
 --- Classify buffer `bufnr` and return its context.
 ---
 --- Must be called inside a plenary.async coroutine; the default

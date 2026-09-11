@@ -10,7 +10,7 @@ local progress_popup = require("parley.progress_popup")
 describe("parley command completion", function()
   it("returns top-level groups for the first argument", function()
     local items = parley._complete_parley("", ":Parley ")
-    assert.same({ "discussion", "comment", "review", "nav", "quickfix", "refresh" }, items)
+    assert.same({ "discussion", "comment", "review", "nav", "quickfix", "refresh", "diffview" }, items)
   end)
 
   it("returns discussion actions for the second argument", function()
@@ -26,6 +26,11 @@ describe("parley command completion", function()
   it("returns nav actions for the second argument", function()
     local items = parley._complete_parley("", ":Parley nav ")
     assert.same({ "buf-next", "buf-prev", "review-next", "review-prev" }, items)
+  end)
+
+  it("returns diffview actions for the second argument", function()
+    local items = parley._complete_parley("", ":Parley diffview ")
+    assert.same({ "open", "close", "toggle" }, items)
   end)
 end)
 
@@ -276,12 +281,14 @@ describe("parley command dispatch", function()
   local saved_nav
   local saved_quickfix
   local saved_write
+  local saved_diffview_integration
 
   before_each(function()
     saved_discussion = package.loaded["parley.discussion_window"]
     saved_nav = package.loaded["parley.nav"]
     saved_quickfix = package.loaded["parley.quickfix"]
     saved_write = package.loaded["parley.services.write"]
+    saved_diffview_integration = package.loaded["parley.diffview_integration"]
   end)
 
   after_each(function()
@@ -289,6 +296,7 @@ describe("parley command dispatch", function()
     package.loaded["parley.nav"] = saved_nav
     package.loaded["parley.quickfix"] = saved_quickfix
     package.loaded["parley.services.write"] = saved_write
+    package.loaded["parley.diffview_integration"] = saved_diffview_integration
   end)
 
   it("dispatches discussion and comment actions", function()
@@ -391,6 +399,31 @@ describe("parley command dispatch", function()
     assert.same({ 31 }, calls)
   end)
 
+  it("dispatches diffview open/close/toggle", function()
+    local calls = {}
+    package.loaded["parley.diffview_integration"] = {
+      open = function(bufnr)
+        calls[#calls + 1] = { action = "open", bufnr = bufnr }
+      end,
+      close = function(bufnr)
+        calls[#calls + 1] = { action = "close", bufnr = bufnr }
+      end,
+      toggle = function(bufnr)
+        calls[#calls + 1] = { action = "toggle", bufnr = bufnr }
+      end,
+    }
+
+    parley._dispatch_parley({ "diffview", "open" }, 41)
+    parley._dispatch_parley({ "diffview", "close" }, 42)
+    parley._dispatch_parley({ "diffview", "toggle" }, 43)
+
+    assert.same({
+      { action = "open", bufnr = 41 },
+      { action = "close", bufnr = 42 },
+      { action = "toggle", bufnr = 43 },
+    }, calls)
+  end)
+
   it("errors on an unknown group", function()
     assert.has_error(function()
       parley._dispatch_parley({ "nope", "open" }, 1)
@@ -437,5 +470,17 @@ describe("parley command dispatch", function()
     assert.has_error(function()
       parley._dispatch_parley({ "quickfix", "nope" }, 1)
     end, "parley: quickfix does not accept subcommands")
+  end)
+
+  it("errors on an unknown diffview action", function()
+    assert.has_error(function()
+      parley._dispatch_parley({ "diffview", "nope" }, 1)
+    end, "parley: unknown diffview action: nope")
+  end)
+
+  it("errors when diffview action is missing", function()
+    assert.has_error(function()
+      parley._dispatch_parley({ "diffview" }, 1)
+    end, "parley: expected a diffview action")
   end)
 end)

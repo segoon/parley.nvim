@@ -73,6 +73,57 @@ function M._sorted_review_discussions(bufnr)
   return sorted
 end
 
+--- Move the cursor to `disc`'s `target_line`, switching files first if
+--- `disc.file` differs from `ctx.rel_path`.
+---
+--- When `bufnr` is a diffview-aliased buffer, cross-file switches go through
+--- diffview_integration.goto_file (diffview's own file-selection API)
+--- instead of `vim.cmd("edit …")`, which would blow away diffview's layout.
+---
+--- @param bufnr integer            Resolved source buffer (post-float-resolve)
+--- @param winid integer            Source window
+--- @param original_bufnr integer   Buffer nav was invoked with (may be a float)
+--- @param ctx table                context_repository snapshot for `bufnr`
+--- @param vcs_root string
+--- @param head_sha string|nil
+--- @param disc parley.Discussion
+--- @param target_line integer
+local function goto_discussion(bufnr, winid, original_bufnr, ctx, vcs_root, head_sha, disc, target_line)
+  local from_float = original_bufnr ~= bufnr
+  if from_float then
+    require("parley.discussion_window").close(bufnr)
+  end
+
+  if disc.file ~= ctx.rel_path and require("parley.buffer_context").is_diffview_buffer(bufnr) then
+    local switched = require("parley.diffview_integration").goto_file(disc.file, target_line, head_sha)
+    if not switched then
+      vim.notify("Could not switch to " .. disc.file .. " in diffview", vim.log.levels.WARN)
+      return
+    end
+    if from_float then
+      local new_bufnr = vim.api.nvim_get_current_buf()
+      local new_line = vim.api.nvim_win_get_cursor(0)[1]
+      vim.schedule(function()
+        require("parley.discussion_window").open_current_line(new_bufnr, { cursor_line = new_line })
+      end)
+    end
+    return
+  end
+
+  vim.api.nvim_set_current_win(winid)
+  if disc.file ~= ctx.rel_path then
+    vim.cmd("edit " .. vim.fn.fnameescape(vcs_root .. "/" .. disc.file))
+  end
+  local target_buf = vim.api.nvim_win_get_buf(winid)
+  target_line = math.max(1, math.min(target_line, vim.api.nvim_buf_line_count(target_buf)))
+  vim.api.nvim_win_set_cursor(winid, { target_line, 0 })
+  if from_float then
+    vim.schedule(function()
+      require("parley.discussion_window").open_current_line(bufnr, { cursor_line = target_line })
+    end)
+  end
+end
+
 --- Given a sorted discussion list and the current buffer context, return the
 --- index of the "current" discussion (the last one in the current file whose
 --- mapped local_line <= cursor_row), or 0 when no match.
@@ -218,9 +269,12 @@ end
 ---
 --- Discussions are ordered by (file, line) in PR-diff space.  The current
 --- position is determined by the buffer's rel_path and the cursor row mapped
---- through the anchor table.  When the next discussion is in a different file
---- the file is opened with `vim.cmd("edit …")` before placing the cursor.
---- Navigation wraps silently at the end of the last file.
+--- through the anchor table.  When the next discussion is in a different
+--- file, the file is opened with `vim.cmd("edit …")` — or, when the current
+--- buffer is a diffview-aliased buffer, by switching diffview's active file
+--- via diffview_integration.goto_file instead, so the diff layout and file
+--- panel selection stay in sync. Navigation wraps silently at the end of
+--- the last file.
 ---
 --- When called from a discussion float the buffer is transparently resolved to
 --- the owning source buffer so that navigation works regardless of focus.
@@ -263,23 +317,9 @@ function M.review_next(bufnr)
   local vcs_root = ctx.vcs_info and ctx.vcs_info.root or ""
   local mapping = mappings[disc.id]
   local target_line = (mapping and mapping.local_line) or disc.line
+  local head_sha = snapshot and snapshot.review and snapshot.review.head_sha
 
-  local from_float = original_bufnr ~= bufnr
-  if from_float then
-    require("parley.discussion_window").close(bufnr)
-  end
-  vim.api.nvim_set_current_win(winid)
-  if disc.file ~= ctx.rel_path then
-    vim.cmd("edit " .. vim.fn.fnameescape(vcs_root .. "/" .. disc.file))
-  end
-  local target_buf = vim.api.nvim_win_get_buf(winid)
-  target_line = math.max(1, math.min(target_line, vim.api.nvim_buf_line_count(target_buf)))
-  vim.api.nvim_win_set_cursor(winid, { target_line, 0 })
-  if from_float then
-    vim.schedule(function()
-      require("parley.discussion_window").open_current_line(bufnr, { cursor_line = target_line })
-    end)
-  end
+  goto_discussion(bufnr, winid, original_bufnr, ctx, vcs_root, head_sha, disc, target_line)
 end
 
 --- Jump to the previous discussion across all files in the review.
@@ -334,23 +374,9 @@ function M.review_prev(bufnr)
   local vcs_root = ctx.vcs_info and ctx.vcs_info.root or ""
   local mapping = mappings[disc.id]
   local target_line = (mapping and mapping.local_line) or disc.line
+  local head_sha = snapshot and snapshot.review and snapshot.review.head_sha
 
-  local from_float = original_bufnr ~= bufnr
-  if from_float then
-    require("parley.discussion_window").close(bufnr)
-  end
-  vim.api.nvim_set_current_win(winid)
-  if disc.file ~= ctx.rel_path then
-    vim.cmd("edit " .. vim.fn.fnameescape(vcs_root .. "/" .. disc.file))
-  end
-  local target_buf = vim.api.nvim_win_get_buf(winid)
-  target_line = math.max(1, math.min(target_line, vim.api.nvim_buf_line_count(target_buf)))
-  vim.api.nvim_win_set_cursor(winid, { target_line, 0 })
-  if from_float then
-    vim.schedule(function()
-      require("parley.discussion_window").open_current_line(bufnr, { cursor_line = target_line })
-    end)
-  end
+  goto_discussion(bufnr, winid, original_bufnr, ctx, vcs_root, head_sha, disc, target_line)
 end
 
 return M

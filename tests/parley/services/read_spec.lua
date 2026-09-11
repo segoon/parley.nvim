@@ -151,6 +151,49 @@ describe("parley.services.read", function()
   -- -------------------------------------------------------------------------
 
   describe("early-exit guards", function()
+    it(
+      "skips diffview buffers entirely without reclassifying or clearing state "
+        .. "(diffview_integration.lua owns their lifecycle separately)",
+      function()
+        use_sync_async()
+        local buffer_context = require("parley.buffer_context")
+        local orig_is_diffview = buffer_context.is_diffview_buffer
+        buffer_context.is_diffview_buffer = function(_bufnr)
+          return true
+        end
+
+        local ctx_refresh_called = false
+        context_repository.refresh = function(_bufnr)
+          ctx_refresh_called = true
+          return { kind = "regular", bufnr = 1, path = "/repo/foo.lua", rel_path = "foo.lua" }
+        end
+
+        local cleared = false
+        local orig_clear = read_service.clear_buffer_state
+        read_service.clear_buffer_state = function(...)
+          cleared = true
+          return orig_clear(...)
+        end
+
+        local callback_snapshot, callback_called = "unset", false
+        read_service.refresh_async(1, {}, function(snapshot)
+          callback_called = true
+          callback_snapshot = snapshot
+        end)
+        vim.wait(20, function()
+          return callback_called
+        end)
+
+        assert.is_false(ctx_refresh_called)
+        assert.is_false(cleared)
+        assert.is_true(callback_called)
+        assert.is_nil(callback_snapshot)
+
+        read_service.clear_buffer_state = orig_clear
+        buffer_context.is_diffview_buffer = orig_is_diffview
+      end
+    )
+
     it("does nothing for a non-VCS buffer (kind ~= regular)", function()
       use_sync_async()
       context_repository.refresh = function(_bufnr)

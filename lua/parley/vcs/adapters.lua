@@ -7,9 +7,18 @@ local M = {}
 --- @field status fun(path: string): string[]
 --- @field dirty fun(output: string): boolean|nil, string|nil
 --- @field diff fun(base: string, head: string, path: string): string[]
+--- @field diffview_range? fun(base: string, head: string): string[]|nil
+---   Optional: args for diffview-plus.nvim's :DiffviewOpen scoped to this
+---   VCS's base...head range; nil (or absent) if this VCS has no diffview
+---   equivalent.
 
 --- @type table<string, parley.VcsAdapter>
 local adapters = {}
+
+--- Methods every adapter must implement.
+local REQUIRED_METHODS = { "head", "show", "status", "dirty", "diff" }
+--- Methods an adapter may implement; passed through as-is when present.
+local OPTIONAL_METHODS = { "diffview_range" }
 
 --- @param name string
 --- @param adapter parley.VcsAdapter
@@ -18,9 +27,15 @@ function M.register(name, adapter)
   assert(type(adapter) == "table", "VCS adapter must be a table")
   assert(adapters[name] == nil, "VCS adapter already registered: " .. name)
   local validated = {}
-  for _, method in ipairs({ "head", "show", "status", "dirty", "diff" }) do
+  for _, method in ipairs(REQUIRED_METHODS) do
     assert(type(adapter[method]) == "function", "VCS adapter requires method: " .. method)
     validated[method] = adapter[method]
+  end
+  for _, method in ipairs(OPTIONAL_METHODS) do
+    if adapter[method] ~= nil then
+      assert(type(adapter[method]) == "function", "VCS adapter method must be a function: " .. method)
+      validated[method] = adapter[method]
+    end
   end
   adapters[name] = validated
 end

@@ -420,7 +420,10 @@ local function setup_review_stubs(ctx, views, discussions)
   }
   package.loaded["parley.repositories.review"] = {
     get = function(bufnr)
-      return { all_mappings = views[bufnr] and views[bufnr].mappings or {} }
+      return {
+        all_mappings = views[bufnr] and views[bufnr].mappings or {},
+        review = views[bufnr] and views[bufnr].review or nil,
+      }
     end,
   }
   package.loaded["parley.services.read"] = {
@@ -746,6 +749,139 @@ describe("nav.review_prev", function()
     assert.equal(1, #notify_calls)
     assert.equal(vim.log.levels.WARN, notify_calls[1].level)
     assert.equal(0, #cmd_calls)
+  end)
+end)
+
+-- ---------------------------------------------------------------------------
+-- Cross-file navigation from a diffview-aliased buffer
+-- ---------------------------------------------------------------------------
+
+describe("nav.review_next / review_prev from a diffview buffer", function()
+  local orig_is_diffview, orig_goto_file
+
+  before_each(function()
+    install_notify_spy()
+    install_cmd_spy()
+    orig_is_diffview = require("parley.buffer_context").is_diffview_buffer
+    orig_goto_file = require("parley.diffview_integration").goto_file
+    require("parley.buffer_context").is_diffview_buffer = function()
+      return true
+    end
+  end)
+
+  after_each(function()
+    restore_notify()
+    restore_cmd()
+    teardown_review_stubs()
+    require("parley.buffer_context").is_diffview_buffer = orig_is_diffview
+    require("parley.diffview_integration").goto_file = orig_goto_file
+  end)
+
+  it("switches files via diffview_integration.goto_file instead of vim.cmd edit", function()
+    local bufnr = scratch(20)
+    local discussions = {
+      { id = "1", file = "a.lua", line = 5, resolved = false, comments = {} },
+      { id = "2", file = "b.lua", line = 7, resolved = false, comments = {} },
+    }
+    local mappings = { ["1"] = { local_line = 5 }, ["2"] = { local_line = 7 } }
+    setup_review_stubs(
+      { rel_path = "a.lua", vcs_info = { root = "/repo" } },
+      { [bufnr] = { mappings = mappings, review = { head_sha = "abc123" } } },
+      discussions
+    )
+    local goto_calls = {}
+    require("parley.diffview_integration").goto_file = function(path, line, head_sha)
+      goto_calls[#goto_calls + 1] = { path = path, line = line, head_sha = head_sha }
+      return true
+    end
+
+    set_cursor(5) -- on disc 1; _current_index = 1
+    nav.review_next(bufnr)
+
+    assert.equal(0, #cmd_calls)
+    assert.equal(1, #goto_calls)
+    assert.equal("b.lua", goto_calls[1].path)
+    assert.equal(7, goto_calls[1].line)
+    assert.equal("abc123", goto_calls[1].head_sha)
+    assert.equal(0, #notify_calls)
+  end)
+
+  it("notifies a warning when diffview_integration.goto_file fails, without falling back to vim.cmd edit", function()
+    local bufnr = scratch(20)
+    local discussions = {
+      { id = "1", file = "a.lua", line = 5, resolved = false, comments = {} },
+      { id = "2", file = "b.lua", line = 7, resolved = false, comments = {} },
+    }
+    local mappings = { ["1"] = { local_line = 5 }, ["2"] = { local_line = 7 } }
+    setup_review_stubs(
+      { rel_path = "a.lua", vcs_info = { root = "/repo" } },
+      { [bufnr] = { mappings = mappings, review = { head_sha = "abc123" } } },
+      discussions
+    )
+    require("parley.diffview_integration").goto_file = function()
+      return false
+    end
+
+    set_cursor(5)
+    nav.review_next(bufnr)
+
+    assert.equal(0, #cmd_calls)
+    assert.equal(1, #notify_calls)
+    assert.equal(vim.log.levels.WARN, notify_calls[1].level)
+  end)
+
+  it("does not call goto_file for a same-file jump, even in a diffview buffer", function()
+    local bufnr = scratch(20)
+    local discussions = {
+      { id = "1", file = "a.lua", line = 3, resolved = false, comments = {} },
+      { id = "2", file = "a.lua", line = 10, resolved = false, comments = {} },
+    }
+    local mappings = { ["1"] = { local_line = 3 }, ["2"] = { local_line = 10 } }
+    setup_review_stubs(
+      { rel_path = "a.lua", vcs_info = { root = "/repo" } },
+      { [bufnr] = { mappings = mappings, review = { head_sha = "abc123" } } },
+      discussions
+    )
+    local goto_calls = {}
+    require("parley.diffview_integration").goto_file = function(...)
+      goto_calls[#goto_calls + 1] = { ... }
+      return true
+    end
+
+    set_cursor(3) -- on disc 1; _current_index = 1
+    nav.review_next(bufnr)
+
+    assert.equal(0, #goto_calls)
+    assert.equal(0, #cmd_calls)
+    assert.equal(10, cursor_row())
+  end)
+
+  it("review_prev also uses diffview_integration.goto_file for cross-file jumps", function()
+    local bufnr = scratch(20)
+    local discussions = {
+      { id = "1", file = "a.lua", line = 5, resolved = false, comments = {} },
+      { id = "2", file = "b.lua", line = 7, resolved = false, comments = {} },
+    }
+    local mappings = { ["1"] = { local_line = 5 }, ["2"] = { local_line = 7 } }
+    setup_review_stubs(
+      { rel_path = "a.lua", vcs_info = { root = "/repo" } },
+      { [bufnr] = { mappings = mappings, review = { head_sha = "def456" } } },
+      discussions
+    )
+    local goto_calls = {}
+    require("parley.diffview_integration").goto_file = function(path, line, head_sha)
+      goto_calls[#goto_calls + 1] = { path = path, line = line, head_sha = head_sha }
+      return true
+    end
+
+    set_cursor(5) -- on disc 1; _current_index = 1 → prev wraps to disc 2 (b.lua)
+    nav.review_prev(bufnr)
+
+    assert.equal(0, #cmd_calls)
+    assert.equal(1, #goto_calls)
+    assert.equal("b.lua", goto_calls[1].path)
+    assert.equal(7, goto_calls[1].line)
+    assert.equal("def456", goto_calls[1].head_sha)
   end)
 end)
 

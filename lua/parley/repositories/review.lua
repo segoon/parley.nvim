@@ -5,6 +5,7 @@ local cache = require("parley.repositories.review_cache")
 local identity = require("parley.cache_identity")
 local context_repository = require("parley.repositories.context")
 local provider_repository = require("parley.repositories.provider")
+local semantics = require("parley.discussion")
 local ui = require("parley.runtime.ui")
 local M = {}
 --- Shared remote review data; projections live in local_mappings.
@@ -19,6 +20,23 @@ M._bufnr_key = {}
 --- review_key → set of bufnrs. Reverse index of _bufnr_key.
 --- @type table<string, table<integer, boolean>>
 M._key_bufnrs = {}
+--- Buffers whose view uses identity (PR-diff-space line == buffer line)
+--- mappings instead of the shared, working-tree-relative local_mappings
+--- cache. Used for diffview diff buffers, whose content is byte-identical
+--- to a specific revision, so remapping against the working tree would be
+--- simply wrong (not just imprecise) whenever the working tree has
+--- diverged from that revision. Checked inside compute_view so it stays
+--- correct across every recomputation trigger (attach, background
+--- refresh, remap_async), not just the initial attach.
+---
+--- The value is which side of the diff the buffer represents ("new" for
+--- diffview's head-side buffer, "old" for its base-side buffer), since an
+--- anchor's own side must match: a discussion anchored to the old side
+--- only has a meaningful identity-mapped position in an old-side buffer,
+--- and vice versa. Most discussions are new-side only (parley's built-in
+--- providers mostly don't produce old-side anchors; see discussion.lua).
+--- @type table<integer, "new"|"old">
+M._identity_bufnrs = {}
 --- Reentrancy guard, keyed by review_key.
 --- @type table<string, boolean>
 M._in_flight = {}
@@ -120,6 +138,36 @@ local function compute_view(bufnr, shared)
     return { discussions = {}, mappings = {} }
   end
   local file_discussions = filter_for_file(shared.all_discussions or {}, rel_path)
+
+  local identity_side = M._identity_bufnrs[bufnr]
+  if identity_side then
+    local mappings = {}
+    for _, discussion in ipairs(file_discussions) do
+      local a = semantics.anchor(discussion)
+      local disc_side = a.side == "old" and "old" or "new"
+      -- Same conditions as semantics.projectable(), except side is matched
+      -- against the buffer's own side instead of hardcoding "new" — an
+      -- old-side anchor only has a meaningful position in an old-side
+      -- buffer, and projectable() itself always excludes side == "old"
+      -- (it's meant for regular, working-tree-relative buffers).
+      if
+        a.kind == "inline"
+        and semantics.valid_path(a.path)
+        and semantics.valid_line(a.line)
+        and not a.unavailable_reason
+        and disc_side == identity_side
+      then
+        mappings[discussion.id] = {
+          local_line = discussion.line,
+          local_end_line = discussion.end_line,
+          confidence = 1.0,
+          stale = false,
+        }
+      end
+    end
+    return { discussions = file_discussions, mappings = mappings, all_mappings = mappings }
+  end
+
   local all_mappings = local_mappings.get(ctx, shared)
   local current = context_repository.get(bufnr)
   if not current or not vim.deep_equal(current.vcs_info, ctx.vcs_info) or current.rel_path ~= rel_path then
@@ -271,6 +319,43 @@ M.make_key = keys.make
 --- @return boolean
 function M.has_review(review_key)
   return M._reviews[review_key] ~= nil
+end
+
+--- The review_key a buffer is currently attached to, if any (in-memory only).
+--- @param bufnr integer
+--- @return string|nil
+function M.key_for_bufnr(bufnr)
+  return M._bufnr_key[bufnr]
+end
+
+--- Attach `bufnr` to an already-loaded review `review_key` and publish its
+--- per-file view immediately, without any network I/O or VCS detection.
+---
+--- Used by parley.diffview_integration to alias a diffview diff buffer (whose
+--- synthetic name never passes buffer_context.classify as "regular") onto a
+--- review already active for a real buffer in the same repository, so the
+--- existing render/write pipelines work unmodified for diffview buffers.
+--- The caller must have already published a matching context_repository /
+--- provider_repository snapshot for `bufnr`.
+--- @param bufnr integer
+--- @param review_key string
+--- @param side? "new"|"old" Which side of the diff `bufnr` represents;
+---   defaults to "new" (defaulting keeps this backward compatible with
+---   the original head-side-only caller).
+--- @return table|nil composite snapshot, or nil if the view couldn't be computed
+function M.attach(bufnr, review_key, side)
+  local shared = M._reviews[review_key]
+  if not shared then
+    return nil
+  end
+  register_bufnr(bufnr, review_key)
+  M._identity_bufnrs[bufnr] = side or "new"
+  local view = compute_view(bufnr, shared)
+  if not view then
+    return nil
+  end
+  M._views[bufnr] = view
+  return clone(composite(shared, view))
 end
 
 --- Check whether the on-disk cache has PR data for this branch.
@@ -520,6 +605,7 @@ function M.detach(bufnr, preserve_subscribers)
     M._key_bufnrs[key][bufnr] = nil
   end
   M._bufnr_key[bufnr], M._views[bufnr] = nil, nil
+  M._identity_bufnrs[bufnr] = nil
   if not preserve_subscribers then
     M._subscribers[bufnr] = nil
   end

@@ -82,6 +82,15 @@ function M.invalidate(bufnr)
   publish(bufnr, nil)
 end
 
+--- Publish an externally constructed snapshot, bypassing buffer_context
+--- detection. Used by parley.diffview_integration to alias a diffview diff
+--- buffer onto a host regular buffer's already-resolved context.
+--- @param bufnr integer
+--- @param snapshot table
+function M.set(bufnr, snapshot)
+  publish(bufnr, snapshot)
+end
+
 --- @param bufnr integer
 --- @param cb fun(snapshot: table|nil): nil
 --- @return fun(): nil

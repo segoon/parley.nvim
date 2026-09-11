@@ -218,6 +218,7 @@
     "app": {
       "modules": [
         "lua/parley/async_operation.lua",
+        "lua/parley/diffview_integration.lua",
         "lua/parley/discussion_window.lua",
         "lua/parley/discussion_picker.lua",
         "lua/parley/discussion_window/input.lua",

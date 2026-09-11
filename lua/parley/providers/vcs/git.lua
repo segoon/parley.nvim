@@ -25,6 +25,9 @@ local adapter = {
       path,
     }
   end,
+  diffview_range = function(base, head)
+    return { "origin/" .. base .. "..." .. head, "--imply-local" }
+  end,
 }
 
 return adapter

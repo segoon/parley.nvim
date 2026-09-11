@@ -1,0 +1,591 @@
+--- parley.diffview_integration — PR discussions inside diffview.nvim.
+---
+--- diffview.nvim opens read-only "diff buffers" showing the exact
+--- content of a single revision. Comments are never local-edit-remapped
+--- there (unlike regular buffers, see anchor.lua): a diffview diff buffer
+--- showing the review's head revision maps PR-diff-space lines onto itself
+--- with identity, so this module aliases such buffers onto the review
+--- already active for a regular buffer in the same repository, reusing the
+--- existing read/hover/write pipelines unmodified. Identity mapping is
+--- enforced structurally, not incidentally: review_repository.attach()
+--- marks the bufnr so every view recomputation (including background
+--- refreshes of the shared review data) skips the working-tree-relative
+--- local_mappings cache regular buffers use — that cache is keyed by VCS
+--- root, shared across every buffer in the repo, and always diffs against
+--- the real working-tree file on disk, which would silently mistarget
+--- cursor-based actions (open/reply/resolve/react) the moment the file
+--- being browsed in diffview has uncommitted local edits.
+---
+--- The head/"new" side is always supported. The base/"old" side renders
+--- only when a discussion is actually anchored there (M._matches_old_side)
+--- — most providers never produce old-side anchors at all (GitHub doesn't
+--- read its REST API's LEFT/RIGHT side field), so in practice this only
+--- activates for Arcanum reviews with old-side comments. Old-side rendering
+--- is read-only: no built-in provider's write path supports creating a new
+--- comment on the old side, so the new-comment keymap stays new-side only.
+---
+--- No dependency on diffview being configured with parley-aware `hooks`:
+--- this module listens on diffview's documented `User` autocmds, which fire
+--- unconditionally, so the integration is zero-config for users who have
+--- both plugins installed.
+
+local async = require("plenary.async")
+local context_repository = require("parley.repositories.context")
+local provider_repository = require("parley.repositories.provider")
+local review_repository = require("parley.repositories.review")
+local read_service = require("parley.services.read")
+
+local M = {}
+
+--- @type fun(): parley.Config
+M._get_config = function()
+  return require("parley").config
+end
+
+-- ---------------------------------------------------------------------------
+-- diffview identity resolution
+-- ---------------------------------------------------------------------------
+
+--- diffview.lib seam; replace in tests to avoid requiring a real diffview
+--- install. Returns nil when diffview.nvim isn't installed.
+--- @type fun(): table|nil
+M._get_lib = function()
+  local ok, lib = pcall(require, "diffview.lib")
+  if not ok then
+    return nil
+  end
+  return lib
+end
+
+--- Find the vcs.File in the current diffview view whose buffer is `bufnr`.
+--- @param bufnr integer
+--- @return table|nil vcs.File
+function M._resolve_file(bufnr)
+  local lib = M._get_lib()
+  if not lib then
+    return nil
+  end
+  local ok, view = pcall(lib.get_current_view)
+  if not ok or not view or not view.cur_entry or not view.cur_entry.layout then
+    return nil
+  end
+  local ok2, files = pcall(function()
+    return view.cur_entry.layout:files()
+  end)
+  if not ok2 or not files then
+    return nil
+  end
+  for _, file in ipairs(files) do
+    if file.bufnr == bufnr then
+      return file
+    end
+  end
+  return nil
+end
+
+--- Derive the VCS root from a vcs.File's absolute/relative path pair.
+--- @param file table vcs.File
+--- @return string|nil
+function M._derive_root(file)
+  if type(file.absolute_path) ~= "string" or type(file.path) ~= "string" then
+    return nil
+  end
+  local suffix = "/" .. file.path
+  if file.absolute_path:sub(-#suffix) == suffix then
+    return file.absolute_path:sub(1, #file.absolute_path - #suffix)
+  end
+  return nil
+end
+
+--- True iff `file.rev` represents the review's head revision (or the local
+--- working tree, which is equivalent for a still-open PR).
+--- @param file table vcs.File
+--- @param head_sha string
+--- @return boolean
+function M._is_head_side(file, head_sha)
+  local rev = file.rev
+  if not rev then
+    return false
+  end
+  if rev.type == "LOCAL" then
+    return true
+  end
+  local ok, rev_lib = pcall(require, "diffview.vcs.rev")
+  if ok and rev_lib.RevType and rev.type == rev_lib.RevType.LOCAL then
+    return true
+  end
+  return type(head_sha) == "string" and head_sha ~= "" and rev.commit == head_sha
+end
+
+--- Find a loaded, already-classified regular buffer in the same VCS root
+--- that has an active review attached, to alias the diffview buffer onto.
+--- Pure lookup over already-cached repository state; no I/O.
+--- @param root string|nil
+--- @return integer|nil host_bufnr
+--- @return string|nil review_key
+--- @return table|nil host_ctx
+function M._find_host(root)
+  if not root then
+    return nil
+  end
+  for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_is_loaded(bufnr) then
+      local ctx = context_repository.get(bufnr)
+      if ctx and ctx.kind == "regular" and ctx.vcs_info and ctx.vcs_info.root == root then
+        local key = review_repository.key_for_bufnr(bufnr)
+        if key then
+          return bufnr, key, ctx
+        end
+      end
+    end
+  end
+  return nil
+end
+
+-- ---------------------------------------------------------------------------
+-- Attach / render
+-- ---------------------------------------------------------------------------
+
+--- @type table<integer, boolean> Diffview buffers currently aliased onto a review.
+M._attached = {}
+
+--- @param bufnr integer
+--- @param keymap string
+local function set_new_comment_keymap(bufnr, keymap)
+  if not keymap or keymap == "" then
+    return
+  end
+  vim.keymap.set("n", keymap, function()
+    require("parley.services.write").open_new_comment_input(bufnr, {})
+  end, { buffer = bufnr, desc = "Parley: new comment (diffview)" })
+end
+
+--- True iff `file`'s revision is the exact old-side revision of at least
+--- one discussion anchored to this path. Unlike the head side (a single
+--- known head_sha), the review has no single "base sha" recorded — each
+--- old-side anchor carries its own revision (providers may anchor
+--- historical comments to different diff revisions), so matching by
+--- anchor identity is both the safest and the only available check: it
+--- can never misattach an unrelated diff (nothing matches unless a real
+--- discussion says so), and needs no extra VCS calls.
+--- @param file table vcs.File
+--- @param all_discussions parley.Discussion[]
+--- @return boolean
+function M._matches_old_side(file, all_discussions)
+  if not file.rev or not file.rev.commit or file.rev.commit == "" then
+    return false
+  end
+  local semantics = require("parley.discussion")
+  for _, discussion in ipairs(all_discussions or {}) do
+    if discussion.file == file.path then
+      local a = semantics.anchor(discussion)
+      if a.side == "old" and a.revision == file.rev.commit then
+        return true
+      end
+    end
+  end
+  return false
+end
+
+--- Handle a diffview diff buffer becoming current: resolve its identity,
+--- alias it onto the host review, and render. Head-side buffers are
+--- always eligible; old-side buffers only when some discussion is
+--- actually anchored there (M._matches_old_side) — most providers never
+--- produce old-side anchors at all (see discussion.lua), so in practice
+--- this only activates for Arcanum reviews with old-side comments.
+---
+--- review_repository.attach() may read revision/working-tree content
+--- (parley.runtime.fs), which yields internally; run it inside a plenary
+--- coroutine so that's safe from a plain `User` autocmd callback (mirrors
+--- services/read.lua's do_refresh, which does the same for BufEnter).
+--- @param bufnr integer
+function M._on_diff_buf(bufnr)
+  local config = M._get_config()
+  if not config or not config.diffview or not config.diffview.enabled then
+    return
+  end
+  if not vim.api.nvim_buf_is_valid(bufnr) then
+    return
+  end
+
+  local file = M._resolve_file(bufnr)
+  if not file then
+    return
+  end
+
+  local root = M._derive_root(file)
+  local host_bufnr, review_key, host_ctx = M._find_host(root)
+  if not review_key then
+    return
+  end
+
+  local host_snapshot = review_repository.get(host_bufnr)
+  if not host_snapshot or not host_snapshot.review then
+    return
+  end
+
+  local side
+  if M._is_head_side(file, host_snapshot.review.head_sha) then
+    side = "new"
+  elseif M._matches_old_side(file, host_snapshot.all_discussions) then
+    side = "old"
+  else
+    return
+  end
+
+  local provider_snapshot = provider_repository.get(host_bufnr)
+  if not provider_snapshot then
+    return
+  end
+
+  context_repository.set(bufnr, {
+    kind = "regular",
+    bufnr = bufnr,
+    path = nil,
+    vcs_info = host_ctx.vcs_info,
+    status = "ready",
+    rel_path = file.path,
+  })
+  provider_repository.set(bufnr, provider_snapshot)
+
+  async.run(function()
+    local snapshot = review_repository.attach(bufnr, review_key, side)
+    vim.schedule(function()
+      if not snapshot or not vim.api.nvim_buf_is_valid(bufnr) then
+        return
+      end
+      M._attached[bufnr] = true
+      read_service.render_snapshot(bufnr, snapshot)
+      -- Creating a new comment on the old side isn't supported by any
+      -- built-in provider's write path today (GitHub hardcodes the new
+      -- side; Arcanum's inline write path does too) — only wire the
+      -- keymap where it can actually succeed.
+      if side == "new" then
+        set_new_comment_keymap(bufnr, config.keymaps and config.keymaps.diffview_new_comment)
+      end
+    end)
+  end)
+end
+
+-- ---------------------------------------------------------------------------
+-- File panel badges
+-- ---------------------------------------------------------------------------
+
+M._panel_ns = nil
+--- @return integer
+local function panel_ns()
+  if not M._panel_ns then
+    M._panel_ns = vim.api.nvim_create_namespace("parley_diffview_panel")
+  end
+  return M._panel_ns
+end
+
+--- Find the rendered row (0-indexed) of `file`'s component in the file
+--- panel, by object identity against diffview's own component tree — not
+--- by searching rendered text, which breaks on same-named files in
+--- different directories or any change to how diffview renders a line.
+--- `view.panel.files:iter()` yields the same FileEntry/vcs.File objects
+--- the component tree's `.context` fields reference, so `==` identity
+--- comparison is reliable. Mirrors diffview's own
+--- FilePanel:highlight_file() traversal, minus its UI side effects
+--- (expanding collapsed directories, redrawing): if a file's parent
+--- directory is collapsed, it has no rendered line to badge, so returning
+--- nil (skip) is correct, not a shortfall to work around.
+--- @param panel table diffview FilePanel
+--- @param file table vcs.File
+--- @return integer|nil
+local function find_panel_file_row(panel, file)
+  local components = panel.components
+  if not components then
+    return nil
+  end
+  local file_sets = { components.conflicting, components.working, components.staged }
+  if panel.listing_style == "list" then
+    for _, set in ipairs(file_sets) do
+      for _, comp_struct in ipairs(set and set.files or {}) do
+        if comp_struct.comp.context == file then
+          return comp_struct.comp.lstart
+        end
+      end
+    end
+  else
+    for _, set in ipairs(file_sets) do
+      local comp_struct = set and set.files
+      if comp_struct and comp_struct.comp then
+        local row
+        comp_struct.comp:deep_some(function(cur)
+          if cur.context == file then
+            row = cur.lstart
+            return true
+          end
+          return false
+        end)
+        if row then
+          return row
+        end
+      end
+    end
+  end
+  return nil
+end
+
+--- Render comment-count badges next to changed files in the diffview file
+--- panel, placed at each file's real rendered row per its component-tree
+--- identity (find_panel_file_row), not by text search.
+function M._render_panel_badges()
+  local config = M._get_config()
+  if not config or not config.diffview or not config.diffview.enabled or not config.diffview.file_panel_badges then
+    return
+  end
+  local lib = M._get_lib()
+  if not lib then
+    return
+  end
+  local ok, view = pcall(lib.get_current_view)
+  if not ok or not view or not view.panel or not view.panel.winid then
+    return
+  end
+  if not vim.api.nvim_win_is_valid(view.panel.winid) then
+    return
+  end
+  local panel_bufnr = vim.api.nvim_win_get_buf(view.panel.winid)
+  local ns = panel_ns()
+  vim.api.nvim_buf_clear_namespace(panel_bufnr, ns, 0, -1)
+  if not view.panel.files or not view.panel.files.iter then
+    return
+  end
+
+  -- Find any host buffer with an active review to source discussion counts
+  -- from; file panel entries aren't tied to a single diff buffer. Derive the
+  -- VCS root from the first panel entry (same technique as a diff buffer's
+  -- own identity resolution) since the view/adapter don't expose it directly.
+  local root
+  for _, file in view.panel.files:iter() do
+    root = M._derive_root(file)
+    if root then
+      break
+    end
+  end
+  local host_bufnr, review_key = M._find_host(root)
+  if not review_key then
+    return
+  end
+  local host_snapshot = review_repository.get(host_bufnr)
+  if not host_snapshot or not host_snapshot.all_discussions then
+    return
+  end
+
+  local by_file = {}
+  for _, discussion in ipairs(host_snapshot.all_discussions) do
+    if type(discussion.file) == "string" then
+      local entry = by_file[discussion.file]
+      if not entry then
+        entry = { count = 0, unresolved = false }
+        by_file[discussion.file] = entry
+      end
+      entry.count = entry.count + 1
+      if require("parley.discussion").is_open_issue(discussion) then
+        entry.unresolved = true
+      end
+    end
+  end
+  if next(by_file) == nil then
+    return
+  end
+
+  for _, file in view.panel.files:iter() do
+    local entry = file.path and by_file[file.path]
+    if entry then
+      local row = find_panel_file_row(view.panel, file)
+      if row then
+        local badge = string.format("💬%d%s", entry.count, entry.unresolved and "!" or "")
+        vim.api.nvim_buf_set_extmark(panel_bufnr, ns, row, 0, {
+          virt_text = { { " " .. badge, "ParleyVirtualTextMeta" } },
+          virt_text_pos = "eol",
+        })
+      end
+    end
+  end
+end
+
+-- ---------------------------------------------------------------------------
+-- :Parley diffview open|close|toggle
+-- ---------------------------------------------------------------------------
+
+--- Notify hook; replace in tests.
+--- @type fun(msg: string, level: integer)
+M._notify = function(msg, level)
+  vim.notify(msg, level)
+end
+
+--- diffview's top-level open/close/toggle API seam; replace in tests to
+--- avoid requiring a real diffview install.
+--- @type fun(): table|nil
+M._get_diffview_api = function()
+  local ok, dv = pcall(require, "diffview")
+  if not ok then
+    return nil
+  end
+  return dv
+end
+
+--- Resolve the diffview `:DiffviewOpen` args for the PR review active in
+--- `bufnr`, via the VCS adapter already resolved for that buffer's
+--- repository. Never branches on a specific VCS name: an adapter that has
+--- no diffview equivalent (e.g. Arc) simply omits `diffview_range`.
+--- @param bufnr integer
+--- @return string[]|nil args, string|nil err
+function M._resolve_range_args(bufnr)
+  local context, err = require("parley.services.write_context").get(bufnr)
+  if not context then
+    return nil, err
+  end
+  local adapter, adapter_err = require("parley.vcs.adapters").get(context.vcs_info)
+  if not adapter then
+    return nil, adapter_err
+  end
+  if not adapter.diffview_range then
+    return nil, "Parley: diffview integration is not supported for this VCS"
+  end
+  local base, head = context.review.pr.base_branch, context.review.head_sha
+  if base == "" or head == "" then
+    return nil, "Parley: review is missing a base branch or head commit"
+  end
+  return adapter.diffview_range(base, head)
+end
+
+--- Open diffview scoped to the PR review active in `bufnr`.
+--- @param bufnr integer
+function M.open(bufnr)
+  local dv = M._get_diffview_api()
+  if not dv then
+    M._notify("Parley: diffview.nvim is not installed", vim.log.levels.WARN)
+    return
+  end
+  local args, err = M._resolve_range_args(bufnr)
+  if not args then
+    M._notify(err, vim.log.levels.WARN)
+    return
+  end
+  dv.open(args)
+end
+
+--- Close the diffview open on the current tabpage, if any.
+--- @param _bufnr integer
+function M.close(_bufnr)
+  local dv = M._get_diffview_api()
+  if not dv then
+    return
+  end
+  dv.close()
+end
+
+--- Toggle diffview: close it if one is open on the current tabpage,
+--- otherwise open it scoped to the PR review active in `bufnr`.
+---
+--- Checks for an open view first rather than delegating to diffview's own
+--- `toggle(args)`, so that closing an already-open view never depends on
+--- successfully resolving a range for `bufnr` (which may no longer have an
+--- active review by the time the user wants to close the view).
+--- @param bufnr integer
+function M.toggle(bufnr)
+  local dv = M._get_diffview_api()
+  if not dv then
+    M._notify("Parley: diffview.nvim is not installed", vim.log.levels.WARN)
+    return
+  end
+  local lib = M._get_lib()
+  if lib and lib.get_current_view() then
+    dv.close()
+    return
+  end
+  local args, err = M._resolve_range_args(bufnr)
+  if not args then
+    M._notify(err, vim.log.levels.WARN)
+    return
+  end
+  dv.open(args)
+end
+
+-- ---------------------------------------------------------------------------
+-- Cross-file review navigation (]C/[C, :Parley nav review-next/-prev)
+-- ---------------------------------------------------------------------------
+
+--- Switch the current diffview session to `target_path`'s head-side diff
+--- buffer and place the cursor at `target_line`. Used by nav.lua's
+--- review_next/review_prev when invoked from a diffview-aliased buffer,
+--- instead of `vim.cmd("edit ...")` — which would blow away diffview's
+--- layout (replace one side of the diff split with a plain file buffer,
+--- desyncing the file panel's selection from what's actually open).
+---
+--- Drives diffview's own file-selection API (`view:set_file_by_path`,
+--- itself `async.void`-wrapped) and waits for the resulting buffer: the
+--- switch triggers diffview's real DiffviewDiffBufRead/DiffviewDiffBufWinEnter
+--- events, which this module's own M.setup autocmds already attach via
+--- M._on_diff_buf — no separate attach logic needed here, just wait for it.
+--- @param target_path string  Repo-relative path to switch to
+--- @param target_line integer PR-diff-space line to place the cursor on
+--- @param head_sha string     The review's head commit, to identify the
+---   head-side window among the (old-side, new-side) pair diffview opens.
+--- @param timeout_ms? integer How long to wait for the switch (default 2000).
+--- @return boolean ok
+function M.goto_file(target_path, target_line, head_sha, timeout_ms)
+  local lib = M._get_lib()
+  if not lib then
+    return false
+  end
+  local view = lib.get_current_view()
+  if not view or type(view.set_file_by_path) ~= "function" then
+    return false
+  end
+
+  view:set_file_by_path(target_path, true, true)
+
+  local target_bufnr, target_winid
+  vim.wait(timeout_ms or 2000, function()
+    for _, winid in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+      local bufnr = vim.api.nvim_win_get_buf(winid)
+      local file = M._resolve_file(bufnr)
+      if file and file.path == target_path and M._is_head_side(file, head_sha) then
+        target_bufnr, target_winid = bufnr, winid
+        return M._attached[bufnr] == true
+      end
+    end
+    return false
+  end, 20)
+
+  if not target_winid or not vim.api.nvim_win_is_valid(target_winid) then
+    return false
+  end
+
+  vim.api.nvim_set_current_win(target_winid)
+  local line_count = vim.api.nvim_buf_line_count(target_bufnr)
+  local line = math.max(1, math.min(target_line, line_count))
+  vim.api.nvim_win_set_cursor(target_winid, { line, 0 })
+  return true
+end
+
+-- ---------------------------------------------------------------------------
+-- Setup
+-- ---------------------------------------------------------------------------
+
+--- @param augroup integer
+function M.setup(augroup)
+  vim.api.nvim_create_autocmd("User", {
+    group = augroup,
+    pattern = { "DiffviewDiffBufRead", "DiffviewDiffBufWinEnter" },
+    callback = function()
+      M._on_diff_buf(vim.api.nvim_get_current_buf())
+    end,
+    desc = "Parley: render PR discussions in diffview diff buffers",
+  })
+
+  vim.api.nvim_create_autocmd("User", {
+    group = augroup,
+    pattern = { "DiffviewViewPostLayout", "DiffviewSelectionChanged", "DiffviewFilesStaged" },
+    callback = M._render_panel_badges,
+    desc = "Parley: render comment-count badges in the diffview file panel",
+  })
+end
+
+return M

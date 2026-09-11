@@ -3,6 +3,7 @@
 local async = require("plenary.async")
 local async_operation = require("parley.async_operation")
 local autorefresh = require("parley.services.autorefresh")
+local buffer_context = require("parley.buffer_context")
 local context_repository = require("parley.repositories.context")
 local provider_repository = require("parley.repositories.provider")
 local review_repository = require("parley.repositories.review")
@@ -53,6 +54,13 @@ local function render_snapshot(bufnr, snapshot)
     virtual_text = config.virtual_text,
   }, cursor_line)
 end
+
+--- Render a snapshot for `bufnr` (signs, virtual text, discussion window).
+--- Exposed for parley.diffview_integration, which builds review snapshots
+--- for diffview diff buffers outside the normal BufEnter refresh cycle.
+--- @param bufnr integer
+--- @param snapshot table|nil
+M.render_snapshot = render_snapshot
 
 local function ensure_subscription(bufnr)
   if M._subscriptions[bufnr] then
@@ -151,6 +159,23 @@ end
 --- background?: boolean, expected_key?: string }
 --- @param callback? fun(snapshot: table|nil): nil
 function M.refresh_async(bufnr, opts, callback)
+  -- diffview_integration.lua owns diffview buffers' lifecycle entirely via
+  -- its own dedicated DiffviewDiffBufRead/DiffviewDiffBufWinEnter autocmds,
+  -- aliasing them onto a host review's context/provider/review repository
+  -- entries. The generic classification below would reclassify such a
+  -- buffer as kind="diffview" (buffer_context.classify never sees the
+  -- alias) and clear that state out from under it — most commonly via the
+  -- BufEnter autocmd firing the moment the user's cursor enters the diff
+  -- buffer, racing with (and usually winning over) the diffview-specific
+  -- attach. Skip entirely rather than reclassify/clear.
+  if buffer_context.is_diffview_buffer(bufnr) then
+    if callback then
+      vim.schedule(function()
+        callback(nil)
+      end)
+    end
+    return
+  end
   opts = vim.tbl_extend("force", {}, opts or {})
   if opts.background then
     opts.force, opts.notify_errors = true, false

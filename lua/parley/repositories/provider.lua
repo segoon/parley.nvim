@@ -89,6 +89,15 @@ function M.invalidate(bufnr)
   publish(bufnr, nil)
 end
 
+--- Publish an externally constructed snapshot, bypassing provider resolution.
+--- Used by parley.diffview_integration to alias a diffview diff buffer onto a
+--- host regular buffer's already-resolved provider.
+--- @param bufnr integer
+--- @param snapshot parley.ProviderSnapshot
+function M.set(bufnr, snapshot)
+  publish(bufnr, snapshot)
+end
+
 --- Store a provider with a newly resolved identity; requires a Plenary coroutine.
 --- @param bufnr integer
 --- @param provider parley.Provider

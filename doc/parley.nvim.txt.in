@@ -35,7 +35,8 @@ Current state: ~
 
   - Built-in providers: GitHub (git repos) and Arcanum (Arc/Arcadia repos)
   - Regular file buffers are supported
-  - diffview.nvim integration is planned
+  - diffview.nvim diff buffers are supported (head side only; see the
+    optional requirements below)
 
 ==============================================================================
 2. REQUIREMENTS                                      *parley-requirements*
@@ -56,6 +57,16 @@ Optional: ~
 
   - telescope.nvim — for discussion pickers (|parley-telescope|)
   - render-markdown.nvim — for rendered markdown in the discussion float
+  - diffview.nvim (https://github.com/sindrets/diffview.nvim) — when
+    installed and loaded, Parley automatically renders PR discussions and
+    lets you create new comments inside its diff buffers (head side only),
+    plus comment-count badges in its file panel. No extra setup call is
+    needed; disable with `diffview = { enabled = false }`
+    (|parley-config-diffview|). Verified against both upstream and the
+    mistricky/diffview-plus.nvim fork; not verified against other forks.
+    File-panel badges only refresh live on selection/staging under the fork
+    (which fires extra events); under plain upstream they refresh after
+    layout changes only.
 
 ==============================================================================
 3. SETUP                                             *parley-setup*
@@ -75,6 +86,7 @@ With lazy.nvim: >lua
         -- Optional:
         -- "nvim-telescope/telescope.nvim",
         -- "MeanderingProgrammer/render-markdown.nvim",
+        -- "sindrets/diffview.nvim",
       },
       opts = {},
     }
@@ -179,6 +191,20 @@ All Parley commands support tab completion.
     active review. Entries use review-wide mappings when available. Unavailable
     positions remain invalid rows; general discussions are omitted. Use
     `:Parley discussion list` to access every thread.
+
+:Parley diffview open                                *:Parley-diffview-open*
+    Open diffview.nvim scoped to the active review's base...head range
+    (resolved via the current buffer's VCS adapter; requires
+    diffview.nvim, see |parley-requirements|). Only supported for Git
+    repositories.
+
+:Parley diffview close                               *:Parley-diffview-close*
+    Close the diffview view open on the current tabpage. A silent no-op if
+    none is open.
+
+:Parley diffview toggle                              *:Parley-diffview-toggle*
+    Close the diffview view on the current tabpage if one is open, otherwise
+    open it as `:Parley diffview open` would.
 
 ==============================================================================
 5. KEYMAPS                                           *parley-keymaps*
