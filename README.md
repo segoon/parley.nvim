@@ -59,6 +59,7 @@ Optional:
     -- Optional:
     -- "nvim-telescope/telescope.nvim",
     -- "MeanderingProgrammer/render-markdown.nvim",
+    -- "mistricky/diffview-plus.nvim",
   },
   opts = {},
 }

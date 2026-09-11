@@ -35,7 +35,8 @@ Current state: ~
 
   - Built-in providers: GitHub (git repos) and Arcanum (Arc/Arcadia repos)
   - Regular file buffers are supported
-  - diffview.nvim integration is planned
+  - diffview-plus.nvim diff buffers are supported (head side only; see the
+    optional requirements below)
 
 ==============================================================================
 2. REQUIREMENTS                                      *parley-requirements*
@@ -56,6 +57,14 @@ Optional: ~
 
   - telescope.nvim — for discussion pickers (|parley-telescope|)
   - render-markdown.nvim — for rendered markdown in the discussion float
+  - diffview-plus.nvim (a diffview.nvim fork,
+    https://github.com/mistricky/diffview-plus.nvim) — when installed and
+    loaded, Parley automatically renders PR discussions and lets you create
+    new comments inside its diff buffers (head side only), plus
+    comment-count badges in its file panel. No extra setup call is needed;
+    disable with `diffview = { enabled = false }`
+    (|parley-config-diffview|). Not verified against other diffview.nvim
+    forks.
 
 ==============================================================================
 3. SETUP                                             *parley-setup*
@@ -75,6 +84,7 @@ With lazy.nvim: >lua
         -- Optional:
         -- "nvim-telescope/telescope.nvim",
         -- "MeanderingProgrammer/render-markdown.nvim",
+        -- "mistricky/diffview-plus.nvim",
       },
       opts = {},
     }
