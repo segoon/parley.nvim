@@ -1,6 +1,6 @@
 --- V2 inline creation: one cancellable operation for callback and coroutine callers.
 local transport = require("parley.providers.arcanum.transport")
-local mapping = require("parley.providers.arcanum.mapping")
+local comment_write = require("parley.providers.arcanum.comment_write")
 local ui = require("parley.runtime.ui")
 local M = {}
 
@@ -35,28 +35,6 @@ local function validate(review, file, anchor)
   then
     return "Cannot comment: invalid file or line range. Reopen the draft on the intended lines."
   end
-end
-
---- Validate and map the V2 creation result without accepting placeholder identities.
---- @param raw any
---- @param viewer string
---- @return parley.Comment
-local function map_created(raw, viewer)
-  if
-    type(raw) ~= "table"
-    or not tostring(raw.id):match("^%-?%d+$")
-    or type(raw.author) ~= "table"
-    or not nonempty(raw.author.name)
-    or type(raw.content) ~= "string"
-    or not nonempty(raw.created_at)
-  then
-    error(
-      "Arcanum returned an incomplete comment response. "
-        .. "Check the review before retrying; the comment may have been sent.",
-      0
-    )
-  end
-  return mapping.map_comment(raw, viewer)
 end
 
 --- @param self parley.arcanum.Provider
@@ -97,7 +75,7 @@ function M.start(self, review, file, anchor, body, callback)
   --- @param method string
   --- @param path string
   --- @param payload table|nil
-  --- @param next_stage fun(data: any)
+  --- @param next_stage? fun(data: any)
   local function request(method, path, payload, next_stage)
     if completed then
       return
@@ -105,13 +83,14 @@ function M.start(self, review, file, anchor, body, callback)
     generation = generation + 1
     local stage, delivered = generation, false
     active = nil
-    local ok, result = pcall(transport.http_start, self, method, path, payload, function(response)
+    local executor = method == "POST" and comment_write.start or transport.request_start
+    local ok, result = pcall(executor, self, method, path, payload, function(response)
       if completed or delivered or generation ~= stage then
         return
       end
       delivered = true
       active = nil
-      if not response.ok then
+      if method == "POST" or not response.ok then
         finish(response)
         return
       end
@@ -119,7 +98,7 @@ function M.start(self, review, file, anchor, body, callback)
       if not success then
         finish({ ok = false, err = tostring(err), uncertain = method == "POST" })
       end
-    end, method == "POST" and { retry_policy = "create" } or nil)
+    end, method == "POST" and { retry_policy = "create", pr_id = comment_write.pr_id(review) } or nil)
     if not ok then
       finish({ ok = false, err = tostring(result) })
     elseif not completed and not delivered and generation == stage then
@@ -134,7 +113,7 @@ function M.start(self, review, file, anchor, body, callback)
       finish({ ok = false, err = err })
       return
     end
-    local ok, auth_err = pcall(require("parley.providers.arcanum.session").require_verified, self)
+    local ok, auth_err = pcall(require("parley.providers.arcanum.session").require_current, self)
     if not ok then
       finish({ ok = false, err = tostring(auth_err) })
       return
@@ -152,14 +131,7 @@ function M.start(self, review, file, anchor, body, callback)
     --- @param entry_id string
     local function post(entry_id)
       payload.entry_id = entry_id
-      request(
-        "POST",
-        "/v2/public/diff/" .. tostring(diff_id) .. "/comment?fields=" .. COMMENT_FIELDS,
-        payload,
-        function(raw)
-          finish({ ok = true, comment = map_created(raw, self._viewer_login or "") })
-        end
-      )
+      request("POST", "/v2/public/diff/" .. tostring(diff_id) .. "/comment?fields=" .. COMMENT_FIELDS, payload, nil)
     end
     local cached = context.changelist_diff_id == diff_id
       and type(context.changelist) == "table"
@@ -199,7 +171,7 @@ end
 --- @param file string
 --- @param anchor parley.Anchor
 --- @param body parley.Body
---- @return parley.Comment
+--- @return parley.Comment|nil Acknowledged writes without data are reconciled by refresh.
 function M.run(self, review, file, anchor, body)
   local result = require("parley.runtime.await").callback(function(callback)
     M.start(self, review, file, anchor, body, callback)

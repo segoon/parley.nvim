@@ -325,12 +325,16 @@ return function(M)
 
       if optimistic then
         if result.comment == nil then
+          optimistic.rollback(pending_token)
+          render_current_snapshot(bufnr)
           finish_progress(progress, bufnr, "success", progress_texts.success)
           refresh_in_background(bufnr)
           return
         end
         local ok, discussion_id, err = pcall(optimistic.confirm, pending_token, result)
         if not ok or not discussion_id then
+          optimistic.rollback(pending_token)
+          render_current_snapshot(bufnr)
           local message = not ok and tostring(discussion_id) or err or "Provider returned no created comment"
           finish_progress(progress, bufnr, "success", progress_texts.success)
           M._notify(message, vim.log.levels.WARN)

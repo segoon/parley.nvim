@@ -11,11 +11,11 @@ local auth = {
 
 describe("provider configuration", function()
   it("copies constructor configuration and preserves zero retries", function()
-    for _, entry in ipairs({ { github, gh_transport }, { arcanum, arc_transport } }) do
+    for _, entry in ipairs({ github, arcanum }) do
       local config = { timeout_ms = 123, retry_count = 0 }
-      local p = entry[1].new({ repository = "owner/repo", config = config, _auth = auth })
+      local p = entry.new({ repository = "owner/repo", config = config, _auth = auth })
       config.timeout_ms = 456
-      local resolved = entry[2].transport_config(p)
+      local resolved = p._config
       assert.equals(123, resolved.timeout_ms)
       assert.equals(0, resolved.retry_count)
       assert.equals(250, resolved.retry_base_delay_ms)
@@ -26,7 +26,7 @@ describe("provider configuration", function()
   it("uses provider-owned defaults for direct construction", function()
     assert.equals(5000, gh_transport.transport_config(github.new({ repository = "owner/repo" })).timeout_ms)
     local p = arcanum.new({ _auth = auth })
-    assert.equals(10000, arc_transport.transport_config(p).timeout_ms)
+    assert.equals(10000, p._config.timeout_ms)
     assert.equals("https://arcanum.yandex.net/api/v1/test", arc_transport.api_url(p, "/v1/test"))
   end)
 
@@ -62,7 +62,7 @@ describe("provider configuration", function()
     local p = old_factory({ login = "alice", _auth = auth })
     assert.equals("https://configured.example/api/v1/test", arc_transport.api_url(p, "/v1/test"))
     assert.equals("configured.example", p._host)
-    assert.equals(123, arc_transport.transport_config(p).timeout_ms)
+    assert.equals(123, p._config.timeout_ms)
     assert.equals(
       321,
       gh_transport.transport_config(registrations[1].factory({ repository = "owner/repo" })).timeout_ms
@@ -71,9 +71,9 @@ describe("provider configuration", function()
     config.arcanum.timeout_ms = 456
     catalog.register(deps, config)
     assert.equals("configured.example", old_factory({ _auth = auth })._host)
-    assert.equals(123, arc_transport.transport_config(p).timeout_ms)
+    assert.equals(123, p._config.timeout_ms)
     local next_provider = registrations[4].factory({ _auth = auth })
     assert.equals("next.example", next_provider._host)
-    assert.equals(456, arc_transport.transport_config(next_provider).timeout_ms)
+    assert.equals(456, next_provider._config.timeout_ms)
   end)
 end)

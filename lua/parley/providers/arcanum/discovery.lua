@@ -8,7 +8,7 @@ local fields = "id,summary,status,url,author,vcs"
 function M.find(self, branch)
   local offset, seen = 0, {}
   while true do
-    local data = transport.http_run(self, "POST", "/v1/pull-requests/cursor", {
+    local data = transport.request_run(self, "POST", "/v1/pull-requests/cursor?fields=id,vcs(from_branch)", {
       limit = 100,
       offset = offset,
       desc_order = true,
@@ -30,16 +30,14 @@ function M.find(self, branch)
       end
       if not seen[id] then
         seen[id], progress = true, true
-        local full = transport.http_run(self, "GET", "/v1/pull-requests/" .. tostring(id) .. "?fields=" .. fields)
-        if
-          type(full) ~= "table"
-          or full.id ~= id
-          or type(full.vcs) ~= "table"
-          or type(full.vcs.from_branch) ~= "string"
-        then
+        if type(candidate.vcs) ~= "table" or type(candidate.vcs.from_branch) ~= "string" then
           error("Arcanum review search returned incomplete candidate details", 0)
         end
-        if full.vcs.from_branch == branch then
+        if candidate.vcs.from_branch == branch then
+          local full = transport.request_run(self, "GET", "/v1/pull-requests/" .. tostring(id) .. "?fields=" .. fields)
+          if type(full) ~= "table" or full.id ~= id or type(full.vcs) ~= "table" or full.vcs.from_branch ~= branch then
+            error("Arcanum review search returned inconsistent candidate details; refresh the review", 0)
+          end
           return full
         end
       end

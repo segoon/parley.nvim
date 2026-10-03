@@ -24,6 +24,8 @@ function M.get(bufnr)
     identity = provider.provider.cache_identity and vim.deepcopy(provider.provider:cache_identity()),
     review = review.review,
     rel_path = context.rel_path,
+    revision = context.revision,
+    review_side = context.review_side,
     vcs_info = vim.deepcopy(context.vcs_info),
   }
 end
@@ -41,8 +43,9 @@ function M.reason(bufnr, action, expected)
     and (
       (expected.identity_checked and not vim.deep_equal(current.identity, expected.identity))
       or (not expected.identity_checked and current.provider ~= expected.provider)
-      or current.review.pr.id ~= expected.review.pr.id
-      or current.review.head_sha ~= expected.review.head_sha
+      or not require("parley.provider").same_review(current.review, expected.review)
+      or current.revision ~= expected.revision
+      or current.review_side ~= expected.review_side
     )
   then
     autorefresh.once(
@@ -53,6 +56,9 @@ function M.reason(bufnr, action, expected)
       end
     )
     return "Parley review changed; reopen the action for the current review"
+  end
+  if action == "post_top_level_comment" and current.review_side == "old" then
+    return "Cannot comment: new comments require the new side of the review."
   end
   return capabilities.reason(current.provider, current.review, action)
 end

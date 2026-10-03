@@ -61,6 +61,13 @@ end
 --- @param bufnr integer
 --- @return table|nil
 function M.refresh(bufnr)
+  local alias = M._entries[bufnr]
+  if alias and alias.host_bufnr then
+    local host = buffer_context.classify(alias.host_bufnr)
+    local snapshot = host.kind == "regular" and vim.tbl_extend("force", alias, { vcs_info = host.vcs_info }) or nil
+    publish(bufnr, snapshot)
+    return clone(snapshot)
+  end
   local ctx = buffer_context.classify(bufnr)
   local snapshot = vim.tbl_extend("force", ctx, {
     status = "ready",

@@ -144,7 +144,7 @@ describe("parley setup", function()
     parley.config.providers.arcanum.host = "mutated.example"
     assert.equals("first.example", p._host)
     assert.equals("first.example", factory({ _auth = auth })._host)
-    assert.equals(0, require("parley.providers.arcanum.transport").transport_config(p).retry_count)
+    assert.equals(0, p._config.retry_count)
     parley.setup({ telescope = false, providers = { arcanum = { host = "second.example" } } })
     assert.equals("second.example", specs[4].factory({ _auth = auth })._host)
     assert.equals("first.example", p._host)

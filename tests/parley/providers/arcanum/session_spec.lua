@@ -1,10 +1,10 @@
 local arcanum = require("parley.providers.arcanum.provider")
 local transport = require("parley.providers.arcanum.transport")
-describe("verified Arcanum accounts", function()
-  local saved, p, token, calls, response
+describe("Arc-bound Arcanum sessions", function()
+  local saved, p, token, calls
   before_each(function()
-    saved = transport.http_run
-    token, calls, response = "SECRET-OAUTH-VALUE", {}, { name = "api-user" }
+    saved = transport.request_run
+    token, calls = "SECRET-OAUTH-VALUE", {}
     p = arcanum.new({
       login = "arc-user",
       _auth = {
@@ -13,58 +13,39 @@ describe("verified Arcanum accounts", function()
         end,
       },
     })
-    transport.http_run = function(_, method, path)
+    transport.request_run = function(_, method, path)
       calls[#calls + 1] = { method, path }
-      if path == "/v2/users/me?fields=name" then
-        if type(response) == "function" then
-          return response()
-        end
-        return response
-      end
+      assert.is_nil(path:find("users/me", 1, true))
       return {
-        { id = 1, user = { name = "api-user" }, content = "own", created_at = "now" },
-        { id = 2, user = { name = "arc-user" }, content = "not own", created_at = "now" },
+        { id = 1, user = { name = "arc-user" }, content = "own", created_at = "now" },
+        { id = 2, user = { name = "other-user" }, content = "not own", created_at = "now" },
       }
     end
   end)
   after_each(function()
-    transport.http_run = saved
+    transport.request_run = saved
   end)
-  it("verifies before mapping ownership and reuses only the same verified credential", function()
+  it("uses Arc login for ownership without an API identity request", function()
     assert.is_nil(p:cache_identity())
     local threads = p:fetch_discussions({ write_context = { pr_id = 1 } })
-    assert.equals("/v2/users/me?fields=name", calls[1][2])
     assert.is_true(threads[1].comments[1].is_own)
     assert.is_false(threads[2].comments[1].is_own)
-    assert.equals("arc-user", p._arc_login)
-    assert.equals("api-user", p._viewer_login)
+    assert.equals("arc-user", p._viewer_login)
     assert.is_not_nil(p:cache_identity())
     p:prepare()
-    assert.equals(2, #calls)
+    assert.equals(1, #calls)
   end)
-  it("fails loading instead of falling back to the local Arc identity", function()
-    for _, invalid in ipairs({ {}, vim.NIL, { name = vim.NIL }, { name = " " } }) do
-      response = invalid
+  it("requires a usable Arc login", function()
+    for _, login in ipairs({ "", " ", vim.NIL }) do
+      p._arc_login = login
       assert.has_error(function()
-        p:fetch_discussions({ write_context = { pr_id = 1 } })
+        p:prepare()
       end)
-      assert.is_nil(p._viewer_login)
       assert.is_nil(p:cache_identity())
     end
-    assert.equals(4, #calls)
+    assert.equals(0, #calls)
   end)
-  it("discards verification when credentials change during HTTP", function()
-    response = function()
-      token = "replacement"
-      return { name = "old-user" }
-    end
-    assert.has_error(function()
-      p:prepare()
-    end)
-    assert.is_nil(p:cache_identity())
-    assert.is_nil(p._viewer_login)
-  end)
-  it("invalidates ownership and scopes when credentials rotate", function()
+  it("invalidates sessions when credentials rotate", function()
     p:prepare()
     local first = p:cache_identity()
     token = "replacement"
@@ -72,24 +53,36 @@ describe("verified Arcanum accounts", function()
     assert.has_error(function()
       p:delete({}, "1")
     end)
-    response = { name = "new-user" }
     p:prepare()
     assert.is_not.equals(first.account, p:cache_identity().account)
-    assert.equals("new-user", p._viewer_login)
+    assert.equals("arc-user", p._viewer_login)
     assert.is_nil(vim.inspect(p:cache_identity()):find(token, 1, true))
   end)
-  it("shares verified account identity across local Arc logins and rejects old ownership cache keys", function()
+  it("isolates Arc logins and invalidates old API-viewer caches", function()
     p:prepare()
-    local other = arcanum.new({ login = "another-checkout-user", _auth = p._auth })
+    local other = arcanum.new({ login = "another-user", _auth = p._auth })
     other:prepare()
-    assert.same(p:cache_identity(), other:cache_identity())
-    local legacy = vim.fn.sha256(vim.json.encode({ token, "api-user" }))
+    assert.is_not.equals(p:cache_identity().account, other:cache_identity().account)
+    local legacy = vim.fn.sha256(vim.json.encode({ "verified-viewer-review-v4", token, "arc-user" }))
     assert.is_not.equals(legacy, p:cache_identity().account)
+    p._arc_login = "new-user"
+    assert.is_nil(p:cache_identity())
+    p:prepare()
+    assert.equals("new-user", p._viewer_login)
   end)
-  it("does not expose server errors containing credentials", function()
-    response = function()
-      error(token)
-    end
+  it("invalidates a changed host before the next request", function()
+    p:prepare()
+    p._host = "other.example"
+    assert.is_nil(p:cache_identity())
+    p:prepare()
+    assert.equals("other.example", p:cache_identity().host)
+  end)
+  it("does not expose credential-reader exceptions", function()
+    p._auth = {
+      read_token = function()
+        error(token)
+      end,
+    }
     local ok, err = pcall(p.prepare, p)
     assert.is_false(ok)
     assert.is_nil(tostring(err):find(token, 1, true))

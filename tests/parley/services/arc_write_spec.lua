@@ -101,7 +101,7 @@ describe("Arc new-comment validation", function()
 
   it("preserves the composer draft when Arcanum cannot resolve an inline entry", function()
     local transport = require("parley.providers.arcanum.transport")
-    local original = transport.http_start
+    local original = transport.request_start
     local p = require("parley.providers.arcanum.provider").new({
       _auth = {
         read_token = function()
@@ -113,11 +113,13 @@ describe("Arc new-comment validation", function()
     providers._entries[buf].provider = p
     local snapshot = reviews.get(buf)
     snapshot.review.write_context.diff_id = 42
+    snapshot.review.base_sha = "base"
+    snapshot.review.review_sha = "abc"
     reviews._seed(buf, snapshot, "arc/write")
     local instance = open()
     local submitted_compose = compose
     composer.patch(buf, { draft = "preserve me" })
-    transport.http_start = function(_, method, _, _, callback)
+    transport.request_start = function(_, method, _, _, callback)
       assert.equals("GET", method, "Missing entries must not create general comments")
       callback({ ok = true, data = {} })
       return { cancel = function() end }
@@ -131,7 +133,7 @@ describe("Arc new-comment validation", function()
       assert.equals("idle", composer.get(buf).submit_state)
       assert.matches("no inline entry", notices[#notices])
     end)
-    transport.http_start = original
+    transport.request_start = original
     assert.is_true(ok, tostring(err))
   end)
 
@@ -293,5 +295,34 @@ describe("Arc new-comment validation", function()
     end))
     assert.is_nil(compose)
     assert.is_truthy(notices[1]:find("context changed", 1, true))
+  end)
+  it("sends prepared remote coordinates while displaying the local selection", function()
+    providers._entries[buf].provider.validate_comment_target = function()
+      return { ok = true, anchor = { start_line = 7 } }
+    end
+    providers._entries[buf].provider.begin_post_top_level_comment = function(_, _, _, anchor)
+      assert.equals(7, anchor.start_line)
+      sent = sent + 1
+      return { cancel = function() end }
+    end
+    local instance = open()
+    compose.on_submit(instance, "comment")
+    assert.is_true(vim.wait(500, function()
+      return sent == 1
+    end))
+    local snapshot = reviews.get(buf)
+    local pending = snapshot.all_discussions[1]
+    assert.equals(7, pending.line)
+    assert.equals(1, snapshot.mappings[pending.id].local_line)
+  end)
+
+  it("rejects a changed diff while the source head stays the same", function()
+    local instance = open()
+    reviews._reviews[reviews.key_for_bufnr(buf)].review.snapshot_id = "next"
+    compose.on_submit(instance, "comment")
+    assert.is_true(vim.wait(500, function()
+      return #notices > 0
+    end))
+    assert.equals(0, sent)
   end)
 end)

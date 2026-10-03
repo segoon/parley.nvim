@@ -12,7 +12,7 @@ integration changes. See [README](README.md) for setup, the
 | Workflow | Behavior | Limits |
 |---|---|---|
 | Discovery | Detect Arc repositories and find an exact remote-branch match across paginated prefix-search results | No remote branch means inactive; malformed or nonprogressing pages fail |
-| Authentication | Read supported token sources and verify the API viewer before restoring cached ownership | The local Arc login is diagnostic only |
+| Authentication | Read supported token sources and bind the Arc login before restoring cached ownership | The selected token must belong to that Arc user |
 | Discussions | Preserve nested, orphaned, and cyclic replies, reactions, issue states, and explicit anchor metadata | Unavailable locations remain readable without fabricated positions |
 | Inline comments | Create new-side line and range comments using the loaded V2 diff | Requires a clean file, matching HEAD, and an entry in the loaded diff |
 | Comment actions | Reply, edit, delete, react, resolve, reopen, and open provider-returned thread or comment links | Only complete open/resolved root issues can transition; missing exact links are reported |
@@ -27,11 +27,17 @@ file named by `ARC_TOKEN_PATH`, then `~/.arc/token`. Empty environment values ar
 skipped. An explicitly selected unreadable or empty token file fails instead of
 silently selecting another account.
 
-Review loading verifies `/v2/users/me?fields=name` before publishing cache
-identity. Only the verified API login determines comment ownership. Credential or
-host changes reject obsolete responses and require a refreshed session. Cache
-identity includes provider, host, repository, and an account fingerprint; tokens
-are neither stored in cache keys nor printed in diagnostics.
+Review loading uses `user_login` from `arc info --json` for ownership. The selected
+token must belong to that user; no `/v2/users/me` call is made. Missing login blocks
+session preparation. Credential, host, or login changes reject obsolete responses
+and require a refreshed session. Cache identity includes provider, host, repository,
+login, and a credential fingerprint; tokens are neither stored in cache keys nor
+printed in diagnostics. Identity version 5 invalidates earlier API-viewer caches.
+
+`ya tool arcanum` is required. Every CLI process receives the provider-selected
+credential through `ARC_TOKEN` and the explicit HTTPS API URL. Inherited
+`ARCANUM_CLI_REVIEW_SYSTEM` is cleared so ordinary comments do not acquire a review
+system implicitly. Comment text is passed through stdin, not a shell.
 
 The configured host must be a hostname or bracketed IPv6 address with an optional
 port. Schemes, paths, userinfo, queries, fragments, and whitespace are rejected;
@@ -39,18 +45,46 @@ all requests use HTTPS.
 
 ## API contracts
 
-| Operation | Contract |
+| Operation | Execution |
 |---|---|
-| Search | `POST /v1/pull-requests/cursor`, followed by exact branch comparison |
-| Active diff | `GET /v1/pull-requests/{id}/active-diff?fields=id,commit_ids(head)` |
-| Discussions | `GET /v1/public/review-requests/{id}/comments` |
-| Inline entry | `GET /v2/public/diff/{diff_id}/changelist` |
-| Inline creation | `POST /v2/public/diff/{diff_id}/comment` with the V2 entry ID |
-| Issue transition | `PATCH /v1/public/review-requests-comments/{root_id}` |
-| Reaction state | `PUT` or `DELETE /v1/plugin/pull-request/{pr_id}/comment/{comment_id}/reaction/{code}` |
-| Review data | `GET /v1/plugin/pull-request/{pr_id}/review` |
-| Approval | `PUT .../review/ship?sticky=false|true`; withdrawal uses `DELETE` |
-| Merge block | `PUT .../review/block-merge`; withdrawal uses `DELETE` |
+| Search | CLI `pr list`, projected cursor pages, then `pr get` for the exact match |
+| Active diff | CLI `pr active-diff --fields id,commit_ids(base,head,merge)` |
+| Discussions | HTTP `GET /v1/public/review-requests/{id}/comments` to retain full V1 anchors |
+| Inline entry | CLI `pr changelist --diff-id … --diff-mode flat_path --ignorews=false --fields path,entry_id` |
+| Inline creation | CLI `comment post-diff` with the loaded V2 entry ID |
+| Reply/edit/delete | PR-scoped CLI `comment reply/edit/delete`, preserving signed IDs |
+| Issue transition | CLI `comment edit --issue-status open|resolved` on the existing root |
+| Reactions | PR-scoped CLI `comment add-reaction/remove-reaction`; HTTP removal for codes the CLI rejects |
+| Review data | HTTP `GET /v1/plugin/pull-request/{pr_id}/review` |
+| Approval | HTTP `PUT .../review/ship?sticky=false|true`; withdrawal uses `DELETE` |
+| Merge block | HTTP `PUT .../review/block-merge`; withdrawal uses `DELETE` |
+
+PR-scoped V2 comment operations support general and historical inline comments,
+despite the CLI help's narrower “PR-level” wording. Replies inherit the original
+parent anchor; existing writes do not resolve a replacement active diff.
+The provider retains its internal method/path request descriptions to select a
+CLI command or a required HTTP operation before execution. Failed CLI mutations
+never fall back to a second HTTP mutation.
+
+The active diff's `head` identifies the pushed source checkout, `base` is the
+immutable destination revision, and `merge` is the new side shown in the review.
+Sync checks use `head`. Changed-line validation uses `base` → `merge`, never the
+moving destination branch. Clean source selections are translated to `merge`
+coordinates; changed, deleted, or noncontiguous ranges are rejected. Selections
+already displayed in the merge revision are not translated again. Missing
+revision metadata/content blocks creation without hiding readable discussions.
+Current new-side anchors map from `merge`; old-side anchors retain their explicit
+revision and path. Diffview identity mappings require the displayed revision to
+match the anchor; a local/source buffer is not the merge side when they differ.
+
+Draft validation and pending transactions use the PR, diff identity, and immutable
+revisions. A new diff with the same source head still invalidates a composer.
+Pending comments survive refresh only within that snapshot; late completions
+cannot alter a replacement review. Optimistic display coordinates stay separate
+from remote anchors, and a confirmed root promotes its exact URL to the thread.
+A successful callback without usable comment data clears the temporary entry and
+refreshes without restoring a retryable draft. Arcanum cache identity version 5
+also prevents restoring snapshots from the earlier account and revision models.
 
 Inline creation deliberately uses the loaded diff rather than repeating the
 active-diff lookup on submission. Entry lookup failure never falls back to a
@@ -81,19 +115,43 @@ but cannot transition.
 
 ## Transport and write safety
 
-All HTTP work is asynchronous. Requests sharing a host and token use one
+All CLI and HTTP work is asynchronous. Requests sharing a host and token use one
 process-local paced queue. A request has one deadline covering queueing, attempts,
-and retry waits; 429 responses apply a shared cooldown using `Retry-After` when
-available. Other Neovim processes and clients are not coordinated.
+and retry waits, including CLI startup. A 429 applies a shared cooldown using
+configured backoff; retained HTTP reads can also use `Retry-After` when available. Other Neovim processes and clients are not coordinated.
 
-Comment and reply creation use one idempotency key per operation. Automatic create
-retries remain disabled unless `providers.arcanum.idempotent_write_retries` is
-enabled after deployment support has been confirmed. Edits, deletions, issue
-updates, reactions, and review actions are not retried automatically.
+Default comment and reply creation uses the CLI without automatic retries.
+`providers.arcanum.idempotent_write_retries` selects keyed HTTP creation before
+sending, with one key per submission reused across retries. Enable it only after
+deployment support has been confirmed. Edits, deletions, issue updates, reactions,
+and review actions are never retried automatically.
+
+Sparse successful write responses are hydrated by an explicit comment read.
+Once acknowledged, failed or cancelled hydration completes successfully without
+comment data and the UI refreshes; it never restores a retryable creation draft.
+CLI decoding cannot recover malformed server fields already normalized by the CLI;
+existing domain validation still applies to the CLI output.
 
 Cancellation cannot undo a request already accepted by the server. Uncertain
 writes preserve the draft and instruct the user to inspect the review before
 retrying. Session changes invalidate in-flight results.
+
+## CLI reuse decision
+
+The provider uses [`ya tool arcanum`](https://a.yandex-team.ru/arcadia/arcanum/ai-utils/arcanum-go-cli)
+where the command preserves its contracts. V1 discussion reads retain richer
+historical anchor information than the CLI's V2 representation. Review status and
+all five verdicts retain HTTP because equivalent CLI commands are unavailable.
+Canonical comment URLs are preserved when supplied by retained reads; neither
+inspected V1 nor V2 comment DTO declares them, so their absence is not a proven
+CLI regression.
+
+[`ya tool gena-arcanum-cli`](https://a.yandex-team.ru/arcadia/ai/tools/infra-clients/arcanum-client)
+is a standalone executable and preserves raw response fields. It offers ship and
+sticky ship, but not the full verdict set, reaction commands, or a CLI API-host
+override. Its `request-for-changes` is a different action from merge blocking.
+Adding it would introduce another adapter without removing the retained HTTP
+implementation, so it is not a dependency.
 
 ## Validation boundary
 

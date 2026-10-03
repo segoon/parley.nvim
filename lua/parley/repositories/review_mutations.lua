@@ -1,6 +1,7 @@
 --- Optimistic comment transactions over shared review snapshots.
 local context_repository = require("parley.repositories.context")
 local model = require("parley.model")
+local provider = require("parley.provider")
 
 local next_pending_id = 0
 
@@ -56,7 +57,7 @@ return function(M, composite, notify_subscribers, build_summary)
   --- @param key string
   --- @param shared table
   --- @param mapping_change? { old_id?: string, new_id?: string, remove_id?: string,
-  ---   source_bufnr?: integer, file?: string, anchor?: parley.Anchor }
+  ---   source_bufnr?: integer, file?: string, anchor?: parley.Anchor, remote_anchor?: parley.Anchor }
   local function publish(key, shared, mapping_change)
     M._reviews[key] = shared
     for bufnr in pairs(M._key_bufnrs[key] or {}) do
@@ -81,15 +82,21 @@ return function(M, composite, notify_subscribers, build_summary)
         elseif new_id and mapping_change.anchor then
           local ctx = context_repository.get(bufnr)
           local source_ctx = context_repository.get(mapping_change.source_bufnr)
-          local same_checkout = ctx
+          local same_checkout = not M._identity_bufnrs[bufnr]
+            and ctx
             and source_ctx
+            and ctx.revision == source_ctx.revision
             and vim.deep_equal(ctx.vcs_info, source_ctx.vcs_info)
             and ctx.rel_path == mapping_change.file
-          local identity_mapped = M._identity_bufnrs[bufnr] == "new" and ctx and ctx.rel_path == mapping_change.file
+          local identity_mapped = M._identity_bufnrs[bufnr] == "new"
+            and ctx
+            and ctx.rel_path == mapping_change.file
+            and (not ctx.revision or ctx.revision == (shared.review.review_sha or shared.review.head_sha))
           if same_checkout or identity_mapped then
+            local position = identity_mapped and mapping_change.remote_anchor or mapping_change.anchor
             local mapping = {
-              local_line = mapping_change.anchor.start_line,
-              local_end_line = mapping_change.anchor.end_line,
+              local_line = position.start_line,
+              local_end_line = position.end_line,
               confidence = 1.0,
               stale = false,
             }
@@ -104,6 +111,7 @@ return function(M, composite, notify_subscribers, build_summary)
   end
 
   --- @class parley.PendingCommentToken
+  --- @field identity table
   --- @field key string
   --- @field kind 'new'|'reply'
   --- @field pending_id string
@@ -111,7 +119,7 @@ return function(M, composite, notify_subscribers, build_summary)
 
   --- @param bufnr integer
   --- @param opts { kind: 'new'|'reply', body: parley.Body, file?: string,
-  ---   anchor?: parley.Anchor, discussion_id?: string, parent_comment_id?: string }
+  ---   anchor?: parley.Anchor, remote_anchor?: parley.Anchor, discussion_id?: string, parent_comment_id?: string }
   --- @return parley.PendingCommentToken|nil, string|nil
   function R.stage_comment(bufnr, opts)
     local key = M._bufnr_key[bufnr]
@@ -144,14 +152,16 @@ return function(M, composite, notify_subscribers, build_summary)
         return nil, "new optimistic comment target is incomplete"
       end
       discussion_id = pending_id
+      local remote = opts.remote_anchor or opts.anchor
       shared.all_discussions[#shared.all_discussions + 1] = model.new_discussion({
         id = discussion_id,
         anchor = {
           kind = "inline",
           side = "new",
           path = opts.file,
-          line = opts.anchor.start_line,
-          end_line = opts.anchor.end_line,
+          line = remote.start_line,
+          end_line = remote.end_line,
+          revision = shared.review.review_sha or shared.review.head_sha,
         },
         issue_state = "unknown",
         comments = { comment },
@@ -160,6 +170,7 @@ return function(M, composite, notify_subscribers, build_summary)
         source_bufnr = bufnr,
         file = opts.file,
         anchor = opts.anchor,
+        remote_anchor = remote,
         new_id = discussion_id,
       }
     else
@@ -175,6 +186,7 @@ return function(M, composite, notify_subscribers, build_summary)
     publish(key, shared, mapping_change)
     return {
       key = key,
+      identity = provider.review_identity(current.review),
       kind = opts.kind,
       pending_id = pending_id,
       discussion_id = discussion_id,
@@ -189,7 +201,7 @@ return function(M, composite, notify_subscribers, build_summary)
       return nil, "provider returned no created comment"
     end
     local current = M._reviews[token.key]
-    if not current then
+    if not current or not vim.deep_equal(token.identity, provider.review_identity(current.review)) then
       return nil, "review snapshot is no longer available"
     end
     local shared = vim.deepcopy(current)
@@ -222,6 +234,7 @@ return function(M, composite, notify_subscribers, build_summary)
     if token.kind == "new" then
       discussion_id = confirmed.id
       discussion.id = discussion_id
+      discussion.url = confirmed.url
       mapping_change = { old_id = token.discussion_id, new_id = discussion_id }
     end
     shared.summary = build_summary(shared.all_discussions)
@@ -233,7 +246,7 @@ return function(M, composite, notify_subscribers, build_summary)
   --- @return boolean
   function R.rollback_comment(token)
     local current = M._reviews[token.key]
-    if not current then
+    if not current or not vim.deep_equal(token.identity, provider.review_identity(current.review)) then
       return false
     end
     local shared = vim.deepcopy(current)

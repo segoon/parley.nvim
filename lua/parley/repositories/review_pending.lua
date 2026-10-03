@@ -6,6 +6,9 @@ local M = {}
 --- @param incoming table
 --- @param build_summary fun(discussions: parley.Discussion[]): table
 function M.preserve(current, incoming, build_summary)
+  if not require("parley.provider").same_review(current.review, incoming.review) then
+    return
+  end
   local incoming_by_id = {}
   for _, discussion in ipairs(incoming.all_discussions or {}) do
     incoming_by_id[discussion.id] = discussion

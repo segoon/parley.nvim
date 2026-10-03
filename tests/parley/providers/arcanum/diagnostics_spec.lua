@@ -18,7 +18,7 @@ describe("Arcanum local diagnostics", function()
       return "SECRET"
     end
     local entries = diagnostics.check({ vcs_info = { branch = "remote" }, opts = { login = "alice" } })
-    assert.same({ "arc", "curl" }, calls)
+    assert.same({ "arc", "ya", "curl" }, calls)
     for _, entry in ipairs(entries) do
       assert.equals("ok", entry.level)
       assert.is_nil(entry.message:find("SECRET", 1, true))
@@ -32,11 +32,12 @@ describe("Arcanum local diagnostics", function()
       return nil
     end
     local entries = diagnostics.check({ vcs_info = {}, opts = {} })
-    assert.equals(6, #entries)
+    assert.equals(7, #entries)
     assert.equals("ok", entries[1].level)
     assert.equals("error", entries[2].level)
     assert.equals("error", entries[3].level)
-    for i = 4, 6 do
+    assert.equals("error", entries[4].level)
+    for i = 5, 7 do
       assert.equals("warn", entries[i].level)
     end
   end)

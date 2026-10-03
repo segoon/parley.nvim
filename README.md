@@ -39,7 +39,7 @@ Required:
 - Neovim `>= 0.10`
 - [`nvim-lua/plenary.nvim`](https://github.com/nvim-lua/plenary.nvim)
 
-GitHub requires `git` and `gh`. Arcanum requires `arc`, `curl`, and HTTPS access
+GitHub requires `git` and `gh`. Arcanum requires `arc`, `ya tool arcanum`, `curl`, and HTTPS access
 to its configured API host (default `arcanum.yandex.net`).
 
 Optional:
@@ -101,12 +101,13 @@ independent positions. If revision content is unavailable, Parley shows stale
 approximations and reports the reason.
 
 New comments require a clean file with no unsaved edits and a local HEAD matching
-the review revision. These checks run again on submission and preserve the draft
+the pushed source revision. These checks run again on submission and preserve the draft
 on failure. Replies and new discussions appear immediately with a sending marker;
 the composer closes while the request runs. Success replaces the temporary entry
 with provider data and refreshes quietly in the background. A definite failure or
 cancellation removes it and restores the draft. Arcanum creates comments only on
-the loaded diff's new side.
+the loaded diff's new side, translating source lines into the synthetic merge
+revision when necessary. Changed or noncontiguous ranges cannot be submitted.
 
 Use `:Parley discussion list` to browse every thread without Telescope. Arcanum
 preserves nested replies and distinct issue states. General, whole-file, old-side,
@@ -136,8 +137,9 @@ remain authoritative; unavailable review data disables these actions without
 hiding discussions.
 
 Arcanum credentials are read from `ARCANUM_TOKEN`, `ARC_OAUTH_TOKEN`,
-`ARC_TOKEN_PATH`, or `~/.arc/token`, in that order. Review loading verifies the API
-account before restoring cached ownership; the local Arc login is diagnostic only.
+`ARC_TOKEN_PATH`, or `~/.arc/token`, in that order. Ownership uses `user_login`
+from `arc info --json`; the selected token must belong to that Arc user. Token,
+host, or login changes invalidate the session and cached ownership.
 Discovery requires an exact remote-branch match. See `:help parley-provider-arcanum`
 for permissions, configuration, transport behavior, and detailed limitations.
 
@@ -183,7 +185,7 @@ Whichever way you open it, when a diffview diff buffer showing the PR's head rev
 
 Verified against both [upstream diffview.nvim](https://github.com/sindrets/diffview.nvim) and the [`mistricky/diffview-plus.nvim`](https://github.com/mistricky/diffview-plus.nvim) fork; not verified against other forks. One difference: file-panel badges refresh live on file selection and staging under the fork (which fires extra `User` events upstream doesn't), but only after layout changes under plain upstream diffview.nvim.
 
-The head/"new" side is always supported. The base/"old" side renders read-only when a comment is actually anchored there — currently only Arcanum ever anchors comments to the old side (GitHub's provider mapping doesn't capture that data); creating a *new* comment on the old side isn't supported by either provider's write path. Disable the integration entirely with:
+The review's "new" side is supported. For Arcanum this is the synthetic merge revision, which can differ from the source checkout. The base/"old" side renders read-only when a comment is actually anchored there — currently only Arcanum ever anchors comments to the old side (GitHub's provider mapping doesn't capture that data); creating a *new* comment on the old side isn't supported by either provider's write path. Disable the integration entirely with:
 
 ```lua
 require("parley").setup({
@@ -265,11 +267,14 @@ Use `:Parley refresh` for an explicit progress-enabled refresh and error reporti
 Repeated `setup()` replaces the polling schedule; editor shutdown stops it.
 
 Requests to GitHub are made through the standard `gh` CLI.
-Arcanum uses asynchronous HTTPS. Its default request budget is 10 seconds,
+Arcanum uses `ya tool arcanum` asynchronously for discovery, diff reads, and
+comment actions. Full discussion reads and review verdicts retain HTTPS. Both
+transports share a default request budget of 10 seconds,
 including queueing and retry waits, with request starts spaced one second apart.
 Comment and reply retries are opt-in via
 `providers.arcanum.idempotent_write_retries = true`; enable this only after
-confirming the deployed server supports idempotency keys. After an uncertain
+confirming the deployed server supports idempotency keys; this selects keyed
+HTTP creation instead of CLI creation. After an uncertain
 write failure or cancellation, check the review before resubmitting your draft.
 See `:help parley-providers` for details.
 

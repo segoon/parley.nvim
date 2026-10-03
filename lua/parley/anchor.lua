@@ -197,8 +197,10 @@ function M.map_discussions(info, revision, discussions)
   local by_file, mappings = {}, {}
   for _, disc in ipairs(discussions) do
     if semantics.projectable(disc) then
-      by_file[disc.file] = by_file[disc.file] or {}
-      table.insert(by_file[disc.file], disc)
+      local source = semantics.anchor(disc).revision or revision
+      local key = source .. "\0" .. disc.file
+      by_file[key] = by_file[key] or { revision = source, file = disc.file, discussions = {} }
+      table.insert(by_file[key].discussions, disc)
     else
       local a = semantics.anchor(disc)
       mappings[disc.id] = {
@@ -209,13 +211,13 @@ function M.map_discussions(info, revision, discussions)
       }
     end
   end
-  for file, entries in pairs(by_file) do
-    local ok, diff, err = pcall(M._diff, info, revision, file)
+  for _, group in pairs(by_file) do
+    local ok, diff, err = pcall(M._diff, info, group.revision, group.file)
     if not ok then
       err, diff = tostring(diff), nil
     end
     local hunks = diff and M.parse_hunks(diff) or {}
-    for _, disc in ipairs(entries) do
+    for _, disc in ipairs(group.discussions) do
       local mapping = diff and M.remap_line(disc.line, hunks) or approximate(disc.line, err or "mapping unavailable")
       if not diff and disc.anchor then
         mapping = { confidence = 0, stale = true, unavailable_reason = err or "Mapping unavailable" }

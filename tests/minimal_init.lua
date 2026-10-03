@@ -21,3 +21,12 @@ vim.g.loaded_node_provider = 0
 vim.g.loaded_python3_provider = 0
 vim.g.loaded_perl_provider = 0
 vim.g.loaded_ruby_provider = 0
+
+-- Provider tests must inject subprocess responses; never contact Arcanum by accident.
+local system = vim.system
+vim.system = function(argv, opts, callback)
+  if argv[1] == "ya" and argv[2] == "tool" and argv[3] == "arcanum" then
+    error("Unmocked ya tool arcanum invocation in tests")
+  end
+  return system(argv, opts, callback)
+end

@@ -70,7 +70,7 @@ end
 
 -- Provider factory
 
---- Build a mock provider with an injectable http_run sequence.
+--- Build a mock provider with an injectable request_run sequence.
 --- responses: list of { method, path, response } tuples (in order).
 --- @param responses table[]
 --- @return parley.arcanum.Provider, table  provider, calls_log
@@ -78,11 +78,11 @@ local function make_provider(responses)
   local calls = {}
   local idx = 0
 
-  local mock_http_run = function(_self, method, path, body)
+  local mock_request_run = function(_self, method, path, body)
     idx = idx + 1
     table.insert(calls, { method = method, path = path, body = body })
     local r = responses[idx]
-    assert(r, string.format("mock http_run: unexpected call #%d (method=%s path=%s)", idx, method, path))
+    assert(r, string.format("mock request_run: unexpected call #%d (method=%s path=%s)", idx, method, path))
     if r.error then
       error(r.error, 0)
     end
@@ -110,21 +110,26 @@ local function make_provider(responses)
 
   dofile("tests/support/arcanum_session.lua")(p)
 
-  -- Override transport.http_run on the provider
-  transport.http_run = mock_http_run
+  -- Override transport.request_run on the provider
+  transport.request_run = mock_request_run
+  transport.request_start = function(self, method, path, body, callback)
+    local ok, data = pcall(mock_request_run, self, method, path, body)
+    callback(ok and { ok = true, data = data } or { ok = false, err = data })
+    return { cancel = function() end }
+  end
 
   return p, calls
 end
 
--- Save/restore transport.http_run
-local original_http_run
+-- Save/restore transport.request_run
+local original_request_run, original_request_start
 
 local function save_transport()
-  original_http_run = transport.http_run
+  original_request_run, original_request_start = transport.request_run, transport.request_start
 end
 
 local function restore_transport()
-  transport.http_run = original_http_run
+  transport.request_run, transport.request_start = original_request_run, original_request_start
 end
 
 -- Suite: auth
@@ -181,10 +186,10 @@ async_tests.describe("parley.providers.arcanum.provider — detect_pr", function
   async_tests.before_each(save_transport)
   async_tests.after_each(restore_transport)
 
-  local function minimal_search_result(pr_id)
+  local function minimal_search_result(pr_id, branch)
     return {
       pull_requests = {
-        { id = pr_id },
+        { id = pr_id, vcs = { from_branch = branch or "users/alice/feature" } },
       },
       has_next = false,
     }
@@ -226,12 +231,12 @@ async_tests.describe("parley.providers.arcanum.provider — detect_pr", function
 
     assert.equals(42, result.write_context.pr_id)
     assert.equals(101, result.write_context.diff_id)
-    assert.equals("101", result.write_context.diff_set_xid)
+    assert.equals("101", result.snapshot_id)
   end)
 
   async_tests.it("returns nil when branch does not match any PR", function()
     local p, _ = make_provider({
-      { response = minimal_search_result(1) },
+      { response = minimal_search_result(1, "users/bob/other") },
       {
         response = {
           id = 1,
@@ -271,7 +276,7 @@ async_tests.describe("parley.providers.arcanum.provider — detect_pr", function
     p:detect_pr("/arc", "users/alice/feature")
 
     assert.equals("POST", calls[1].method)
-    assert.equals("/v1/pull-requests/cursor", calls[1].path)
+    assert.equals("/v1/pull-requests/cursor?fields=id,vcs(from_branch)", calls[1].path)
   end)
 
   async_tests.it("searches using the provided remote branch id", function()
@@ -292,9 +297,9 @@ async_tests.describe("parley.providers.arcanum.provider — detect_pr", function
     }, calls[1].body)
   end)
 
-  async_tests.it("fetches full PR details before matching by branch", function()
+  async_tests.it("fetches full PR details only after matching by branch", function()
     local p, calls = make_provider({
-      { response = minimal_search_result(13323715) },
+      { response = minimal_search_result(13323715, "users/segoon/feature/chaotic-const") },
       { response = pr_search_result(13323715, "users/segoon/feature/chaotic-const").pull_requests[1] },
       { response = active_diff(101, "ARC:DEADBEEF") },
     })

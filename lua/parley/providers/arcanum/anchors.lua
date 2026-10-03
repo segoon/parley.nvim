@@ -64,6 +64,9 @@ function M.map(raw, review)
   end
   local context = review and review.write_context or {}
   local target = xid and (xid:match("^%d+%-(%d+)$") or xid:match("^(%d+)$"))
+  if side == "new" and context.diff_id and tonumber(target) == context.diff_id then
+    result.revision = review.review_sha or review.head_sha
+  end
   -- Old-side anchors are readable (e.g. for diffview's old-side diff
   -- buffer) once they pass the same historical/stale-diff check new-side
   -- anchors already get; they still don't imply write eligibility, which
@@ -77,7 +80,7 @@ function M.map(raw, review)
     result.unavailable_reason = "File absent from the old side"
   elseif not target or not context.diff_id or tonumber(target) ~= context.diff_id then
     result.unavailable_reason = "Historical or unverified diff"
-  elseif side == "new" and (not review or not text(review.head_sha)) then
+  elseif side == "new" and not text(result.revision) then
     result.unavailable_reason = "Revision unavailable"
   elseif side == "old" and not text(before.commit_id) then
     result.unavailable_reason = "Revision unavailable"

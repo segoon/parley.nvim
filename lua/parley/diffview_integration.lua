@@ -97,22 +97,22 @@ function M._derive_root(file)
   return nil
 end
 
---- True iff `file.rev` represents the review's head revision (or the local
---- working tree, which is equivalent for a still-open PR).
+--- Whether the buffer uses the new-side review coordinates.
 --- @param file table vcs.File
 --- @param head_sha string
+--- @param source_sha? string Source checkout revision, when different from the review new side.
 --- @return boolean
-function M._is_head_side(file, head_sha)
+function M._is_head_side(file, head_sha, source_sha)
   local rev = file.rev
   if not rev then
     return false
   end
   if rev.type == "LOCAL" then
-    return true
+    return source_sha == nil or source_sha == head_sha
   end
   local ok, rev_lib = pcall(require, "diffview.vcs.rev")
   if ok and rev_lib.RevType and rev.type == rev_lib.RevType.LOCAL then
-    return true
+    return source_sha == nil or source_sha == head_sha
   end
   return type(head_sha) == "string" and head_sha ~= "" and rev.commit == head_sha
 end
@@ -225,7 +225,13 @@ function M._on_diff_buf(bufnr)
   end
 
   local side
-  if M._is_head_side(file, host_snapshot.review.head_sha) then
+  if
+    M._is_head_side(
+      file,
+      host_snapshot.review.review_sha or host_snapshot.review.head_sha,
+      host_snapshot.review.head_sha
+    )
+  then
     side = "new"
   elseif M._matches_old_side(file, host_snapshot.all_discussions) then
     side = "old"
@@ -242,6 +248,9 @@ function M._on_diff_buf(bufnr)
     kind = "regular",
     bufnr = bufnr,
     path = nil,
+    host_bufnr = host_bufnr,
+    revision = side == "new" and (host_snapshot.review.review_sha or host_snapshot.review.head_sha) or file.rev.commit,
+    review_side = side,
     vcs_info = host_ctx.vcs_info,
     status = "ready",
     rel_path = file.path,
@@ -268,7 +277,6 @@ function M._on_diff_buf(bufnr)
 end
 
 -- ---------------------------------------------------------------------------
--- File panel badges
 -- ---------------------------------------------------------------------------
 
 M._panel_ns = nil

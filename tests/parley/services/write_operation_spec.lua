@@ -361,6 +361,43 @@ for _, mode in ipairs({ "submit", "action" }) do
         assert.equals("success", progress.list()[1].state)
       end)
 
+      it("clears acknowledged pending comments when hydration is unavailable without restoring a draft", function()
+        for _, result in ipairs({ { ok = true }, { ok = true, comment = { id = "server" } } }) do
+          local removed, restored, sent = 0, 0, 0
+          ops.run_submit(
+            1,
+            instance,
+            function(callback)
+              sent = sent + 1
+              callback(result)
+              return { cancel = function() end }
+            end,
+            "submitting",
+            texts,
+            {
+              optimistic = {
+                stage = function()
+                  return { discussion_id = "pending" }
+                end,
+                confirm = function()
+                  return nil, "snapshot unavailable"
+                end,
+                rollback = function()
+                  removed = removed + 1
+                end,
+                restore = function()
+                  restored = restored + 1
+                end,
+              },
+            }
+          )
+          assert.equals(1, removed)
+          assert.equals(0, restored)
+          assert.equals(1, sent)
+          assert.is_nil(hooks._operations[1])
+        end
+      end)
+
       it("rolls back an optimistic failure and restores the composer", function()
         local callback, restored, rolled_back = nil, 0, 0
         assert.is_true(ops.run_submit(

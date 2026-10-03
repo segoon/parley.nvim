@@ -1,5 +1,6 @@
 local transport = require("parley.providers.arcanum.transport")
 local http = require("parley.http")
+local cli = require("parley.providers.arcanum.cli")
 local provider = require("parley.providers.arcanum.provider")
 local clock_factory = dofile("tests/support/clock.lua")
 
@@ -9,6 +10,7 @@ describe("Arcanum reliable transport", function()
     scheduler = require("parley.providers.arcanum.scheduler")
     saved = {
       start = http.start,
+      system = cli._system,
       now = scheduler._now,
       defer = scheduler._defer,
       key = transport._key,
@@ -34,6 +36,15 @@ describe("Arcanum reliable transport", function()
       },
     })
     dofile("tests/support/arcanum_session.lua")(p)
+    cli._system = function(argv, opts, callback)
+      local call = { argv = argv, opts = opts, callback = callback, at = clock.time, cancelled = false }
+      calls[#calls + 1] = call
+      return {
+        kill = function()
+          call.cancelled = true
+        end,
+      }
+    end
     http.start = function(opts, callback)
       local call = { opts = opts, callback = callback, at = clock.time, cancelled = false }
       calls[#calls + 1] = call
@@ -47,6 +58,7 @@ describe("Arcanum reliable transport", function()
   end)
   after_each(function()
     scheduler.reset()
+    cli._system = saved.system
     http.start, scheduler._now, scheduler._defer = saved.start, saved.now, saved.defer
     transport._key, transport._wall_time = saved.key, saved.wall
   end)
@@ -55,7 +67,7 @@ describe("Arcanum reliable transport", function()
   --- @param policy? string
   --- @return table
   local function start(method, policy)
-    return transport.http_start(p, method or "GET", "/endpoint", { content = "hello" }, function(r)
+    return transport.request_start(p, method or "GET", "/endpoint", { content = "hello" }, function(r)
       results[#results + 1] = r
     end, { retry_policy = policy })
   end
@@ -64,6 +76,21 @@ describe("Arcanum reliable transport", function()
   --- @param headers? table
   --- @param body? string
   local function respond(index, status, headers, body)
+    if calls[index].argv then
+      local decoded = vim.json.decode(body or '{"data":{"id":1}}')
+      calls[index].callback({
+        code = status >= 400 and 1 or 0,
+        stdout = vim.json.encode(status >= 400 and {
+          error = {
+            http_status = status,
+            code = status == 429 and "RATE_LIMITED" or "REMOTE_ERROR",
+            message = "private server detail",
+          },
+        } or decoded.data),
+        stderr = "",
+      })
+      return
+    end
     calls[index].callback({
       ok = true,
       response = {
@@ -75,6 +102,43 @@ describe("Arcanum reliable transport", function()
     })
   end
 
+  it("uses CLI creation by default and keyed HTTP only when retries are enabled", function()
+    local review = { pr = { id = "12" } }
+    p:begin_reply(review, {}, { id = "-123" }, { text = "reply" }, function() end)
+    assert.equals("reply", calls[1].argv[8])
+    assert.equals("reply", calls[1].opts.stdin)
+    respond(1, 503)
+    clock.advance(1000)
+    assert.equals(1, #calls)
+    p._config.idempotent_write_retries = true
+    p:begin_reply(review, {}, { id = "-123" }, { text = "reply" }, function() end)
+    assert.equals("unique-submit-key", calls[2].opts.headers["Idempotency-Key"])
+    respond(2, 503)
+    clock.advance(1000)
+    assert.equals(3, #calls)
+    assert.equals(calls[2].opts.headers["Idempotency-Key"], calls[3].opts.headers["Idempotency-Key"])
+  end)
+  it("paces CLI and retained HTTP together and cancels CLI without falling back", function()
+    transport.request_start(p, "GET", "/v1/pull-requests/12/active-diff?fields=id", nil, function(r)
+      results[#results + 1] = r
+    end)
+    start()
+    assert.equals(1, #calls)
+    assert.equals("active-diff", calls[1].argv[8])
+    clock.advance(1000)
+    assert.equals(2, #calls)
+    assert.equals("GET", calls[2].opts.method)
+    local handle = p:begin_reply({ pr = { id = "12" } }, {}, { id = "123" }, { text = "x" }, function(r)
+      results[#results + 1] = r
+    end)
+    clock.advance(1000)
+    handle.cancel()
+    assert.is_true(calls[3].cancelled)
+    assert.is_true(results[1].uncertain)
+    calls[3].callback({ code = 0, stdout = '{"id":123}', stderr = "" })
+    assert.equals(1, #results)
+    assert.equals(3, #calls)
+  end)
   it("does not retry reactions and explains permission and AI conflicts by HTTP status", function()
     for _, status in ipairs({ 401, 403, 409, 503 }) do
       p:begin_set_reaction({ pr = { id = "12" } }, "42", ":heart:", true, function(r)
@@ -151,6 +215,14 @@ describe("Arcanum reliable transport", function()
     assert.is_false(results[1].ok)
     assert.is_false(results[1].sent)
   end)
+  it("rejects an old completion after the Arc login changes with the same token", function()
+    start()
+    p._arc_login = "another-user"
+    p:prepare()
+    respond(1, 200)
+    assert.is_false(results[1].ok)
+    assert.is_nil(results[1].data)
+  end)
   it("rejects an old response even after the same provider is prepared for new credentials", function()
     start()
     p._auth.read_token = function()
@@ -182,7 +254,7 @@ describe("Arcanum reliable transport", function()
   end)
 
   it("isolates credentials and hosts and uses the slower shared interval", function()
-    p._verified_token = nil -- Exercise transport queue scoping independently of account verification.
+    p._session_token = nil -- Exercise transport queue scoping independently of account verification.
     start()
     p._config.request_interval_ms = 2000
     start()
@@ -302,7 +374,7 @@ describe("Arcanum reliable transport", function()
   it("wakes coroutine callers through the same paced transport", function()
     local outcome
     require("plenary.async").run(function()
-      outcome = transport.http_run(p, "GET", "/read")
+      outcome = transport.request_run(p, "GET", "/read")
     end)
     assert.is_nil(outcome)
     respond(1, 200)
@@ -365,7 +437,8 @@ describe("Arcanum reliable transport", function()
     assert.is_true(results[1].uncertain)
   end)
 
-  it("preserves uncertain cancellation through the inline provider", function()
+  it("preserves uncertain cancellation through keyed HTTP inline creation", function()
+    p._config.idempotent_write_retries = true
     local r = {
       head_sha = "head",
       write_context = { diff_id = 42, changelist_diff_id = 42, changelist = { ["a.lua"] = "eid:entry" } },
@@ -401,15 +474,14 @@ describe("Arcanum reliable transport", function()
     assert.equals(1, #calls)
   end)
 
-  it("completes replies with an uncertain failure when a successful response cannot be mapped", function()
+  it("acknowledges successful replies without restoring retryable drafts for incomplete responses", function()
     local result
     p:begin_reply({}, {}, { id = "-123" }, { text = "reply" }, function(r)
       result = r
     end)
     respond(1, 201, nil, '{"data":{"id":1,"user":{"name":"a"},"content":null}}')
-    assert.is_false(result.ok)
-    assert.is_true(result.uncertain)
-    assert.matches("Check the review", result.err)
+    assert.is_true(result.ok)
+    assert.is_nil(result.comment)
   end)
 
   it("accepts 204 and empty successful bodies", function()
