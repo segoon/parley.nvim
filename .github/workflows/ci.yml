@@ -15,11 +15,20 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Keep LuaRocks independent of Ubuntu's outdated package and LuaSec downloader.
+      - uses: leafo/gh-actions-lua@v13
+        with:
+          luaVersion: "5.1.5"
+
+      - uses: leafo/gh-actions-luarocks@v6
+        with:
+          luaRocksVersion: "3.13.0"
+
       - name: Install luacheck
         run: |
-          sudo apt-get update -q
-          sudo apt-get install -y luarocks
-          sudo luarocks install luacheck
+          luarocks --version
+          luarocks install luacheck 1.2.0-1
+          luacheck --version
 
       - name: Run luacheck
         run: luacheck lua/ plugin/ tests/
