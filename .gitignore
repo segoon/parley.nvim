@@ -23,3 +23,8 @@ deps/
 
 # Compiled / built docs
 doc/tags
+
+# added automatically by ya tool
+.aisuite/
+.codex/
+.agents/
