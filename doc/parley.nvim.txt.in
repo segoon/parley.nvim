@@ -50,7 +50,8 @@ GitHub provider: ~
 
 Arcanum provider: ~
   - arc (Arcadia VCS CLI)
-  - curl
+  - ya tool arcanum (Arcanum CLI)
+  - curl (retained discussion and review APIs)
   - HTTPS access to the configured API host (default arcanum.yandex.net)
 
 Optional: ~
@@ -477,7 +478,10 @@ Limitations: ~
 Arcanum                                              *parley-provider-arcanum*
 
 The built-in Arcanum provider supports Arc (Arcadia VCS) repositories via
-the Arcanum public and plugin REST APIs over HTTPS at arcanum.yandex.net.
+`ya tool arcanum` and retained REST APIs over HTTPS at arcanum.yandex.net.
+The CLI handles discovery, diff reads, and comment actions. Complete discussion
+reads and review verdicts retain HTTP to preserve their full contracts. The CLI
+is required; unavailable CLI operations do not silently retry through HTTP.
 
 The provider is activated automatically when the current buffer belongs to an
 Arc repository (detected via `arc root`).
@@ -499,13 +503,13 @@ To obtain a token: https://a.yandex-team.ru/oauth/token
 
 User login detection: ~
 
-The local Arc login comes from `arc info --json` and is diagnostic metadata only.
-Normal review loading verifies the OAuth account via `/v2/users/me?fields=name`
-before restoring cached discussions. Only this verified login determines comment
-ownership. A differing local Arc login does not override it. Failed verification
-fails review loading; Parley does not fall back to a guessed account or cached
-ownership. Credential changes invalidate the session and reject obsolete results.
-Direct provider mutations require a prepared session from review loading.
+Ownership uses `user_login` from `arc info --json`. The selected OAuth token must
+belong to that Arc user; Parley does not call the API to verify the account.
+Missing Arc login prevents session preparation. Credential, host, and Arc-login
+changes invalidate the session and reject obsolete results. Cache identity binds
+all three without storing the token. Direct provider mutations require a prepared
+session from review loading. The CLI receives the selected token as ARC_TOKEN and
+an explicit API URL; its default credential selection is not used.
 
 PR detection follows prefix-search pages using offset and has_next until an exact
 remote branch match is found. Cursor fields include vcs(from_branch); full PR
@@ -528,8 +532,9 @@ are rejected. A changed diff invalidates drafts even if the source head is equal
 Missing diff/revision metadata, unavailable file entries, and failed lookups
 prevent submission; inline comments never fall back to general PR comments.
 
-The draft remains available after failure or cancellation. If a creation response
-is incomplete, check the review before retrying: the comment may have been sent.
+The draft remains available after failure or cancellation before acknowledgement.
+Successful creation with sparse data is followed by a comment read. If that read
+fails, Parley refreshes without offering to create the same comment again.
 Cancellation after sending does not guarantee that the server discarded it.
 
 Discussion locations and issue states: ~
@@ -549,7 +554,7 @@ Provider options: ~
 The configured host must be a hostname or bracketed IPv6 address, optionally with
 a port. Schemes, userinfo, paths, queries, fragments, and whitespace are rejected.
 An explicit constructor host overrides providers.arcanum.host; the effective host
-is used consistently by verification, discovery, reads, writes, and cache identity.
+is used consistently by discovery, reads, writes, and cache identity.
 
 Arcanum-specific options live under `providers.arcanum` in the setup call: >lua
     require("parley").setup({
@@ -567,27 +572,29 @@ Arcanum-specific options live under `providers.arcanum` in the setup call: >lua
     })
 <
 
-Each transport request has one `timeout_ms` budget covering queueing, HTTP
-attempts, and retry waits. Inline entry lookup and comment creation are separate
-requests. Expiration completes the request and terminates any active curl process.
+Each transport request has one `timeout_ms` budget covering queueing, CLI startup
+or HTTP attempts, and retry waits. Inline entry lookup, comment creation, and
+acknowledgement hydration are separate requests. Expiration completes the request
+and terminates its active subprocess.
 
 Requests sharing a host and OAuth token share a queue in this Neovim process.
 The default spacing is one second; retries use the same queue. Separate Neovim
 processes and other clients are not coordinated. A shared queue retains the
 slowest interval used during this process. A 429 response delays that queue;
-`Retry-After` seconds or a GMT HTTP-date takes precedence over shorter backoff.
-Long server-directed waits remain subject to the request's deadline.
+HTTP responses can extend backoff through `Retry-After`; CLI responses use the
+configured backoff because the CLI does not expose that header. All waits remain
+subject to the request's deadline.
 
 Reads, including PR search, retry transient failures up to `retry_count` times.
-Comment creation and replies always send one idempotency key per submission,
-reused across automatic retries with the same body. Their automatic retries are
-disabled unless `idempotent_write_retries = true`. Enable this only after confirming
+CLI comment creation and replies are never retried automatically. Setting
+`idempotent_write_retries = true` selects HTTP creation before sending, with one
+idempotency key reused across retries of that submission. Enable this only after confirming
 that your deployed Arcanum server supports `Idempotency-Key`; local server source
 alone does not establish deployment support. Edits, deletions, and unclassified
 mutations are not retried automatically. Conflicts and authentication failures
 are not retried.
 
-Manual resubmission uses a new key. After an uncertain write failure or
+Manual resubmission through keyed HTTP uses a new key. After an uncertain write failure or
 cancellation, check the review before retrying. Drafts are preserved; terminating
 curl cannot roll back a change the server has already accepted.
 
@@ -738,6 +745,11 @@ callbacks, and turns startup failures or malformed pending handles/results into
 write failures while retaining drafts. Existing providers with valid hooks need
 no behavioral changes. Providers without these hooks retain coroutine fallbacks.
 
+Acknowledged comment writes may return nil instead of a Comment when follow-up
+data is unavailable. Callback writes report `{ ok = true }` without `comment`.
+The shared workflow clears the pending entry and refreshes without restoring a
+retryable draft. This applies to creation, replies, and edits.
+
 Shared HTTP infrastructure: ~
 
 `require("parley.http").start(opts, callback)` returns a cancel handle immediately.
@@ -782,8 +794,8 @@ options or private provider fields.
 The optional `provider:prepare(vcs_info)` hook runs in a Plenary coroutine before
 provider identity is published or review caches are consulted. Preparation errors
 clear obsolete provider/review state. Providers without the hook retain their
-existing lifecycle. Arcanum verifies its API account here; its cache identity binds
-host, credential fingerprint, and verified viewer and excludes the local Arc login.
+existing lifecycle. Arcanum binds the Arc login and selected credential here; its
+cache identity includes host, credential fingerprint, and Arc login.
 The ownership cache version changes with this release, so earlier cached ownership
 is not reused. Tokens are neither stored in cache keys nor printed in diagnostics.
 
@@ -895,7 +907,7 @@ The health check verifies:
 
 GitHub diagnostics check Git/gh executables, branch, and credentials from the
 environment or hosts.yml. Keyring credentials are not checked. Arcanum diagnostics
-check Arc/curl executables, remote branch, configured HTTPS host, local Arc login,
+check Arc/ya/curl executables, remote branch, configured HTTPS host, local Arc login,
 and credential source/availability. They do not construct or prepare a provider.
 Missing executables for unrelated providers do not produce warnings.
 

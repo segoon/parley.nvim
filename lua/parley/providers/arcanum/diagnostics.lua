@@ -17,7 +17,7 @@ function M.check(ctx)
     )
   )
   local entries = { { level = "ok", message = "Arcanum HTTPS host: " .. settings.host } }
-  for _, tool in ipairs({ "arc", "curl" }) do
+  for _, tool in ipairs({ "arc", "ya", "curl" }) do
     local found = M._executable(tool) == 1
     entries[#entries + 1] = {
       level = found and "ok" or "error",
@@ -33,7 +33,7 @@ function M.check(ctx)
   local login = ctx.opts.login
   entries[#entries + 1] = {
     level = login and login ~= "" and "ok" or "warn",
-    message = login and login ~= "" and ("Local Arc login (not verified API identity): " .. login)
+    message = login and login ~= "" and ("Arc account (token must belong to this user): " .. login)
       or "Arc user login is unavailable",
   }
   local token, err, source = M._read_token()

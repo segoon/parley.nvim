@@ -72,7 +72,7 @@ end
 --- @param review parley.DetectedReview
 function M.load(self, review)
   local ok, data = pcall(
-    transport.http_run,
+    transport.request_run,
     self,
     "GET",
     "/v1/plugin/pull-request/" .. review.pr.id .. "/review?fields=reviewers(user(name),action),min_ships_required"
@@ -141,7 +141,7 @@ function M.start(self, review, action, callback)
       end
     end,
   }
-  local ok, err = pcall(session.require_verified, self)
+  local ok, err = pcall(session.require_current, self)
   if not ok then
     finish({ ok = false, err = tostring(err) })
     return cancel
@@ -178,7 +178,7 @@ function M.start(self, review, action, callback)
       cb(result)
     end
     local h =
-      transport.http_start(self, method, path, nil, receive, { retry_policy = method == "GET" and "read" or "none" })
+      transport.request_start(self, method, path, nil, receive, { retry_policy = method == "GET" and "read" or "none" })
     if current == generation then
       handle = h
     end

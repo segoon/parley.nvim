@@ -1,5 +1,4 @@
---- Bind authenticated ownership, HTTP credentials, and cache identity to one verified session.
-local transport = require("parley.providers.arcanum.transport")
+--- Bind Arc ownership, selected credentials, and cache identity to one local session.
 local M = {}
 --- @param self parley.arcanum.Provider
 --- @return string|nil, string|nil
@@ -17,17 +16,18 @@ end
 --- @return boolean
 function M.current(self)
   local token = credential(self)
-  return self._verified_host == self._host
+  return self._session_host == self._host
     and token ~= nil
     and token == self._token
-    and token == self._verified_token
+    and token == self._session_token
     and type(self._viewer_login) == "string"
-    and self._viewer_login ~= ""
+    and self._viewer_login:find("%S") ~= nil
+    and self._viewer_login == self._arc_login
 end
 --- @param self parley.arcanum.Provider
-function M.require_verified(self)
+function M.require_current(self)
   if not M.current(self) then
-    error("Arcanum account is unverified or credentials changed; refresh the review before continuing", 0)
+    error("Arcanum session is unavailable or credentials changed; refresh the review before continuing", 0)
   end
 end
 --- @param self parley.arcanum.Provider
@@ -39,23 +39,17 @@ function M.prepare(self, info)
   if M.current(self) then
     return
   end
-  self._viewer_login, self._verified_token = nil, nil
+  self._viewer_login, self._session_token = nil, nil
   local host = self._host
   local token, err = credential(self)
   if not token then
     error(err, 0)
   end
   self._token = token
-  local ok, result = pcall(transport.http_run, self, "GET", "/v2/users/me?fields=name")
-  if not ok then
-    error("Arcanum account verification failed; check credentials, host, and connectivity", 0)
+  local login = self._arc_login
+  if type(login) ~= "string" or not login:find("%S") then
+    error("Arc user login is unavailable; check arc info and refresh the review", 0)
   end
-  if type(result) ~= "table" or type(result.name) ~= "string" or not result.name:find("%S") then
-    error("Arcanum account verification returned no valid user name", 0)
-  end
-  if credential(self) ~= token or self._host ~= host then
-    error("Arcanum credentials changed during verification; refresh the review", 0)
-  end
-  self._viewer_login, self._verified_token, self._verified_host = result.name, token, host
+  self._viewer_login, self._session_token, self._session_host = login, token, host
 end
 return M

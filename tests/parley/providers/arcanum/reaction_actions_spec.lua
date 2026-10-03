@@ -9,15 +9,15 @@ describe("Arcanum desired reaction state", function()
       end,
     } })
     dofile("tests/support/arcanum_session.lua")(p)
-    saved, calls = transport.http_start, {}
-    transport.http_start = function(_, method, path, body, cb, opts)
+    saved, calls = transport.request_start, {}
+    transport.request_start = function(_, method, path, body, cb, opts)
       calls[#calls + 1] = { method, path, body, opts }
       cb({ ok = true })
       return { cancel = function() end }
     end
   end)
   after_each(function()
-    transport.http_start = saved
+    transport.request_start = saved
   end)
   it("offers supported codes and removal of the viewer's other codes", function()
     local choices = p:reaction_choices({}, {

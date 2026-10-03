@@ -1,4 +1,4 @@
---- Arcanum transport: one deadline across pacing, HTTP attempts, and retries.
+--- Arcanum transport: one lifecycle for CLI and retained HTTP operations.
 local http = require("parley.http")
 local ui = require("parley.runtime.ui")
 local await = require("parley.runtime.await")
@@ -8,10 +8,12 @@ local dbg = require("parley.debug")
 local M = {}
 
 --- @class parley.arcanum.RequestOptions
+--- @field pr_id? integer|string PR scope for signed comment operations.
 --- @field retry_policy? 'read'|'create'|'none' GET/HEAD default to read; all other methods default to none.
 --- @class parley.arcanum.TransportResult
 --- @field ok boolean
 --- @field data? table
+--- @field status? integer
 --- @field err? string
 --- @field cancelled? boolean
 --- @field timed_out? boolean
@@ -42,9 +44,9 @@ end
 --- @param callback fun(result: parley.arcanum.TransportResult)
 --- @param opts? parley.arcanum.RequestOptions
 --- @return parley.CancelHandle
-function M.http_start(self, method, path, body, callback, opts)
+function M.request_start(self, method, path, body, callback, opts)
   local created = scheduler._now()
-  local verified_token, host = self._verified_token, self._host
+  local session_token, host, viewer = self._session_token, self._host, self._viewer_login
   local done, sent, uncertain, in_flight = false, false, false, false
   method = method:upper()
   local active, queued, deadline_timer
@@ -58,9 +60,10 @@ function M.http_start(self, method, path, body, callback, opts)
       return
     end
     if
-      verified_token
+      session_token
       and (
-        self._verified_token ~= verified_token
+        self._session_token ~= session_token
+        or self._viewer_login ~= viewer
         or self._host ~= host
         or not require("parley.providers.arcanum.session").current(self)
       )
@@ -123,10 +126,54 @@ function M.http_start(self, method, path, body, callback, opts)
       Accept = "application/json",
     }
     local serialized = body and vim.json.encode(body) or nil
-    if policy == "create" then
+    local command = not (policy == "create" and cfg.idempotent_write_retries)
+        and require("parley.providers.arcanum.cli").request(method, path, body, opts)
+      or nil
+    if policy == "create" and not command then
       headers["Idempotency-Key"] = M._key()
     end
-    local can_retry = policy == "read" or (policy == "create" and cfg.idempotent_write_retries)
+    local can_retry = policy == "read" or (policy == "create" and not command and cfg.idempotent_write_retries)
+    --- @param remaining integer
+    --- @param receive fun(result: table)
+    --- @return parley.CancelHandle
+    local function start_attempt(remaining, receive)
+      if command then
+        return require("parley.providers.arcanum.cli").start(
+          command,
+          M.api_url(self, ""),
+          self._token or "",
+          remaining,
+          receive
+        )
+      end
+      return http.start(
+        { url = url, method = method, headers = vim.deepcopy(headers), body = serialized, timeout_ms = remaining },
+        function(result)
+          if not result.ok then
+            receive({
+              ok = false,
+              err = result.err,
+              cancelled = result.cancelled,
+              sent = result.sent,
+              uncertain = result.sent ~= false,
+              retryable = response.retry_exit(result.exit),
+            })
+            return
+          end
+          local raw = result.response
+          local valid, data = pcall(response.unwrap, raw)
+          receive({
+            ok = raw.ok and valid,
+            data = valid and data or nil,
+            err = not valid and tostring(data) or (not raw.ok and ("Arcanum HTTP " .. raw.status) or nil),
+            status = raw.status,
+            retryable = not raw.ok and response.retry_status(raw.status),
+            retry_after = raw.status == 429 and response.retry_after(raw.headers, M._wall_time()) or nil,
+            uncertain = raw.status >= 500 or (raw.ok and not valid),
+          })
+        end
+      )
+    end
     local queue = scheduler.scope(self._host, self._token or "", cfg.request_interval_ms)
     deadline_timer = scheduler._defer(function()
       ui.dispatch(function()
@@ -167,9 +214,10 @@ function M.http_start(self, method, path, body, callback, opts)
           return
         end
         if
-          verified_token
+          session_token
           and (
-            self._verified_token ~= verified_token
+            self._session_token ~= session_token
+            or self._viewer_login ~= viewer
             or self._host ~= host
             or not require("parley.providers.arcanum.session").current(self)
           )
@@ -187,51 +235,24 @@ function M.http_start(self, method, path, body, callback, opts)
         local backoff = math.min(cfg.retry_base_delay_ms * 2 ^ (attempt - 1), cfg.retry_max_delay_ms)
         dbg.trace("arcanum.transport", method .. " " .. path .. " attempt=" .. attempt)
         sent, in_flight = true, true
-        local started_ok, request = pcall(http.start, {
-          url = url,
-          method = method,
-          headers = vim.deepcopy(headers),
-          body = serialized,
-          timeout_ms = math.ceil(remaining),
-        }, function(result)
+        local started_ok, request = pcall(start_attempt, math.ceil(remaining), function(result)
           ui.dispatch(function()
             if done or delivered or stage ~= generation then
               return
             end
             delivered, in_flight = true, false
             active = nil
-            if not result.ok then
-              if mutation and result.sent ~= false then
-                uncertain = true
-              end
-              if result.cancelled then
-                finish(result)
-                return
-              end
-              fail_or_retry(response.retry_exit(result.exit), result.err or "Arcanum network request failed.", backoff)
-              return
-            end
-            local raw = result.response
-            if mutation and raw.status >= 500 then
-              uncertain = true
-            end
-            if raw.status == 429 then
-              backoff = math.max(backoff, response.retry_after(raw.headers, M._wall_time()) or 0)
+            uncertain = uncertain or (mutation and result.uncertain == true)
+            if result.status == 429 then
+              backoff = math.max(backoff, result.retry_after or 0)
               scheduler.cooldown(queue, scheduler._now() + backoff)
             end
-            local valid, data = pcall(response.unwrap, raw)
-            if raw.ok then
-              if not valid and mutation then
-                uncertain = true
-              end
-              finish(valid and { ok = true, data = data } or { ok = false, err = tostring(data) })
+            if result.cancelled or result.timed_out then
+              finish(result)
+            elseif result.ok then
+              finish({ ok = true, data = result.data })
             else
-              fail_or_retry(
-                response.retry_status(raw.status),
-                valid and ("Arcanum HTTP " .. raw.status) or tostring(data),
-                backoff,
-                raw.status
-              )
+              fail_or_retry(result.retryable, result.err or "Arcanum request failed.", backoff, result.status)
             end
           end)
         end)
@@ -266,9 +287,9 @@ end
 --- @param body? table
 --- @param opts? parley.arcanum.RequestOptions
 --- @return table|nil
-function M.http_run(self, method, path, body, opts)
+function M.request_run(self, method, path, body, opts)
   local result = await.callback(function(callback)
-    M.http_start(self, method, path, body, callback, opts)
+    M.request_start(self, method, path, body, callback, opts)
   end)
   if not result.ok then
     error(result.err or "Arcanum request failed", 0)

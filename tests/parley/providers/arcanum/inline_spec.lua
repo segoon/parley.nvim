@@ -23,9 +23,9 @@ end
 describe("Arcanum inline submission", function()
   local original, original_run, p, calls, pending
   before_each(function()
-    original = transport.http_start
-    original_run = transport.http_run
-    transport.http_run = function()
+    original = transport.request_start
+    original_run = transport.request_run
+    transport.request_run = function()
       error("unexpected coroutine transport")
     end
     calls, pending = {}, {}
@@ -38,7 +38,7 @@ describe("Arcanum inline submission", function()
       },
     })
     dofile("tests/support/arcanum_session.lua")(p)
-    transport.http_start = function(_, method, path, body, callback)
+    transport.request_start = function(_, method, path, body, callback)
       local call = { method = method, path = path, body = body, cancelled = false }
       calls[#calls + 1] = call
       pending[#pending + 1] = callback
@@ -50,8 +50,8 @@ describe("Arcanum inline submission", function()
     end
   end)
   after_each(function()
-    transport.http_start = original
-    transport.http_run = original_run
+    transport.request_start = original
+    transport.request_run = original_run
   end)
 
   it("resolves a cold changelist asynchronously and uses the V2 range contract", function()
@@ -161,7 +161,7 @@ describe("Arcanum inline submission", function()
     assert.equals(1, #calls)
   end)
 
-  it("uses only a cache belonging to the loaded diff and rejects malformed creation responses", function()
+  it("uses only the loaded diff cache and reconciles incomplete successful creation responses", function()
     local r, result = review(), nil
     r.write_context.changelist = { ["a.lua"] = "eid:stale" }
     r.write_context.changelist_diff_id = 41
@@ -172,8 +172,8 @@ describe("Arcanum inline submission", function()
     pending[1]({ ok = true, data = { { path = "a.lua", entry_id = "eid:fresh" } } })
     assert.equals(1, calls[2].body.size)
     pending[2]({ ok = true, data = {} })
-    assert.is_false(result.ok)
-    assert.is_true(result.uncertain)
+    assert.is_true(result.ok)
+    assert.is_nil(result.comment)
   end)
 
   it("reports POST failure without successful completion", function()
@@ -202,7 +202,7 @@ describe("Arcanum inline submission", function()
 
   it("handles immediate callbacks without replacing the current stage handle", function()
     local result, post_cancelled = nil, false
-    transport.http_start = function(_, method, _, _, callback)
+    transport.request_start = function(_, method, _, _, callback)
       if method == "GET" then
         callback({ ok = true, data = { { path = "a.lua", entry_id = "eid:x" } } })
         return {
@@ -226,7 +226,7 @@ describe("Arcanum inline submission", function()
   end)
 
   it("reports transport startup exceptions through the callback", function()
-    transport.http_start = function()
+    transport.request_start = function()
       error("startup failed")
     end
     local result
@@ -251,7 +251,7 @@ describe("Arcanum inline submission", function()
     local r = review()
     r.write_context.changelist = { ["a.lua"] = "eid:cached" }
     r.write_context.changelist_diff_id = 42
-    transport.http_start = function(_, method, _, body, callback)
+    transport.request_start = function(_, method, _, body, callback)
       assert.equals("POST", method)
       assert.equals("eid:cached", body.entry_id)
       vim.schedule(function()

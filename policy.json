@@ -304,6 +304,8 @@
     "providers": {
       "modules": [
         "lua/parley/providers/arcanum/auth.lua",
+        "lua/parley/providers/arcanum/cli.lua",
+        "lua/parley/providers/arcanum/comment_write.lua",
         "lua/parley/providers/arcanum/anchors.lua",
         "lua/parley/providers/arcanum/discussions.lua",
         "lua/parley/providers/arcanum/cache_identity.lua",

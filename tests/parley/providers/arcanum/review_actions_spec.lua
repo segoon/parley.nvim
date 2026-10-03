@@ -20,17 +20,17 @@ describe("Arcanum explicit review actions", function()
         review_data = { reviewers = {}, min_ships_required = 1 },
       },
     }
-    saved = transport.http_start
+    saved = transport.request_start
     calls = {}
     diff = { id = 34, commit_ids = { head = "head" } }
-    transport.http_start = function(_, method, path, body, callback, opts)
+    transport.request_start = function(_, method, path, body, callback, opts)
       calls[#calls + 1] = { method = method, path = path, body = body, opts = opts }
       callback({ ok = true, data = method == "GET" and diff or nil })
       return { cancel = function() end }
     end
   end)
   after_each(function()
-    transport.http_start = saved
+    transport.request_start = saved
   end)
   it("normalizes actual verdicts and remaining approval requirements", function()
     assert.equals("pending", actions.status({ reviewers = {}, min_ships_required = 1 }))
@@ -108,7 +108,7 @@ describe("Arcanum explicit review actions", function()
   it("cancels either stage exactly once and ignores late callbacks", function()
     for _, mutation in ipairs({ false, true }) do
       local pending, results, stopped = {}, {}, {}
-      transport.http_start = function(_, method, _, _, cb)
+      transport.request_start = function(_, method, _, _, cb)
         pending[#pending + 1] = cb
         return {
           cancel = function()
@@ -137,7 +137,7 @@ describe("Arcanum explicit review actions", function()
   end)
   it("cancels the mutation handle when the recheck completed synchronously", function()
     local stopped, completed
-    transport.http_start = function(_, method, _, _, cb)
+    transport.request_start = function(_, method, _, _, cb)
       if method == "GET" then
         cb({ ok = true, data = diff })
       end
@@ -156,7 +156,7 @@ describe("Arcanum explicit review actions", function()
     assert.is_true(completed.uncertain)
   end)
   it("rejects credentials changed during the recheck", function()
-    transport.http_start = function(_, _, _, _, cb)
+    transport.request_start = function(_, _, _, _, cb)
       p._auth.read_token = function()
         return "changed"
       end
@@ -171,9 +171,9 @@ describe("Arcanum explicit review actions", function()
     assert.matches("credentials changed", result.err)
   end)
   it("loads unknown status safely after failed or malformed reads", function()
-    local run = transport.http_run
+    local run = transport.request_run
     for _, failure in ipairs({ true, false }) do
-      transport.http_run = function()
+      transport.request_run = function()
         if failure then
           error("403 secret server details")
         end
@@ -183,6 +183,6 @@ describe("Arcanum explicit review actions", function()
       assert.equals("unknown", review.pr.review_status)
       assert.is_nil(review.write_context.review_data)
     end
-    transport.http_run = run
+    transport.request_run = run
   end)
 end)

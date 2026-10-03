@@ -112,7 +112,7 @@ function M.detect(path)
     vcs = "arc",
     root = root,
     branch = branch,
-    -- remote_url carries the local login for diagnostics;
+    -- remote_url carries the Arc login used for ownership;
     -- format: "arc://<login>" (not a real URL, just an internal convention)
     remote_url = login and ("arc://" .. login) or nil,
   }

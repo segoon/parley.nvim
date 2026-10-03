@@ -4,10 +4,11 @@ describe("Arcanum cache identity", function()
     local token = "SECRET"
     local p = {
       _host = "host",
-      _verified_host = "host",
-      _verified_token = token,
+      _session_host = "host",
+      _session_token = token,
       _token = token,
       _viewer_login = "alice",
+      _arc_login = "alice",
       _auth = {
         read_token = function()
           return token
@@ -16,11 +17,11 @@ describe("Arcanum cache identity", function()
     }
     local first = identity.get(p)
     assert.is_nil(vim.inspect(first):find(token, 1, true))
-    p._viewer_login = "bob"
+    p._viewer_login, p._arc_login = "bob", "bob"
     assert.is_not.equals(first.account, identity.get(p).account)
     p._host = "other"
     assert.is_nil(identity.get(p))
-    p._verified_host = "other"
+    p._session_host = "other"
     assert.equals("other", identity.get(p).host)
     token = nil
     assert.is_nil(identity.get(p))

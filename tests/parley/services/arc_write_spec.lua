@@ -101,7 +101,7 @@ describe("Arc new-comment validation", function()
 
   it("preserves the composer draft when Arcanum cannot resolve an inline entry", function()
     local transport = require("parley.providers.arcanum.transport")
-    local original = transport.http_start
+    local original = transport.request_start
     local p = require("parley.providers.arcanum.provider").new({
       _auth = {
         read_token = function()
@@ -119,7 +119,7 @@ describe("Arc new-comment validation", function()
     local instance = open()
     local submitted_compose = compose
     composer.patch(buf, { draft = "preserve me" })
-    transport.http_start = function(_, method, _, _, callback)
+    transport.request_start = function(_, method, _, _, callback)
       assert.equals("GET", method, "Missing entries must not create general comments")
       callback({ ok = true, data = {} })
       return { cancel = function() end }
@@ -133,7 +133,7 @@ describe("Arc new-comment validation", function()
       assert.equals("idle", composer.get(buf).submit_state)
       assert.matches("no inline entry", notices[#notices])
     end)
-    transport.http_start = original
+    transport.request_start = original
     assert.is_true(ok, tostring(err))
   end)
 

@@ -39,7 +39,7 @@ Required:
 - Neovim `>= 0.10`
 - [`nvim-lua/plenary.nvim`](https://github.com/nvim-lua/plenary.nvim)
 
-GitHub requires `git` and `gh`. Arcanum requires `arc`, `curl`, and HTTPS access
+GitHub requires `git` and `gh`. Arcanum requires `arc`, `ya tool arcanum`, `curl`, and HTTPS access
 to its configured API host (default `arcanum.yandex.net`).
 
 Optional:
@@ -137,8 +137,9 @@ remain authoritative; unavailable review data disables these actions without
 hiding discussions.
 
 Arcanum credentials are read from `ARCANUM_TOKEN`, `ARC_OAUTH_TOKEN`,
-`ARC_TOKEN_PATH`, or `~/.arc/token`, in that order. Review loading verifies the API
-account before restoring cached ownership; the local Arc login is diagnostic only.
+`ARC_TOKEN_PATH`, or `~/.arc/token`, in that order. Ownership uses `user_login`
+from `arc info --json`; the selected token must belong to that Arc user. Token,
+host, or login changes invalidate the session and cached ownership.
 Discovery requires an exact remote-branch match. See `:help parley-provider-arcanum`
 for permissions, configuration, transport behavior, and detailed limitations.
 
@@ -266,11 +267,14 @@ Use `:Parley refresh` for an explicit progress-enabled refresh and error reporti
 Repeated `setup()` replaces the polling schedule; editor shutdown stops it.
 
 Requests to GitHub are made through the standard `gh` CLI.
-Arcanum uses asynchronous HTTPS. Its default request budget is 10 seconds,
+Arcanum uses `ya tool arcanum` asynchronously for discovery, diff reads, and
+comment actions. Full discussion reads and review verdicts retain HTTPS. Both
+transports share a default request budget of 10 seconds,
 including queueing and retry waits, with request starts spaced one second apart.
 Comment and reply retries are opt-in via
 `providers.arcanum.idempotent_write_retries = true`; enable this only after
-confirming the deployed server supports idempotency keys. After an uncertain
+confirming the deployed server supports idempotency keys; this selects keyed
+HTTP creation instead of CLI creation. After an uncertain
 write failure or cancellation, check the review before resubmitting your draft.
 See `:help parley-providers` for details.
 

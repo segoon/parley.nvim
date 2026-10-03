@@ -102,18 +102,18 @@ local M = {}
 --- @field fetch_discussions fun(self: parley.Provider, review: parley.DetectedReview): parley.Discussion[]
 ---
 --- Post a new top-level comment anchored to a file/line or line range.
---- Returns the newly created Comment.
+--- Returns the newly created Comment, or nil after acknowledged success requiring refresh.
 --- @field post_top_level_comment fun(
 ---   self: parley.Provider,
 ---   review: parley.DetectedReview,
 ---   file: string,
 ---   anchor: parley.Anchor,
----   body: parley.Body): parley.Comment
+---   body: parley.Body): parley.Comment|nil
 ---
 --- Post a reply to an existing discussion.
---- Returns the newly created Comment.
+--- Returns the newly created Comment, or nil after acknowledged success requiring refresh.
 --- @field reply fun(self: parley.Provider, review: parley.DetectedReview, discussion: parley.Discussion,
----   parent_comment: parley.Comment, body: parley.Body): parley.Comment
+---   parent_comment: parley.Comment, body: parley.Body): parley.Comment|nil
 ---
 --- Mark a discussion as resolved.
 --- @field resolve fun(self: parley.Provider, review: parley.DetectedReview, discussion_id: string)
@@ -124,13 +124,13 @@ local M = {}
 --- Toggle a reaction on a comment (add if absent, remove if present).
 --- @field react fun(self: parley.Provider, review: parley.DetectedReview, comment_id: string, reaction: string)
 ---
---- Edit an existing comment body. Returns the updated Comment.
+--- Edit an existing comment body. Returns the updated Comment, or nil when refresh is needed.
 --- @field edit fun(
 ---   self: parley.Provider,
 ---   review: parley.DetectedReview,
 ---   comment_id: string,
 ---   body: parley.Body
---- ): parley.Comment
+--- ): parley.Comment|nil
 ---
 --- Delete a comment.
 --- @field delete fun(self: parley.Provider, review: parley.DetectedReview, comment_id: string)

@@ -171,7 +171,7 @@ describe("delegated health diagnostics", function()
       }
     end
     diagnostics._executable = function(tool)
-      assert.is_true(tool == "arc" or tool == "curl")
+      assert.is_true(tool == "arc" or tool == "ya" or tool == "curl")
       return 1
     end
     diagnostics._read_token = function()

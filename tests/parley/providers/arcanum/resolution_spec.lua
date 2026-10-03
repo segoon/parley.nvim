@@ -11,10 +11,10 @@ describe("Arcanum issue resolution", function()
       end,
     } })
     dofile("tests/support/arcanum_session.lua")(p)
-    saved = transport.http_start
+    saved = transport.request_start
     calls, cancelled = {}, 0
     result = { ok = true, data = { id = 42 } }
-    transport.http_start = function(_, method, path, body, callback, opts)
+    transport.request_start = function(_, method, path, body, callback, opts)
       assert.equals("test-token", p._token)
       calls[#calls + 1] = { method, path, body, opts }
       callback(result)
@@ -26,7 +26,7 @@ describe("Arcanum issue resolution", function()
     end
   end)
   after_each(function()
-    transport.http_start = saved
+    transport.request_start = saved
   end)
   it("shares exact PATCH bodies across coroutine and callback methods", function()
     local done

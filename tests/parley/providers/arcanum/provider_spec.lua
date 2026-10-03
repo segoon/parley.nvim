@@ -70,7 +70,7 @@ end
 
 -- Provider factory
 
---- Build a mock provider with an injectable http_run sequence.
+--- Build a mock provider with an injectable request_run sequence.
 --- responses: list of { method, path, response } tuples (in order).
 --- @param responses table[]
 --- @return parley.arcanum.Provider, table  provider, calls_log
@@ -78,11 +78,11 @@ local function make_provider(responses)
   local calls = {}
   local idx = 0
 
-  local mock_http_run = function(_self, method, path, body)
+  local mock_request_run = function(_self, method, path, body)
     idx = idx + 1
     table.insert(calls, { method = method, path = path, body = body })
     local r = responses[idx]
-    assert(r, string.format("mock http_run: unexpected call #%d (method=%s path=%s)", idx, method, path))
+    assert(r, string.format("mock request_run: unexpected call #%d (method=%s path=%s)", idx, method, path))
     if r.error then
       error(r.error, 0)
     end
@@ -110,10 +110,10 @@ local function make_provider(responses)
 
   dofile("tests/support/arcanum_session.lua")(p)
 
-  -- Override transport.http_run on the provider
-  transport.http_run = mock_http_run
-  transport.http_start = function(self, method, path, body, callback)
-    local ok, data = pcall(mock_http_run, self, method, path, body)
+  -- Override transport.request_run on the provider
+  transport.request_run = mock_request_run
+  transport.request_start = function(self, method, path, body, callback)
+    local ok, data = pcall(mock_request_run, self, method, path, body)
     callback(ok and { ok = true, data = data } or { ok = false, err = data })
     return { cancel = function() end }
   end
@@ -121,15 +121,15 @@ local function make_provider(responses)
   return p, calls
 end
 
--- Save/restore transport.http_run
-local original_http_run, original_http_start
+-- Save/restore transport.request_run
+local original_request_run, original_request_start
 
 local function save_transport()
-  original_http_run, original_http_start = transport.http_run, transport.http_start
+  original_request_run, original_request_start = transport.request_run, transport.request_start
 end
 
 local function restore_transport()
-  transport.http_run, transport.http_start = original_http_run, original_http_start
+  transport.request_run, transport.request_start = original_request_run, original_request_start
 end
 
 -- Suite: auth

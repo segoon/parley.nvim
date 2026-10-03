@@ -61,7 +61,7 @@ end
 --- @return parley.CancelHandle
 function M.start(self, review, id, code, present, callback)
   local ok, err = pcall(function()
-    require("parley.providers.arcanum.session").require_verified(self)
+    require("parley.providers.arcanum.session").require_current(self)
     assert(type(id) == "string" and id:match("^%-?%d+$"), "Invalid Arcanum comment ID")
     assert(tostring(review.pr.id):match("^%d+$"), "Invalid Arcanum review ID")
     assert(type(code) == "string" and code ~= "" and type(present) == "boolean", "Invalid reaction")
@@ -77,7 +77,7 @@ function M.start(self, review, id, code, present, callback)
     callback({ ok = false, err = tostring(err) })
     return { cancel = function() end }
   end
-  return transport.http_start(
+  return transport.request_start(
     self,
     present and "PUT" or "DELETE",
     "/v1/plugin/pull-request/" .. review.pr.id .. "/comment/" .. id .. "/reaction/" .. encode(code),

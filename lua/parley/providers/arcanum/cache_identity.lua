@@ -1,4 +1,4 @@
---- Cache identity uses only a verified API account bound to the current credential.
+--- Cache identity uses the Arc login bound to the current credential.
 local M = {}
 --- @param self parley.arcanum.Provider
 --- @return parley.CacheIdentity|nil
@@ -10,7 +10,7 @@ function M.get(self)
     provider = "arcanum",
     host = self._host,
     repository = "arcanum",
-    account = vim.fn.sha256(vim.json.encode({ "verified-viewer-review-v4", self._token, self._viewer_login })),
+    account = vim.fn.sha256(vim.json.encode({ "arc-viewer-review-v5", self._token, self._viewer_login })),
   }
 end
 return M
