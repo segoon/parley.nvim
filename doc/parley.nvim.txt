@@ -608,7 +608,7 @@ Example override: >lua
 Parley uses a provider abstraction to support multiple hosting platforms.
 
 Local revision reads and new-comment validation use the detected VCS (Git or
-Arc). Mapping compares review-head content with a loaded buffer's text, including
+Arc). Mapping compares each anchor revision's content with a loaded buffer's text, including
 unsaved edits, or with the working-tree file when no buffer is loaded. Edits
 refresh positions after a short debounce without an API request. Separate
 checkouts have independent mappings even when they share the same review.
@@ -617,13 +617,18 @@ If content cannot be read, existing locations remain visible as stale
 approximations with a warning. Deleted lines have no precise local position;
 quickfix entries are marked unavailable rather than targeting the original line.
 
-New comments require local HEAD to match the review revision, a clean file, and
+New comments require local HEAD to match the pushed source revision, a clean file, and
 no unsaved changes. Every selected line must belong to the review's changed
 new-side lines. Validation runs before composition and again before sending.
 Failures preserve the draft; Parley never bypasses a failed VCS check.
 
 Internal VCS helpers take a VcsInfo table rather than a root string. Shared
-workflows use DetectedReview.head_sha; write_context remains provider-private.
+workflows use DetectedReview.head_sha for checkout sync. Optional base_sha and
+review_sha identify the immutable base and new side; snapshot_id is an opaque
+provider diff identity. When review_sha is absent it defaults to head_sha.
+Write guards and pending transactions compare these immutable fields, PR identity,
+and base branch, ignoring mutable write_context caches. write_context remains
+provider-private.
 
 GitHub                                               *parley-provider-github*
 
@@ -701,7 +706,8 @@ ownership. Credential changes invalidate the session and reject obsolete results
 Direct provider mutations require a prepared session from review loading.
 
 PR detection follows prefix-search pages using offset and has_next until an exact
-remote branch match is found. Candidate details are fetched once per search;
+remote branch match is found. Cursor fields include vcs(from_branch); full PR
+metadata is fetched only for the exact match;
 malformed or nonprogressing pages are errors. Without a remote branch, Parley stays
 inactive without authentication or PR HTTP requests.
 
@@ -710,6 +716,12 @@ Inline comments: ~
 New line and range comments are published on the new side of the loaded review
 using the V2 diff API. Submission uses the loaded diff without checking whether
 Arcanum has since activated a newer diff. Refresh the review to use newer data.
+
+Arcanum keeps the pushed source head, immutable destination base, and synthetic
+merge revision separate. Changed-line checks use base-to-merge content. Clean
+source selections are translated into merge coordinates before sending, while
+optimistic placement uses the original selection. Changed or interrupted ranges
+are rejected. A changed diff invalidates drafts even if the source head is equal.
 
 Missing diff/revision metadata, unavailable file entries, and failed lookups
 prevent submission; inline comments never fall back to general PR comments.
@@ -867,9 +879,14 @@ See `lua/parley/provider.lua` for the full interface.
 
 Every provider must implement `validate_comment_target(review, target)`. The
 `target` contains `vcs_info`, `rel_path` (repository-relative), and `anchor`
-(`start_line`, optional `end_line`). Return `{ ok = true }` to accept or
+(`start_line`, optional `end_line`). Optional `revision` identifies an immutable
+buffer's selection coordinates; absence means the source checkout. Return
+`{ ok = true }` to accept or
 `{ ok = false, err = "Reason shown to the user" }` to reject; the reason must be
 nonblank. This method runs in a Plenary async context and must not post comments.
+A successful result may include `anchor = { start_line, end_line }` to prepare
+remote coordinates. Shared writes send that anchor and retain the original
+selection for optimistic display. Omitted anchor preserves existing behavior.
 It runs before opening the composer and again before submission. Errors and
 malformed results block the operation; submission failures preserve the draft.
 
@@ -909,7 +926,8 @@ Set `uncertain = true` when a failed write may have reached the server,
 with an `err` explaining that the user should check the review before retrying.
 This message remains visible in the composer after cancellation or failure.
 A cancelled result must have `ok = false`. Successful callbacks need not return
-a comment object.
+a comment object. An acknowledged optimistic creation without a usable comment
+clears its temporary entry and refreshes; it does not reopen a retryable draft.
 
 Cancellation requests completion through the callback; shared writes continue
 waiting until it arrives. It does not guarantee rollback of a remote mutation.

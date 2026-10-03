@@ -41,8 +41,8 @@ all requests use HTTPS.
 
 | Operation | Contract |
 |---|---|
-| Search | `POST /v1/pull-requests/cursor`, followed by exact branch comparison |
-| Active diff | `GET /v1/pull-requests/{id}/active-diff?fields=id,commit_ids(head)` |
+| Search | `POST /v1/pull-requests/cursor?fields=id,vcs(from_branch)`, then one metadata read for the exact match |
+| Active diff | `GET /v1/pull-requests/{id}/active-diff?fields=id,commit_ids(base,head,merge)` |
 | Discussions | `GET /v1/public/review-requests/{id}/comments` |
 | Inline entry | `GET /v2/public/diff/{diff_id}/changelist` |
 | Inline creation | `POST /v2/public/diff/{diff_id}/comment` with the V2 entry ID |
@@ -51,6 +51,26 @@ all requests use HTTPS.
 | Review data | `GET /v1/plugin/pull-request/{pr_id}/review` |
 | Approval | `PUT .../review/ship?sticky=false|true`; withdrawal uses `DELETE` |
 | Merge block | `PUT .../review/block-merge`; withdrawal uses `DELETE` |
+
+The active diff's `head` identifies the pushed source checkout, `base` is the
+immutable destination revision, and `merge` is the new side shown in the review.
+Sync checks use `head`. Changed-line validation uses `base` → `merge`, never the
+moving destination branch. Clean source selections are translated to `merge`
+coordinates; changed, deleted, or noncontiguous ranges are rejected. Selections
+already displayed in the merge revision are not translated again. Missing
+revision metadata/content blocks creation without hiding readable discussions.
+Current new-side anchors map from `merge`; old-side anchors retain their explicit
+revision and path. Diffview identity mappings require the displayed revision to
+match the anchor; a local/source buffer is not the merge side when they differ.
+
+Draft validation and pending transactions use the PR, diff identity, and immutable
+revisions. A new diff with the same source head still invalidates a composer.
+Pending comments survive refresh only within that snapshot; late completions
+cannot alter a replacement review. Optimistic display coordinates stay separate
+from remote anchors, and a confirmed root promotes its exact URL to the thread.
+A successful callback without usable comment data clears the temporary entry and
+refreshes without restoring a retryable draft. Arcanum cache identity version 4
+prevents restoring snapshots built with the earlier source-only revision model.
 
 Inline creation deliberately uses the loaded diff rather than repeating the
 active-diff lookup on submission. Entry lookup failure never falls back to a
@@ -94,6 +114,25 @@ updates, reactions, and review actions are not retried automatically.
 Cancellation cannot undo a request already accepted by the server. Uncertain
 writes preserve the draft and instruct the user to inspect the review before
 retrying. Session changes invalidate in-flight results.
+
+## CLI reuse decision
+
+The provider retains its asynchronous HTTP transport. The inspected
+[`ya tool arcanum` implementation](https://a.yandex-team.ru/arcadia/arcanum/ai-utils/arcanum-go-cli)
+provides useful PR/comment operations and demonstrates the cursor projection used
+here. It does not yet replace this provider as a whole: the command surface lacks
+verified-viewer and explicit verdict operations, the comment output omits canonical
+URLs, and V2 anchors do not preserve every historical V1 anchor detail. Its HTTP
+client also lacks this provider's total deadline, shared pacing, and keyed-create
+retry contracts. Sparse creation output needs explicit reconciliation, not another
+creation request. A future migration must cover these contracts and pin the
+provider-selected credential and host; the CLI's default token precedence differs.
+
+Native `arc pr status --json` can resolve an exact branch, but uses Arc's own host,
+credentials, and error conventions. Projected cursor discovery preserves the
+configured provider session and removes per-candidate metadata requests without
+introducing another transport. Full PR metadata is still read once because cursor
+rows do not supply all required fields, including the canonical PR URL.
 
 ## Validation boundary
 

@@ -40,7 +40,10 @@ local M = {}
 ---
 --- @class parley.DetectedReview
 --- @field pr parley.PR
---- @field head_sha string
+--- @field head_sha string Source checkout revision used for sync checks.
+--- @field base_sha? string Immutable review base revision.
+--- @field review_sha? string New-side review revision; defaults to head_sha when absent.
+--- @field snapshot_id? string Opaque immutable provider snapshot identity.
 --- @field write_context table|nil
 ---
 --- @class parley.CacheIdentity
@@ -53,7 +56,9 @@ local M = {}
 --- @field vcs_info parley.VcsInfo
 --- @field rel_path string
 --- @field anchor parley.Anchor
---- @alias parley.CommentTargetResult {ok: true}|{ok: false, err: string}
+--- @field revision? string Selection revision for immutable buffers; absent means the source checkout.
+--- Successful validation may prepare a translated remote anchor; omitted means the original selection.
+--- @alias parley.CommentTargetResult {ok: true, anchor?: parley.Anchor}|{ok: false, err: string}
 
 --- @class parley.WriteResult
 --- @field ok boolean
@@ -226,6 +231,31 @@ function M.validate(p)
     end
   end
   return true
+end
+
+--- Capture immutable review identity without mutable provider caches or status.
+--- @param review? parley.DetectedReview
+--- @return table|nil
+function M.review_identity(review)
+  if not review or not review.pr then
+    return nil
+  end
+  return {
+    pr_id = review.pr.id,
+    head_sha = review.head_sha,
+    base_branch = review.pr.base_branch,
+    base_sha = review.base_sha,
+    review_sha = review.review_sha,
+    snapshot_id = review.snapshot_id,
+  }
+end
+
+--- @param left? parley.DetectedReview
+--- @param right? parley.DetectedReview
+--- @return boolean
+function M.same_review(left, right)
+  local a, b = M.review_identity(left), M.review_identity(right)
+  return a ~= nil and b ~= nil and vim.deep_equal(a, b)
 end
 
 return M

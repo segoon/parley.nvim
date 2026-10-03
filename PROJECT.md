@@ -49,7 +49,7 @@ and a generic tree renderer handles nested and incomplete discussion graphs.
 1. In the discussion float, select a comment and press `r` to compose a reply,
    `e` to edit your own comment, or `d` to request deletion with confirmation.
 2. Run `:Parley discussion new` on a line or visual range for a top-level comment.
-   The local HEAD must match the loaded review revision, the file must be clean,
+   The local HEAD must match the pushed source revision, the file must be clean,
    and every selected line must belong to the changed new side of the review.
 3. Compose Markdown in the input window; submit with `s` in normal mode or
    `<C-s>` in insert mode. Checks run before composition and again on submission.

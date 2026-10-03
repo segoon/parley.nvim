@@ -29,12 +29,6 @@ M._key = function()
 end
 
 --- @param self parley.arcanum.Provider
---- @return parley.ArcanumProviderConfig
-function M.transport_config(self)
-  return self._config
-end
-
---- @param self parley.arcanum.Provider
 --- @param path string
 --- @return string
 function M.api_url(self, path)

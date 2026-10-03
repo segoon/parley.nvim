@@ -57,6 +57,7 @@ describe("review optimistic comment mutations", function()
 
     local server_comment = model.new_comment({
       id = "9001",
+      url = "https://example.test/comments/9001",
       author = "alice",
       body = model.new_body({ text = "new thread", format = "markdown" }),
       created_at = "2026-09-11T12:00:00Z",
@@ -66,6 +67,7 @@ describe("review optimistic comment mutations", function()
     assert.equals("9001", reviews.confirm_comment(token, server_comment))
 
     local confirmed = reviews.get(1)
+    assert.equals("https://example.test/comments/9001", confirmed.all_discussions[1].url)
     assert.equals("9001", confirmed.all_discussions[1].id)
     assert.equals("9001", confirmed.all_discussions[1].comments[1].id)
     assert.is_nil(confirmed.all_discussions[1].comments[1].pending)
@@ -152,5 +154,38 @@ describe("review optimistic comment mutations", function()
     local comments = reviews.get(1).all_discussions[1].comments
     assert.equals(2, #comments)
     assert.equals("reply-id", comments[2].id)
+  end)
+  it("rejects delayed confirmation and rollback after the snapshot changes", function()
+    local token = assert(reviews.stage_comment(1, {
+      kind = "new",
+      file = "src/foo.lua",
+      anchor = { start_line = 4 },
+      body = model.new_body({ text = "draft", format = "markdown" }),
+    }))
+    local key = reviews.key_for_bufnr(1)
+    reviews._reviews[key].review.snapshot_id = "next-diff"
+    assert.is_nil(reviews.confirm_comment(token, { id = "9001" }))
+    assert.is_false(reviews.rollback_comment(token))
+  end)
+  it("uses remote coordinates in new-side aliases and never maps new comments onto the old side", function()
+    local key = reviews.key_for_bufnr(1)
+    local identities = reviews._identity_bufnrs
+    reviews._identity_bufnrs = { [2] = "new", [3] = "old" }
+    contexts._entries[2], contexts._entries[3] = vim.deepcopy(contexts._entries[1]), vim.deepcopy(contexts._entries[1])
+    reviews._key_bufnrs[key][2], reviews._key_bufnrs[key][3] = true, true
+    local ok, err = pcall(function()
+      local token = assert(reviews.stage_comment(1, {
+        kind = "new",
+        file = "src/foo.lua",
+        anchor = { start_line = 4 },
+        remote_anchor = { start_line = 7 },
+        body = model.new_body({ text = "draft", format = "markdown" }),
+      }))
+      assert.equals(4, reviews._views[1].mappings[token.discussion_id].local_line)
+      assert.equals(7, reviews._views[2].mappings[token.discussion_id].local_line)
+      assert.is_nil(reviews._views[3].mappings[token.discussion_id])
+    end)
+    reviews._identity_bufnrs = identities
+    assert.is_true(ok, tostring(err))
   end)
 end)

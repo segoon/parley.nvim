@@ -33,6 +33,9 @@ local M = {}
 ---
 --- @class parley.BufferContext
 --- @field kind     parley.BufferKind
+--- @field host_bufnr? integer Host checkout buffer for an externally attached immutable buffer.
+--- @field revision? string Revision whose coordinates the buffer displays.
+--- @field review_side? "new"|"old" Attached review side.
 --- @field bufnr    integer
 --- @field path     string|nil        Absolute file path; nil for non-file buffers
 --- @field vcs_info parley.VcsInfo|nil  Populated only when kind == "regular"

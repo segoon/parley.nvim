@@ -16,8 +16,8 @@ a.describe("configured Arcanum workflow", function()
       local data
       if path == "/v2/users/me?fields=name" then
         data = { name = "api-user" }
-      elseif path == "/v1/pull-requests/cursor" then
-        data = { pull_requests = { { id = 1 } }, has_next = false }
+      elseif path == "/v1/pull-requests/cursor?fields=id,vcs(from_branch)" then
+        data = { pull_requests = { { id = 1, vcs = { from_branch = "feature" } } }, has_next = false }
       elseif path:find("active-diff", 1, true) then
         data = { id = 2, commit_ids = { head = "head" } }
       elseif path:find("/v1/pull-requests/1?", 1, true) then

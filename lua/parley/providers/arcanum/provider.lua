@@ -32,7 +32,6 @@ local session = require("parley.providers.arcanum.session")
 --- @class parley.arcanum.WriteContext
 --- @field pr_id         integer          PR numeric ID
 --- @field diff_id       integer|nil      Active diff numeric ID (nil before detect_pr resolves it)
---- @field diff_set_xid  string|nil       Active diff set xid (for comment anchoring)
 --- @field review_data? table Validated plugin reviewer verdicts and remaining approval count
 --- @field changelist_diff_id integer|nil Diff owning cached entry IDs
 --- @field changelist    table<string, string>  Map of file path → entry_id (populated lazily)
@@ -46,7 +45,6 @@ local session = require("parley.providers.arcanum.session")
 --- @field _arc_login string|nil Local Arc account, never used for ownership
 --- @field _verified_host string|nil
 --- @field _verified_token string|nil
---- @field _cache_provider string
 
 -- ---------------------------------------------------------------------------
 -- Provider object
@@ -57,7 +55,7 @@ local ArcanumProvider = { display_name = require("parley.providers.arcanum.metad
 ArcanumProvider.__index = ArcanumProvider
 ArcanumProvider.prepare = session.prepare
 ArcanumProvider.capabilities = require("parley.providers.arcanum.capabilities").get
-ArcanumProvider.validate_comment_target = require("parley.providers.comment_target").validate
+ArcanumProvider.validate_comment_target = require("parley.providers.arcanum.target").validate
 ArcanumProvider.cache_identity = require("parley.providers.arcanum.cache_identity").get
 ArcanumProvider.review_actions = require("parley.providers.arcanum.review_actions").choices
 ArcanumProvider.begin_review_action = require("parley.providers.arcanum.review_actions").start
@@ -93,7 +91,6 @@ function M.new(opts)
     _auth = opts._auth or require("parley.providers.arcanum.auth"),
     _config = config,
     _arc_login = opts.login or nil,
-    _cache_provider = "arcanum",
     -- Detected from vcs_info at detect() time
     _branch = opts.branch or nil,
   }, ArcanumProvider)
@@ -179,44 +176,34 @@ function ArcanumProvider:detect_pr(_repo_root, branch)
 
   dbg.trace("arcanum.provider", "detect_pr: found pr_id=" .. tostring(pr_id))
 
-  -- Fetch the active diff to get diff_id and diff_set_xid for anchoring
-  local diff_id = nil
-  local diff_set_xid = nil
-  local ok_diff, diff_data = pcall(
+  local ok_diff, data = pcall(
     transport.http_run,
     self,
     "GET",
-    "/v1/pull-requests/" .. tostring(pr_id) .. "/active-diff?fields=id,commit_ids(head)"
+    "/v1/pull-requests/" .. tostring(pr_id) .. "/active-diff?fields=id,commit_ids(base,head,merge)"
   )
-  if ok_diff and type(diff_data) == "table" then
-    if require("parley.providers.arcanum.inline").valid_diff_id(diff_data.id) then
-      diff_id = diff_data.id
-      diff_set_xid = tostring(diff_id)
-    end
-    dbg.trace(
-      "arcanum.provider",
-      "detect_pr: diff_id=" .. tostring(diff_id) .. " diff_set_xid=" .. tostring(diff_set_xid)
-    )
-  else
-    dbg.trace("arcanum.provider", "detect_pr: could not fetch active diff: " .. tostring(diff_data))
+  local diff = ok_diff and type(data) == "table" and data or {}
+  local commits = type(diff.commit_ids) == "table" and diff.commit_ids or {}
+  --- @param name string
+  --- @return string
+  local function revision(name)
+    return type(commits[name]) == "string" and commits[name] or ""
   end
-
-  -- Determine head_sha from the active diff's commit_ids
-  local head_sha = ""
-  if ok_diff and type(diff_data) == "table" and type(diff_data.commit_ids) == "table" then
-    local head = diff_data.commit_ids.head
-    head_sha = type(head) == "string" and head or ""
-  end
-
-  --- @type parley.arcanum.WriteContext
-  local write_context = {
-    pr_id = pr_id,
-    diff_id = diff_id,
-    diff_set_xid = diff_set_xid,
-    changelist = {},
+  local diff_id = require("parley.providers.arcanum.inline").valid_diff_id(diff.id) and diff.id or nil
+  local review = {
+    pr = pr,
+    head_sha = revision("head"),
+    base_sha = revision("base"),
+    review_sha = revision("merge"),
+    snapshot_id = tostring(diff_id or "unavailable"),
+    write_context = { pr_id = pr_id, diff_id = diff_id, changelist = {} },
   }
-
-  local review = { pr = pr, head_sha = head_sha, write_context = write_context }
+  dbg.trace("arcanum.provider", "review revisions: " .. vim.inspect({
+    diff = diff_id,
+    head = review.head_sha,
+    base = review.base_sha,
+    merge = review.review_sha,
+  }))
   require("parley.providers.arcanum.review_actions").load(self, review)
   return review
 end
@@ -255,23 +242,19 @@ ArcanumProvider.begin_post_top_level_comment = require("parley.providers.arcanum
 --- Post a reply to an existing discussion.
 ---
 --- @param self           parley.arcanum.Provider
---- @param _review        parley.DetectedReview
---- @param _discussion    parley.Discussion
+--- @param review        parley.DetectedReview
+--- @param discussion    parley.Discussion
 --- @param parent_comment parley.Comment
 --- @param body           parley.Body
 --- @return parley.Comment
-function ArcanumProvider:reply(_review, _discussion, parent_comment, body)
-  session.require_verified(self)
-
-  local data = transport.http_run(
-    self,
-    "POST",
-    "/v1/public/review-requests-comments/" .. parent_comment.id .. "/replies",
-    { content = body.text },
-    { retry_policy = "create" }
-  )
-
-  return map_reply(data, self._viewer_login or "")
+function ArcanumProvider:reply(review, discussion, parent_comment, body)
+  local result = require("parley.runtime.await").callback(function(callback)
+    self:begin_reply(review, discussion, parent_comment, body, callback)
+  end)
+  if not result.ok then
+    error(result.err or "Arcanum reply cancelled", 0)
+  end
+  return result.comment
 end
 
 --- Start a cancellable reply request.

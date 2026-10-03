@@ -20,11 +20,13 @@ describe("review pending comment preservation", function()
       pending = true,
     })
     local current = {
+      review = { pr = { id = "42" }, head_sha = "head", snapshot_id = "diff:1" },
       all_discussions = {
         model.new_discussion({ id = "root", file = "f", line = 1, comments = { root, optimistic } }),
       },
     }
     local incoming = {
+      review = vim.deepcopy(current.review),
       all_discussions = {
         model.new_discussion({ id = "root", file = "f", line = 1, comments = { root } }),
       },
@@ -37,5 +39,16 @@ describe("review pending comment preservation", function()
     assert.equals(2, #incoming.all_discussions[1].comments)
     assert.is_true(incoming.all_discussions[1].comments[2].pending)
     assert.same({ unresolved_count = 1 }, incoming.summary)
+    for _, changed in ipairs({
+      { pr = { id = "99" }, head_sha = "head", snapshot_id = "diff:1" },
+      { pr = { id = "42" }, head_sha = "head", snapshot_id = "diff:2" },
+    }) do
+      incoming.review = changed
+      incoming.all_discussions[1].comments = { root }
+      pending.preserve(current, incoming, function()
+        return {}
+      end)
+      assert.equals(1, #incoming.all_discussions[1].comments)
+    end
   end)
 end)

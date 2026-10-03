@@ -183,31 +183,37 @@ function M.start(self, review, action, callback)
       handle = h
     end
   end
-  request("GET", "/v1/pull-requests/" .. wc.pr_id .. "/active-diff?fields=id,commit_ids(head)", function(result)
-    if done then
-      return
+  request(
+    "GET",
+    "/v1/pull-requests/" .. wc.pr_id .. "/active-diff?fields=id,commit_ids(base,head,merge)",
+    function(result)
+      if done then
+        return
+      end
+      if not result.ok then
+        finish(result)
+        return
+      end
+      local diff = result.data
+      if not session.current(self) or token ~= self._token or host ~= self._host then
+        finish({ ok = false, err = "Arcanum credentials changed; refresh the review" })
+        return
+      end
+      if
+        type(diff) ~= "table"
+        or diff.id ~= wc.diff_id
+        or type(diff.commit_ids) ~= "table"
+        or diff.commit_ids.head ~= review.head_sha
+        or (review.base_sha ~= nil and diff.commit_ids.base ~= review.base_sha)
+        or (review.review_sha ~= nil and diff.commit_ids.merge ~= review.review_sha)
+      then
+        finish({ ok = false, err = "Active diff changed or is unavailable; refresh before reviewing" })
+        return
+      end
+      scope = selected.method == "PUT" and "REVIEW_REQUEST_SHIP" or "GENERIC_WRITE"
+      request(selected.method, "/v1/plugin/pull-request/" .. wc.pr_id .. "/review" .. selected.route, finish)
     end
-    if not result.ok then
-      finish(result)
-      return
-    end
-    local diff = result.data
-    if not session.current(self) or token ~= self._token or host ~= self._host then
-      finish({ ok = false, err = "Arcanum credentials changed; refresh the review" })
-      return
-    end
-    if
-      type(diff) ~= "table"
-      or diff.id ~= wc.diff_id
-      or type(diff.commit_ids) ~= "table"
-      or diff.commit_ids.head ~= review.head_sha
-    then
-      finish({ ok = false, err = "Active diff changed or is unavailable; refresh before reviewing" })
-      return
-    end
-    scope = selected.method == "PUT" and "REVIEW_REQUEST_SHIP" or "GENERIC_WRITE"
-    request(selected.method, "/v1/plugin/pull-request/" .. wc.pr_id .. "/review" .. selected.route, finish)
-  end)
+  )
   return cancel
 end
 return M

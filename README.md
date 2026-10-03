@@ -101,12 +101,13 @@ independent positions. If revision content is unavailable, Parley shows stale
 approximations and reports the reason.
 
 New comments require a clean file with no unsaved edits and a local HEAD matching
-the review revision. These checks run again on submission and preserve the draft
+the pushed source revision. These checks run again on submission and preserve the draft
 on failure. Replies and new discussions appear immediately with a sending marker;
 the composer closes while the request runs. Success replaces the temporary entry
 with provider data and refreshes quietly in the background. A definite failure or
 cancellation removes it and restores the draft. Arcanum creates comments only on
-the loaded diff's new side.
+the loaded diff's new side, translating source lines into the synthetic merge
+revision when necessary. Changed or noncontiguous ranges cannot be submitted.
 
 Use `:Parley discussion list` to browse every thread without Telescope. Arcanum
 preserves nested replies and distinct issue states. General, whole-file, old-side,
@@ -183,7 +184,7 @@ Whichever way you open it, when a diffview diff buffer showing the PR's head rev
 
 Verified against both [upstream diffview.nvim](https://github.com/sindrets/diffview.nvim) and the [`mistricky/diffview-plus.nvim`](https://github.com/mistricky/diffview-plus.nvim) fork; not verified against other forks. One difference: file-panel badges refresh live on file selection and staging under the fork (which fires extra `User` events upstream doesn't), but only after layout changes under plain upstream diffview.nvim.
 
-The head/"new" side is always supported. The base/"old" side renders read-only when a comment is actually anchored there — currently only Arcanum ever anchors comments to the old side (GitHub's provider mapping doesn't capture that data); creating a *new* comment on the old side isn't supported by either provider's write path. Disable the integration entirely with:
+The review's "new" side is supported. For Arcanum this is the synthetic merge revision, which can differ from the source checkout. The base/"old" side renders read-only when a comment is actually anchored there — currently only Arcanum ever anchors comments to the old side (GitHub's provider mapping doesn't capture that data); creating a *new* comment on the old side isn't supported by either provider's write path. Disable the integration entirely with:
 
 ```lua
 require("parley").setup({

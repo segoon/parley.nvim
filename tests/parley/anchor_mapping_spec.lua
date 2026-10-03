@@ -301,4 +301,19 @@ a.describe("parley.anchor.map_discussions", function()
     assert.equals(5, result["d_clean"].local_line)
     assert.is_false(result["d_clean"].stale)
   end)
+  a.it("maps each anchor from its own revision even within the same file", function()
+    local revisions = {}
+    anchor._diff = function(_, revision)
+      revisions[revision] = (revisions[revision] or 0) + 1
+      return revision == "merge" and "@@ -1 +0,0 @@\n" or ""
+    end
+    local source = make_discussion("source", "f", 2)
+    local merged = make_discussion("merged", "f", 3)
+    source.anchor = { kind = "inline", path = "f", line = 2, revision = "source" }
+    merged.anchor = { kind = "inline", path = "f", line = 3, revision = "merge" }
+    local result = anchor.map_discussions({ vcs = "arc", root = "/repo" }, "wrong", { source, merged })
+    assert.equals(2, result.source.local_line)
+    assert.equals(2, result.merged.local_line)
+    assert.same({ source = 1, merge = 1 }, revisions)
+  end)
 end)
