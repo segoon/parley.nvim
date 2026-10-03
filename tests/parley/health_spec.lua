@@ -282,11 +282,16 @@ describe("delegated health diagnostics", function()
       return { { level = "ok", message = "real health delegation" } }
     end)
     vim.cmd("checkhealth parley")
-    local output = table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), "\n")
     local report_buf = vim.api.nvim_get_current_buf()
+    -- Nightly sets this after rendering asynchronously; older versions finish before the command returns.
+    local completed = vim.wait(2000, function()
+      return vim.api.nvim_buf_is_valid(report_buf) and vim.bo[report_buf].filetype == "checkhealth"
+    end, 10)
+    local output = table.concat(vim.api.nvim_buf_get_lines(report_buf, 0, -1, false), "\n")
     vim.api.nvim_set_current_buf(buf)
     vim.api.nvim_buf_delete(report_buf, { force = true })
     vim.api.nvim_buf_delete(buf, { force = true })
+    assert.is_truthy(completed, "checkhealth did not finish: " .. output)
     assert.equals("/tmp/parley-health-origin", detected)
     assert.is_truthy(output:find("real health delegation", 1, true))
   end)
