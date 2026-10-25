@@ -78,3 +78,54 @@ describe("parley.providers.github.mapping — comment URLs", function()
     assert.equals(discussions[1].comments[1].url, discussions[1].url)
   end)
 end)
+
+describe("GitHub discussion locations", function()
+  --- @param fields table
+  --- @return parley.Discussion
+  local function map(fields)
+    local raw =
+      vim.tbl_extend("force", { id = 1, path = "a.lua", body = "Comment", user = { login = "alice" } }, fields)
+    return mapping.group_comments_into_discussions({ raw }, "alice")[1]
+  end
+
+  it("keeps whole-file comments readable when all line fields are JSON null", function()
+    local discussion = map({ subject_type = "file", line = vim.NIL, original_line = vim.NIL, start_line = vim.NIL })
+    assert.equals("file", discussion.anchor.kind)
+    assert.equals("a.lua", discussion.file)
+    assert.is_nil(discussion.line)
+    assert.equals("Comment", discussion.comments[1].body.text)
+    assert.is_false(require("parley.discussion").projectable(discussion))
+  end)
+
+  it("keeps unlocated line comments readable without inventing a file anchor", function()
+    local discussion = map({ subject_type = "line", line = vim.NIL, original_line = vim.NIL })
+    assert.equals("unavailable", discussion.anchor.kind)
+    assert.is_nil(discussion.line)
+  end)
+
+  it("preserves both ends of a current multiline range", function()
+    local discussion = map({ start_line = 3, line = 8 })
+    assert.equals(3, discussion.line)
+    assert.equals(8, discussion.end_line)
+  end)
+
+  it("uses original range endpoints together for an outdated comment", function()
+    local discussion = map({ start_line = vim.NIL, line = vim.NIL, original_start_line = 3, original_line = 8 })
+    assert.equals(3, discussion.line)
+    assert.equals(8, discussion.end_line)
+  end)
+
+  it("does not mix an original range start into a current single-line comment", function()
+    local discussion = map({ start_line = vim.NIL, line = 8, original_start_line = 2, original_line = 4 })
+    assert.equals(8, discussion.line)
+    assert.is_nil(discussion.end_line)
+  end)
+
+  for _, fields in ipairs({ { line = 8, start_line = 10 }, { line = -1 }, { path = vim.NIL, line = 8 } }) do
+    it("degrades malformed locations to unavailable", function()
+      local discussion = map(fields)
+      assert.equals("unavailable", discussion.anchor.kind)
+      assert.is_false(require("parley.discussion").projectable(discussion))
+    end)
+  end
+end)
