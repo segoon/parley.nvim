@@ -239,9 +239,8 @@ function GitHubProvider:detect_pr(_repo_root, branch)
 
   -- Fetch reviews to determine review_status.
   local reviews_url = repo_path(self) .. "/pulls/" .. pr_number .. "/reviews"
-  local reviews = transport.gh_run(self, { "gh", "api", reviews_url }) or {}
-
-  local review_status = mapping.compute_review_status(reviews)
+  local ok, reviews = pcall(transport.gh_run, self, { "gh", "api", reviews_url })
+  local review_status = mapping.compute_review_status(ok and reviews or nil)
 
   local pr = model.new_pr({
     id = tostring(pr_number),

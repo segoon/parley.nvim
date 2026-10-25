@@ -67,7 +67,8 @@ comments to changed new-side lines. GitHub's current REST mapping falls back to
 `original_line` when necessary but does not retain the API's left/right side as
 old-side anchor metadata.
 
-Review status is derived from REST review verdicts. Review submission accepts
+Review status is derived from REST review verdicts. Failed or malformed status
+reads produce `unknown` without preventing PR discovery or discussion loading. Review submission accepts
 `approve`, `request_changes`, or `comment`, mapped to GitHub's corresponding review
 events, and requires a body through the shared workflow.
 
