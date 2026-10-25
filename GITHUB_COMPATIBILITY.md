@@ -77,10 +77,12 @@ The reaction picker exposes GitHub's supported review-comment reactions: `+1`,
 ## Transport and failure handling
 
 API operations run through `gh api` subprocesses. Coroutine and callback entry
-points apply the configured timeout and exponential backoff to recognized transient
-CLI/network failures. Non-transient failures and invalid JSON fail immediately.
-Cancellable callback writes terminate the active subprocess or pending retry and
-complete at most once.
+points apply the configured timeout. Read requests retry recognized transient
+CLI/network failures with exponential backoff; mutations are never automatically
+replayed. Ambiguous write failures, malformed write responses, and cancellation
+after sending report uncertainty and ask the user to check the review before
+retrying. Cancellable callback writes terminate the active subprocess and complete
+at most once, without waiting for its exit callback.
 
 GitHub transport does not currently implement explicit `X-RateLimit-*`, HTTP 429,
 or HTTP 403 scheduling. Broader handling is tracked in [TODO](TODO.md); behavior

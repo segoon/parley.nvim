@@ -90,7 +90,7 @@ local function fetch_review_threads(self, review)
       repo = self._repo,
       number = pr_number,
       cursor = cursor,
-    })
+    }, "read")
     local conn = data and data.repository and data.repository.pullRequest and data.repository.pullRequest.reviewThreads
     if not conn then
       break

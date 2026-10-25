@@ -656,7 +656,7 @@ GitHub-specific options live under `providers.github` in the setup call. Default
       providers = {
         github = {
           timeout_ms = 5000,
-          retry_count = 2,
+          retry_count = 2,         -- Read retries; writes are never replayed
           retry_base_delay_ms = 250,
           retry_max_delay_ms = 2000,
         },
