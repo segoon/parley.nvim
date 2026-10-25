@@ -82,11 +82,21 @@ mutation($id: ID!) {
 
 --- Compute review_status from a list of GitHub review objects.
 --- Takes the last non-PENDING entry (reviews are in chronological order).
---- @param reviews table[]
+--- @param reviews any Review list or malformed/unavailable remote data.
 --- @return parley.ReviewStatus
 function M.compute_review_status(reviews)
+  if type(reviews) ~= "table" or not vim.islist(reviews) then
+    return "unknown"
+  end
   local status = "pending"
   for _, r in ipairs(reviews) do
+    if
+      type(r) ~= "table"
+      or type(r.state) ~= "string"
+      or (r.state ~= "PENDING" and not M.GH_REVIEW_STATE_MAP[r.state])
+    then
+      return "unknown"
+    end
     local mapped = M.GH_REVIEW_STATE_MAP[r.state]
     if mapped then
       status = mapped
