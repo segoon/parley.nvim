@@ -222,6 +222,33 @@ function M.map_review_thread_nodes(nodes)
   return result
 end
 
+--- Normalize nullable REST positions before constructing domain discussions.
+--- Keep legacy inline mappings until GitHub side/revision mapping is supported.
+--- @param raw table
+--- @return table
+local function location(raw)
+  local semantics = require("parley.discussion")
+  local path = semantics.valid_path(raw.path) and raw.path or nil
+  if path and raw.subject_type == "file" then
+    return { anchor = { kind = "file", path = path } }
+  end
+  local line, start = raw.line, raw.start_line
+  if line == nil or line == vim.NIL then
+    line, start = raw.original_line, raw.original_start_line
+  end
+  if start == vim.NIL then
+    start = nil
+  end
+  if
+    not path
+    or not semantics.valid_line(line)
+    or (start ~= nil and (not semantics.valid_line(start) or start > line))
+  then
+    return { anchor = { kind = "unavailable", path = path, unavailable_reason = "Line location unavailable" } }
+  end
+  return { file = path, line = start or line, end_line = start and line or nil }
+end
+
 --- Group a flat list of REST review comments into parley.Discussion[].
 ---
 --- Grouping rules:
@@ -244,19 +271,12 @@ function M.group_comments_into_discussions(comments, viewer)
 
     if is_root then
       local root_id = tostring(raw.id)
-      local line = raw.line
-      if not line or line == vim.NIL then
-        line = raw.original_line or 0
-      end
-      local disc = model.new_discussion({
+      local disc = model.new_discussion(vim.tbl_extend("force", location(raw), {
         id = root_id,
         url = comment.url,
-        file = raw.path or "",
-        line = line,
-        end_line = (raw.start_line and raw.start_line ~= vim.NIL) and raw.line or nil,
         resolved = false, -- overlaid with real state from GraphQL by the provider
         comments = { comment },
-      })
+      }))
       by_root[root_id] = disc
       table.insert(order, root_id)
     else

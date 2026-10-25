@@ -64,8 +64,10 @@ available for resolution writes until a later successful refresh.
 New comments and replies use the loaded review head. Shared write validation
 requires local HEAD to match it, rejects dirty or unsaved files, and restricts new
 comments to changed new-side lines. GitHub's current REST mapping falls back to
-`original_line` when necessary but does not retain the API's left/right side as
-old-side anchor metadata.
+`original_line` and `original_start_line` together when necessary. Current
+multiline comments preserve `start_line` through `line`. Whole-file and unavailable
+locations remain readable without fabricated line numbers. The mapping does not
+yet retain the API's left/right side as old-side anchor metadata.
 
 Review status is derived from REST review verdicts. Failed or malformed status
 reads produce `unknown` without preventing PR discovery or discussion loading. Review submission accepts
