@@ -102,6 +102,31 @@ local function is_retryable_failure(result)
   return result.code == 124 or is_retryable_error(result.stderr)
 end
 
+--- Bind every API request to the same host used by credential/cache identity.
+--- Copy arguments so retries and callers cannot accumulate routing flags.
+--- @param self parley.github.Provider
+--- @param cmd string[]
+--- @return string[]
+local function routed_command(self, cmd)
+  local result = vim.deepcopy(cmd)
+  local host = self._host or "github.com"
+  local standard = host == "github.com" and "https://api.github.com" or "https://" .. host .. "/api/v3"
+  local base = (self._api_base or standard):gsub("/+$", "")
+  if base ~= standard then
+    for i = 3, #result do
+      if result[i] == "graphql" then
+        result[i] = base:gsub("/v3$", "") .. "/graphql"
+        break
+      elseif result[i]:sub(1, 1) == "/" then
+        result[i] = base .. result[i]
+        break
+      end
+    end
+  end
+  vim.list_extend(result, { "--hostname", host })
+  return result
+end
+
 -- ---------------------------------------------------------------------------
 -- gh_run — synchronous runner with retry
 -- ---------------------------------------------------------------------------
@@ -114,6 +139,7 @@ end
 --- @param cmd   string[]
 --- @return table|nil
 function M.gh_run(self, cmd)
+  cmd = routed_command(self, cmd)
   local runner = self._runner
   local cfg = M.transport_config(self)
   local attempts = cfg.retry_count + 1
@@ -169,6 +195,7 @@ end
 --- @param callback fun(result: { ok: boolean, data?: table, err?: string, cancelled?: boolean }): nil
 --- @return { cancel: fun(): nil }
 function M.gh_start(self, cmd, callback)
+  cmd = routed_command(self, cmd)
   local completed = false
   local cancelled = false
   local handle = nil

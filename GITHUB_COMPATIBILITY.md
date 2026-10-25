@@ -25,6 +25,10 @@ The Git detector uses `git rev-parse`, the current non-detached branch, and the
 provider selection currently accepts only the `github.com` host. The provider's
 explicit constructor supports a configured GitHub Enterprise Server host and API
 base; that path is not selected automatically from arbitrary enterprise remotes.
+Every REST and GraphQL request explicitly selects the configured host, overriding
+`GH_HOST` and CLI defaults. A custom API base is used for REST paths; GraphQL uses
+the same base with a trailing `/v3` replaced by `/graphql` (or `/graphql` appended
+when there is no `/v3` suffix).
 
 For `github.com` and `*.ghe.com`, credentials are resolved from `GH_TOKEN`, then
 `GITHUB_TOKEN`. Other enterprise hosts use `GH_ENTERPRISE_TOKEN`, then
