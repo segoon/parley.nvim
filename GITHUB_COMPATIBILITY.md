@@ -25,6 +25,10 @@ The Git detector uses `git rev-parse`, the current non-detached branch, and the
 provider selection currently accepts only the `github.com` host. The provider's
 explicit constructor supports a configured GitHub Enterprise Server host and API
 base; that path is not selected automatically from arbitrary enterprise remotes.
+Every REST and GraphQL request explicitly selects the configured host, overriding
+`GH_HOST` and CLI defaults. A custom API base is used for REST paths; GraphQL uses
+the same base with a trailing `/v3` replaced by `/graphql` (or `/graphql` appended
+when there is no `/v3` suffix).
 
 For `github.com` and `*.ghe.com`, credentials are resolved from `GH_TOKEN`, then
 `GITHUB_TOKEN`. Other enterprise hosts use `GH_ENTERPRISE_TOKEN`, then
@@ -73,10 +77,12 @@ The reaction picker exposes GitHub's supported review-comment reactions: `+1`,
 ## Transport and failure handling
 
 API operations run through `gh api` subprocesses. Coroutine and callback entry
-points apply the configured timeout and exponential backoff to recognized transient
-CLI/network failures. Non-transient failures and invalid JSON fail immediately.
-Cancellable callback writes terminate the active subprocess or pending retry and
-complete at most once.
+points apply the configured timeout. Read requests retry recognized transient
+CLI/network failures with exponential backoff; mutations are never automatically
+replayed. Ambiguous write failures, malformed write responses, and cancellation
+after sending report uncertainty and ask the user to check the review before
+retrying. Cancellable callback writes terminate the active subprocess and complete
+at most once, without waiting for its exit callback.
 
 GitHub transport does not currently implement explicit `X-RateLimit-*`, HTTP 429,
 or HTTP 403 scheduling. Broader handling is tracked in [TODO](TODO.md); behavior

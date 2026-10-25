@@ -849,7 +849,7 @@ end)
 -- ---------------------------------------------------------------------------
 
 async_tests.describe("parley.providers.github.provider — reply", function()
-  async_tests.it("retries transient async gh transport failures with backoff", function()
+  async_tests.it("does not retry an uncertain reply creation", function()
     local calls = 0
     local delays = {}
     local p = make_provider({
@@ -892,10 +892,11 @@ async_tests.describe("parley.providers.github.provider — reply", function()
     end)
 
     assert.is_not_nil(result)
-    assert.is_true(result.ok)
-    assert.equals(2, calls)
-    assert.equals(250, delays[1])
-    assert.equals("3001", result.comment.id)
+    assert.is_false(result.ok)
+    assert.is_true(result.uncertain)
+    assert.equals(1, calls)
+    assert.same({}, delays)
+    assert.is_nil(result.comment)
   end)
 
   async_tests.it("sends in_reply_to equal to the explicit parent_comment_id", function()
