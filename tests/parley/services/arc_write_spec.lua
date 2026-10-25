@@ -62,6 +62,7 @@ describe("Arc new-comment validation", function()
     package.loaded["parley.discussion_window"] = {
       show_new_comment_input = function(_, opts)
         compose = opts
+        return {} -- The real window returns a composer handle after opening.
       end,
     }
   end)
@@ -86,7 +87,9 @@ describe("Arc new-comment validation", function()
       set_idle = function() end,
       set_submitting = function() end,
       set_cancel = function() end,
-      close = function() end,
+      close = function()
+        composer.clear(buf)
+      end,
     }
   end
 

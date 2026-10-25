@@ -105,6 +105,31 @@ local validation = require("parley.services.write_validation")(M)
 local validate_target, validate_submission, provider_changed =
   validation.target, validation.submission, validation.provider_changed
 
+--- Recovery must not re-run opening eligibility or replace a newer draft.
+--- A listed scratch buffer keeps the text accessible if its source is gone.
+--- @param bufnr integer
+--- @param text string
+--- @param show fun(text: string): parley.ComposerHandle|nil
+local function restore_draft(bufnr, text, show)
+  local current = composer_ui_state.get(bufnr)
+  if vim.api.nvim_buf_is_valid(bufnr) and not (current and current.visible) then
+    local ok, handle = pcall(show, text)
+    if ok and handle then
+      return
+    end
+    composer_ui_state.clear(bufnr)
+  end
+  local recovered = vim.api.nvim_create_buf(true, true)
+  vim.api.nvim_buf_set_name(recovered, "parley-recovered-draft://" .. recovered)
+  vim.bo[recovered].bufhidden = "hide"
+  vim.bo[recovered].filetype = "markdown"
+  vim.api.nvim_buf_set_lines(recovered, 0, -1, false, vim.split(text, "\n", { plain = true }))
+  M._notify(
+    "Parley draft preserved in buffer " .. recovered .. ". Use :buffer " .. recovered .. " to recover it.",
+    vim.log.levels.WARN
+  )
+end
+
 --- Open an input window for a new top-level comment.
 --- @param bufnr integer
 --- @param opts? { line?: integer, range?: integer, line1?: integer, line2?: integer, initial_text?: string }
@@ -165,112 +190,118 @@ function M.open_new_comment_input(bufnr, opts)
     if not allowed(bufnr, "post_top_level_comment", write_context) then
       return
     end
-    composer_ui_state.set(bufnr, {
-      mode = "new",
-      visible = true,
-      submit_state = "idle",
-      target_line = anchor,
-      draft = opts.initial_text or "",
-    })
+    --- @param initial_text? string
+    --- @return parley.ComposerHandle|nil
+    local function show_draft(initial_text)
+      composer_ui_state.set(bufnr, {
+        mode = "new",
+        visible = true,
+        submit_state = "idle",
+        target_line = anchor,
+        draft = initial_text or "",
+      })
 
-    require("parley.discussion_window").show_new_comment_input(bufnr, {
-      cursor_line = target_line,
-      initial_text = opts.initial_text,
-      status = "Drafting top-level comment. Press <C-s> to send, or <Esc>s in normal mode. q closes.",
-      on_submit = function(instance, text)
-        if M._validating[bufnr] or M._operations[bufnr] then
-          return false
-        end
-        M._validating[bufnr] = true
-        async.run(function()
-          local validation_ok, validation_err, remote_anchor = pcall(validate_submission, bufnr, write_context, anchor)
-          M._validating[bufnr] = nil
-          if not validation_ok or validation_err then
-            local message = tostring(validation_err)
-            instance.set_idle(message .. " Draft preserved.")
-            M._notify(message, vim.log.levels.WARN)
-            return
+      return require("parley.discussion_window").show_new_comment_input(bufnr, {
+        cursor_line = target_line,
+        initial_text = initial_text,
+        status = "Drafting top-level comment. Press <C-s> to send, or <Esc>s in normal mode. q closes.",
+        on_submit = function(instance, text)
+          if M._validating[bufnr] or M._operations[bufnr] then
+            return false
           end
-          if not allowed(bufnr, "post_top_level_comment", write_context, instance) then
-            return
-          end
-          local body = model.new_body({ text = text, format = "markdown" })
-          operations.run_submit(
-            bufnr,
-            instance,
-            function(callback)
-              if write_context.provider.begin_post_top_level_comment then
-                return write_context.provider:begin_post_top_level_comment(
-                  write_context.review,
-                  write_context.rel_path,
-                  remote_anchor,
-                  body,
-                  callback
-                )
-              end
-
-              local cancelled = false
-              async.run(function()
-                local ok, result = pcall(function()
-                  return write_context.provider:post_top_level_comment(
+          M._validating[bufnr] = true
+          async.run(function()
+            local validation_ok, validation_err, remote_anchor =
+              pcall(validate_submission, bufnr, write_context, anchor)
+            M._validating[bufnr] = nil
+            if not validation_ok or validation_err then
+              local message = tostring(validation_err)
+              instance.set_idle(message .. " Draft preserved.")
+              M._notify(message, vim.log.levels.WARN)
+              return
+            end
+            if not allowed(bufnr, "post_top_level_comment", write_context, instance) then
+              return
+            end
+            local body = model.new_body({ text = text, format = "markdown" })
+            operations.run_submit(
+              bufnr,
+              instance,
+              function(callback)
+                if write_context.provider.begin_post_top_level_comment then
+                  return write_context.provider:begin_post_top_level_comment(
                     write_context.review,
                     write_context.rel_path,
                     remote_anchor,
-                    body
+                    body,
+                    callback
                   )
+                end
+
+                local cancelled = false
+                async.run(function()
+                  local ok, result = pcall(function()
+                    return write_context.provider:post_top_level_comment(
+                      write_context.review,
+                      write_context.rel_path,
+                      remote_anchor,
+                      body
+                    )
+                  end)
+                  vim.schedule(function()
+                    if cancelled then
+                      callback({ ok = false, cancelled = true })
+                    elseif ok then
+                      callback({ ok = true, comment = result })
+                    else
+                      callback({ ok = false, err = tostring(result) })
+                    end
+                  end)
                 end)
-                vim.schedule(function()
-                  if cancelled then
-                    callback({ ok = false, cancelled = true })
-                  elseif ok then
-                    callback({ ok = true, comment = result })
-                  else
-                    callback({ ok = false, err = tostring(result) })
-                  end
-                end)
-              end)
-              return {
-                cancel = function()
-                  cancelled = true
-                end,
-              }
-            end,
-            "Sending request... Press C to cancel request.",
-            {
-              running = "Sending comment",
-              refreshing = "Refreshing discussion",
-              success = "Comment sent",
-              failed = "Comment failed",
-              cancelled = "Comment cancelled",
-            },
-            {
-              cursor_line = target_line,
-              optimistic = {
-                stage = function()
-                  return review_repository.stage_comment(bufnr, {
-                    kind = "new",
-                    file = write_context.rel_path,
-                    anchor = anchor,
-                    remote_anchor = remote_anchor,
-                    body = body,
-                  })
-                end,
-                confirm = function(token, result)
-                  return review_repository.confirm_comment(token, result.comment)
-                end,
-                rollback = function(token)
-                  review_repository.rollback_comment(token)
-                end,
-                restore = function()
-                  M.open_new_comment_input(bufnr, vim.tbl_extend("force", {}, opts, { initial_text = text }))
-                end,
+                return {
+                  cancel = function()
+                    cancelled = true
+                  end,
+                }
+              end,
+              "Sending request... Press C to cancel request.",
+              {
+                running = "Sending comment",
+                refreshing = "Refreshing discussion",
+                success = "Comment sent",
+                failed = "Comment failed",
+                cancelled = "Comment cancelled",
               },
-            }
-          )
-        end)
-        return true
-      end,
-    })
+              {
+                cursor_line = target_line,
+                optimistic = {
+                  stage = function()
+                    return review_repository.stage_comment(bufnr, {
+                      kind = "new",
+                      file = write_context.rel_path,
+                      anchor = anchor,
+                      remote_anchor = remote_anchor,
+                      body = body,
+                    })
+                  end,
+                  confirm = function(token, result)
+                    return review_repository.confirm_comment(token, result.comment)
+                  end,
+                  rollback = function(token)
+                    review_repository.rollback_comment(token)
+                  end,
+                  restore = function()
+                    restore_draft(bufnr, text, show_draft)
+                  end,
+                },
+              }
+            )
+          end)
+          return true
+        end,
+      })
+    end
+    show_draft(opts.initial_text)
   end)
 end
 
@@ -302,88 +333,99 @@ function M.open_reply_input(bufnr, discussion, parent_comment, opts)
       and review_snapshot.mappings[discussion.id]
       and review_snapshot.mappings[discussion.id].local_line
     or nil
-  composer_ui_state.set(bufnr, {
-    mode = "reply",
-    visible = true,
-    submit_state = "idle",
-    target_discussion_id = discussion.id,
-    target_parent_comment_id = parent_comment.id,
-    draft = opts.initial_text or "",
-  })
+  --- @param initial_text? string
+  --- @return parley.ComposerHandle|nil
+  local function show_draft(initial_text)
+    composer_ui_state.set(bufnr, {
+      mode = "reply",
+      visible = true,
+      submit_state = "idle",
+      target_discussion_id = discussion.id,
+      target_parent_comment_id = parent_comment.id,
+      draft = initial_text or "",
+    })
 
-  require("parley.discussion_window").show_reply_input(bufnr, {
-    parent_comment_id = parent_comment.id,
-    title = "New reply:",
-    initial_text = opts.initial_text,
-    status = "Drafting reply. Press <C-s> to send, or <Esc>s in normal mode. q closes.",
-    on_submit = function(instance, text)
-      if not allowed(bufnr, "reply", write_context, instance) then
-        return false
-      end
-      local body = model.new_body({ text = text, format = "markdown" })
-      return operations.run_submit(
-        bufnr,
-        instance,
-        function(callback)
-          if write_context.provider.begin_reply then
-            return write_context.provider:begin_reply(write_context.review, discussion, parent_comment, body, callback)
-          end
+    return require("parley.discussion_window").show_reply_input(bufnr, {
+      parent_comment_id = parent_comment.id,
+      title = "New reply:",
+      initial_text = initial_text,
+      status = "Drafting reply. Press <C-s> to send, or <Esc>s in normal mode. q closes.",
+      on_submit = function(instance, text)
+        if not allowed(bufnr, "reply", write_context, instance) then
+          return false
+        end
+        local body = model.new_body({ text = text, format = "markdown" })
+        return operations.run_submit(
+          bufnr,
+          instance,
+          function(callback)
+            if write_context.provider.begin_reply then
+              return write_context.provider:begin_reply(
+                write_context.review,
+                discussion,
+                parent_comment,
+                body,
+                callback
+              )
+            end
 
-          local cancelled = false
-          async.run(function()
-            local ok, result = pcall(function()
-              return write_context.provider:reply(write_context.review, discussion, parent_comment, body)
+            local cancelled = false
+            async.run(function()
+              local ok, result = pcall(function()
+                return write_context.provider:reply(write_context.review, discussion, parent_comment, body)
+              end)
+              vim.schedule(function()
+                if cancelled then
+                  callback({ ok = false, cancelled = true })
+                elseif ok then
+                  callback({ ok = true, comment = result })
+                else
+                  callback({ ok = false, err = tostring(result) })
+                end
+              end)
             end)
-            vim.schedule(function()
-              if cancelled then
-                callback({ ok = false, cancelled = true })
-              elseif ok then
-                callback({ ok = true, comment = result })
-              else
-                callback({ ok = false, err = tostring(result) })
-              end
-            end)
-          end)
-          return {
-            cancel = function()
-              cancelled = true
-            end,
-          }
-        end,
-        "Sending request... Press C to cancel request.",
-        {
-          running = "Sending reply",
-          refreshing = "Refreshing discussion",
-          success = "Reply sent",
-          failed = "Reply failed",
-          cancelled = "Reply cancelled",
-        },
-        {
-          cursor_line = target_line,
-          discussion_id = discussion.id,
-          optimistic = {
-            stage = function()
-              return review_repository.stage_comment(bufnr, {
-                kind = "reply",
-                discussion_id = discussion.id,
-                parent_comment_id = parent_comment.id,
-                body = body,
-              })
-            end,
-            confirm = function(token, result)
-              return review_repository.confirm_comment(token, result.comment)
-            end,
-            rollback = function(token)
-              review_repository.rollback_comment(token)
-            end,
-            restore = function()
-              M.open_reply_input(bufnr, discussion, parent_comment, { initial_text = text })
-            end,
+            return {
+              cancel = function()
+                cancelled = true
+              end,
+            }
+          end,
+          "Sending request... Press C to cancel request.",
+          {
+            running = "Sending reply",
+            refreshing = "Refreshing discussion",
+            success = "Reply sent",
+            failed = "Reply failed",
+            cancelled = "Reply cancelled",
           },
-        }
-      )
-    end,
-  })
+          {
+            cursor_line = target_line,
+            discussion_id = discussion.id,
+            optimistic = {
+              stage = function()
+                return review_repository.stage_comment(bufnr, {
+                  kind = "reply",
+                  discussion_id = discussion.id,
+                  parent_comment_id = parent_comment.id,
+                  body = body,
+                })
+              end,
+              confirm = function(token, result)
+                return review_repository.confirm_comment(token, result.comment)
+              end,
+              rollback = function(token)
+                review_repository.rollback_comment(token)
+              end,
+              restore = function()
+                restore_draft(bufnr, text, show_draft)
+              end,
+            },
+          }
+        )
+      end,
+    })
+  end
+  return show_draft(opts.initial_text)
 end
 
 --- Open an input window for editing an existing comment.

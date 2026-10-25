@@ -170,6 +170,12 @@ All Parley commands support tab completion.
     comment with provider data and starts a quiet background refresh. A definite
     failure or cancellation removes the temporary comment and restores the draft.
 
+    Restored drafts retain their original review binding even if the source file
+    became dirty; submission checks still apply. If the original composer cannot
+    be restored, or a newer draft is open, the text is retained in a listed
+    `parley-recovered-draft://` buffer. Use the reported `:buffer N` command to
+    recover the text.
+
 :Parley review actions                                *:Parley-review-actions*
     Open the provider's explicit review-action picker. Arcanum offers Ship,
     Sticky ship, Unship, Block merge, and Unblock merge. Confirm the PR, loaded
