@@ -2,7 +2,7 @@
 local M = {}
 --- @type fun(name: string): integer
 M._executable = vim.fn.executable
---- @type fun(host: string): string|nil, string|nil
+--- @type fun(host: string, opts: table): string|nil, string|nil
 M._read_token = require("parley.providers.github.auth").read_token_async
 
 --- @param ctx parley.HealthContext
@@ -21,11 +21,11 @@ function M.check(ctx)
     level = branch and branch ~= "" and "ok" or "info",
     message = branch and branch ~= "" and ("Current branch: " .. branch) or "No active branch (possibly detached HEAD)",
   }
-  local token = M._read_token(ctx.opts.host)
+  local token = M._read_token(ctx.opts.host, { local_only = true })
   entries[#entries + 1] = {
     level = token and "ok" or "warn",
     message = token and "GitHub credential available locally"
-      or "No GitHub credential found in environment or hosts.yml; keyring credentials are not checked",
+      or "GitHub credential unavailable; run gh auth login --hostname " .. ctx.opts.host .. " and retry",
   }
   return entries
 end

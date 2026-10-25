@@ -1,49 +1,41 @@
-local identity = require("parley.providers.github.cache_identity")
+local a = require("plenary.async.tests")
+local github = require("parley.providers.github.provider")
 
-describe("GitHub cache identity", function()
-  it("fingerprints credentials and local viewer context without API calls", function()
-    local token, login = "SECRET", "alice"
-    local p = {
-      _host = "host",
-      _api_base = "endpoint",
-      _owner = "o",
-      _repo = "r",
+a.describe("prepared GitHub cache identity", function()
+  a.it("fingerprints CLI credentials and keeps cache getters free of I/O", function()
+    local token, calls = "SECRET", 0
+    local p = github.new({
+      repository = "o/r",
+      host = "host",
       _auth = {
-        read_token = function()
+        read_token_async = function()
+          calls = calls + 1
           return token
         end,
       },
-      _runner = function(cmd)
-        assert.equals("config", cmd[2])
-        return { code = 0, stdout = login }
-      end,
-    }
-    local first = identity.get(p)
+    })
+    assert.is_nil(p:cache_identity())
+    p:prepare()
+    local first = p:cache_identity()
     assert.is_nil(vim.inspect(first):find(token, 1, true))
-    login = "bob"
-    assert.is_not.equals(first.account, identity.get(p).account)
+    assert.same(first, p:cache_identity())
+    assert.equals(1, calls)
     token = "OTHER"
-    assert.is_not.equals(first.account, identity.get(p).account)
+    p:prepare()
+    assert.is_not.equals(first.account, p:cache_identity().account)
+    p._host = "another-host"
+    assert.is_nil(p:cache_identity())
   end)
-  it("uses local CLI credentials then disables caching when unavailable", function()
-    local available = true
-    local p = {
-      _host = "host",
-      _api_base = "endpoint",
-      _owner = "o",
-      _repo = "r",
+  a.it("disables persistent caching when CLI credentials cannot be established", function()
+    local p = github.new({
+      repository = "o/r",
       _auth = {
-        read_token = function()
+        read_token_async = function()
           return nil
         end,
       },
-      _runner = function(cmd)
-        assert.is_false(cmd[2] == "api")
-        return { code = available and 0 or 1, stdout = "SECRET" }
-      end,
-    }
-    assert.is_not_nil(identity.get(p))
-    available = false
-    assert.is_nil(identity.get(p))
+    })
+    p:prepare()
+    assert.is_nil(p:cache_identity())
   end)
 end)

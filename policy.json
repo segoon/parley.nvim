@@ -327,6 +327,7 @@
         "lua/parley/providers/github/config.lua",
         "lua/parley/providers/github/descriptor.lua",
         "lua/parley/providers/github/diagnostics.lua",
+        "lua/parley/providers/github/discussions.lua",
         "lua/parley/providers/github/mapping.lua",
         "lua/parley/providers/github/metadata.lua",
         "lua/parley/providers/github/provider.lua",

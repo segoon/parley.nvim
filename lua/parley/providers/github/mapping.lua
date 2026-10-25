@@ -34,16 +34,16 @@ M.REVIEW_EVENT_MAP = {
 }
 
 --- GraphQL query fetching review-thread resolution state and node ids for a
---- PR, paginated via reviewThreads(first, after: $cursor). Only the first
+--- PR, paginated via reviewThreads(first, after: $endCursor). Only the first
 --- comment of each thread is requested — its databaseId is the REST review
 --- comment id already used as parley.Discussion.id, letting us correlate
 --- GraphQL threads to REST-derived discussions.
 --- @type string
 M.REVIEW_THREADS_QUERY = [[
-query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
+query($owner: String!, $repo: String!, $number: Int!, $endCursor: String) {
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) {
-      reviewThreads(first: 100, after: $cursor) {
+      reviewThreads(first: 100, after: $endCursor) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id

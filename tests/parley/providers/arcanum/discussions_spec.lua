@@ -127,7 +127,7 @@ describe("Arcanum discussion semantics", function()
     local original, reads = anchor._diff, {}
     anchor._diff = function(_, revision, path)
       reads[#reads + 1] = { revision, path }
-      return ""
+      return {}
     end
     local comments = { raw(1), raw(2, nil, "old"), raw(3, nil, "new", "41"), raw(4) }
     comments[4].anchor.review_request.diff.file.position.line = -1

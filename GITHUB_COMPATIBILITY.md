@@ -1,6 +1,6 @@
 # GitHub compatibility
 
-Parley supports GitHub pull-request discussions through Git and the `gh` CLI. This
+Parley supports GitHub pull-request discussions through Git and the `gh` CLI (version 2.48 or newer). This
 document records provider contracts and limitations. See [README](README.md) for
 setup, the [help template](doc/parley.nvim.txt.in) for the full user reference,
 and [TODO](TODO.md) for unfinished work.
@@ -10,7 +10,7 @@ and [TODO](TODO.md) for unfinished work.
 | Workflow | Behavior | Limits |
 |---|---|---|
 | Discovery | Detect a Git working copy, parse its `origin`, and find an open PR for the current branch | Automatic provider selection currently accepts `github.com` remotes only |
-| Authentication | Resolve host-appropriate environment tokens or `gh`'s `hosts.yml` token | Interactive login, SSO, and keyring behavior remain owned by `gh` |
+| Authentication | Delegate host-specific credential selection to `gh auth token` | Environment, config, keyring, and token refresh behavior remain owned by `gh` |
 | Discussions | Read paginated REST review comments and group roots with replies | GraphQL resolution metadata is overlaid separately |
 | Inline comments | Create new-side line and range comments | Requires a clean file, matching HEAD, and changed lines in the loaded review |
 | Comment actions | Reply, edit, delete, react, resolve, reopen, and open canonical thread or comment links | Resolution requires a GraphQL thread ID from a successful discussion fetch |
@@ -30,23 +30,33 @@ Every REST and GraphQL request explicitly selects the configured host, overridin
 the same base with a trailing `/v3` replaced by `/graphql` (or `/graphql` appended
 when there is no `/v3` suffix).
 
-For `github.com` and `*.ghe.com`, credentials are resolved from `GH_TOKEN`, then
-`GITHUB_TOKEN`. Other enterprise hosts use `GH_ENTERPRISE_TOKEN`, then
-`GITHUB_ENTERPRISE_TOKEN`. If no environment token is present, Parley reads the
-matching `oauth_token` from `gh`'s `hosts.yml`, following `GH_CONFIG_DIR`,
-`XDG_CONFIG_HOME`, and `HOME` precedence.
+Parley resolves credentials asynchronously with `gh auth token --hostname <host>`.
+The CLI owns environment precedence, active-account selection, configuration paths,
+and secure storage. Parley does not parse `hosts.yml`. Run `gh auth login` to set
+up authentication. Credential lookup has a timeout and its output is never logged.
 
-Cache identity includes the host, API base, repository, token, and local viewer
-context through a one-way fingerprint. Credentials are not stored in cache keys.
-If a stable local credential cannot be established, persistent caching is disabled
-for that provider instance.
+Preparation captures the selected token. API subprocesses receive that token via
+their environment, and credential checks before and after each operation reject
+obsolete results. A changed or unavailable credential invalidates the session;
+refresh the review before continuing. An interrupted mutation may still have been
+sent and must be checked before retrying.
+
+Cache identity includes host, API base, repository, and a one-way token fingerprint.
+The getter performs no I/O. Credentials are not stored in cache keys. If a stable
+credential cannot be established during preparation, persistent caching is disabled
+for that provider instance. The changed fingerprint format causes a cold refresh
+of earlier cached GitHub reviews.
+
+Health checks resolve credentials through `gh` without refreshing tokens, including
+secure-store credentials. Older CLI versions that do not refresh tokens fall back
+to their original token command. Health checks do not validate server authorization.
 
 ## API contracts
 
 | Operation | Contract |
 |---|---|
 | PR discovery | `GET /repos/{owner}/{repo}/pulls?head={owner}:{branch}&state=open` |
-| Review status | `GET /repos/{owner}/{repo}/pulls/{number}/reviews` |
+| Review status | `GET --paginate /repos/{owner}/{repo}/pulls/{number}/reviews` |
 | Discussions | `GET --paginate /repos/{owner}/{repo}/pulls/{number}/comments` |
 | Thread state | GraphQL `reviewThreads`, paginated and correlated by root comment database ID |
 | Inline creation | `POST /repos/{owner}/{repo}/pulls/{number}/comments` |
@@ -80,8 +90,22 @@ The reaction picker exposes GitHub's supported review-comment reactions: `+1`,
 ## Transport and failure handling
 
 API operations run through `gh api` subprocesses. Coroutine and callback entry
-points apply the configured timeout. Read requests retry recognized transient
-CLI/network failures with exponential backoff; mutations are never automatically
+points share one request lifecycle with timeout, retry, cancellation, decoding,
+and at-most-once completion.
+
+REST lists (comments, reviews, and reactions) use `--paginate --slurp`; Parley
+flattens the resulting page arrays. Standard GraphQL thread queries use the same
+flags and `$endCursor`. A failed later page does not publish partial metadata.
+Custom API bases retain explicit cursor traversal because `gh` only recognizes
+its literal `graphql` endpoint for GraphQL pagination. Absolute GraphQL requests
+encode parameters under `variables`. Failed thread refreshes clear cached thread
+IDs before resolution writes can use them.
+
+Local line mapping uses `vim.diff(..., { result_type = "indices" })` directly.
+Git's review-range patch parsing remains responsible for changed-line write
+validation; local buffer diffs do not redefine which lines GitHub accepts.
+
+Read requests retry recognized transient CLI/network failures with exponential backoff; mutations are never automatically
 replayed. Ambiguous write failures, malformed write responses, and cancellation
 after sending report uncertainty and ask the user to check the review before
 retrying. Cancellable callback writes terminate the active subprocess and complete

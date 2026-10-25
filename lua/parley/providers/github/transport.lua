@@ -1,13 +1,10 @@
 --- parley.providers.github.transport — gh CLI transport layer.
 ---
---- Provides two primitives for executing `gh api …` commands:
----   • gh_run   — synchronous (blocking via plenary.async), with exponential-
----                backoff retry on transient network errors.
----   • gh_start — asynchronous (callback-based), cancellable, also with retry.
----
---- Both functions operate on a parley.github.Provider table and read their
---- timeout / retry settings through transport_config().
+--- One cancellable callback lifecycle; coroutine callers await the same result.
 
+local async = require("plenary.async")
+local await = require("parley.runtime.await")
+local identity = require("parley.providers.github.cache_identity")
 local ui = require("parley.runtime.ui")
 local dbg = require("parley.debug")
 
@@ -102,6 +99,14 @@ local function is_retryable_failure(result)
   return result.code == 124 or is_retryable_error(result.stderr)
 end
 
+--- @param self parley.github.Provider
+--- @return boolean
+function M.uses_custom_api_base(self)
+  local host = self._host or "github.com"
+  local standard = host == "github.com" and "https://api.github.com" or "https://" .. host .. "/api/v3"
+  return (self._api_base or standard):gsub("/+$", "") ~= standard
+end
+
 --- Bind every API request to the same host used by credential/cache identity.
 --- Copy arguments so retries and callers cannot accumulate routing flags.
 --- @param self parley.github.Provider
@@ -112,10 +117,19 @@ local function routed_command(self, cmd)
   local host = self._host or "github.com"
   local standard = host == "github.com" and "https://api.github.com" or "https://" .. host .. "/api/v3"
   local base = (self._api_base or standard):gsub("/+$", "")
-  if base ~= standard then
+  if M.uses_custom_api_base(self) then
     for i = 3, #result do
       if result[i] == "graphql" then
         result[i] = base:gsub("/v3$", "") .. "/graphql"
+        -- Absolute endpoints use gh's REST field encoding, including nested variables.
+        for j = 3, #result - 1 do
+          if result[j] == "-f" or result[j] == "-F" then
+            local name, value = result[j + 1]:match("^([^=]+)=(.*)$")
+            if name and name ~= "query" and name ~= "operationName" then
+              result[j + 1] = "variables[" .. name .. "]=" .. value
+            end
+          end
+        end
         break
       elseif result[i]:sub(1, 1) == "/" then
         result[i] = base .. result[i]
@@ -123,12 +137,15 @@ local function routed_command(self, cmd)
       end
     end
   end
+  if vim.tbl_contains(result, "--paginate") and not vim.tbl_contains(result, "--slurp") then
+    result[#result + 1] = "--slurp"
+  end
   vim.list_extend(result, { "--hostname", host })
   return result
 end
 
 -- ---------------------------------------------------------------------------
--- gh_run — synchronous runner with retry
+-- gh_run — coroutine adapter
 -- ---------------------------------------------------------------------------
 
 --- REST reads are inferred from the command; GraphQL queries opt in explicitly.
@@ -177,53 +194,36 @@ end
 --- @param policy? 'read'|'none'
 --- @return table|nil
 function M.gh_run(self, cmd, policy)
-  cmd = routed_command(self, cmd)
-  local runner = self._runner
-  local cfg = M.transport_config(self)
-  local can_retry = read_only(cmd, policy)
-  local attempts = can_retry and cfg.retry_count + 1 or 1
-  local result
-
-  dbg.trace("github.transport", "gh_run: cmd=" .. vim.inspect(cmd))
-
-  local gh_err = check_gh_available()
-  if gh_err then
-    error(gh_err, 0)
+  local result = await.callback(function(callback)
+    M.gh_start(self, cmd, callback, policy)
+  end)
+  if not result.ok then
+    error(result.err or "GitHub request cancelled", 0)
   end
+  return result.data
+end
 
-  for attempt = 1, attempts do
-    result = runner(cmd)
-    dbg.trace(
-      "github.transport",
-      "gh_run: attempt="
-        .. attempt
-        .. " code="
-        .. tostring(result.code)
-        .. " stdout="
-        .. vim.inspect(result.stdout or "")
-        .. " stderr="
-        .. vim.inspect(result.stderr or "")
-    )
-    if result.code == 0 then
-      break
+--- Decode CLI output. REST pagination returns arrays of pages; GraphQL retains envelopes.
+--- @param cmd string[]
+--- @param stdout string
+--- @return any
+local function decode(cmd, stdout)
+  local decoded = vim.json.decode(stdout)
+  if not vim.tbl_contains(cmd, "--paginate") then
+    return decoded
+  end
+  assert(type(decoded) == "table" and vim.islist(decoded), "Invalid paginated response")
+  for _, arg in ipairs(cmd) do
+    if arg == "graphql" or arg:match("/graphql$") then
+      return decoded
     end
-    if attempt >= attempts or not is_retryable_failure(result) then
-      local message = string.format("parley.github: gh command failed (exit %d): %s", result.code, result.stderr or "")
-      error(not can_retry and not definite_rejection(result) and uncertain_message(message) or message, 0)
-    end
-    self._sleep(retry_delay_ms(attempt, cfg))
   end
-
-  local stdout = result.stdout or ""
-  if stdout == "" then
-    return nil
+  local items = {}
+  for _, page in ipairs(decoded) do
+    assert(type(page) == "table" and vim.islist(page), "Invalid REST page")
+    vim.list_extend(items, page)
   end
-  local ok_decode, decoded = pcall(vim.json.decode, stdout)
-  if not ok_decode then
-    local message = "parley.github: failed to decode JSON response"
-    error(not can_retry and uncertain_message(message) or message, 0)
-  end
-  return decoded
+  return items
 end
 
 -- ---------------------------------------------------------------------------
@@ -238,7 +238,11 @@ end
 --- @return { cancel: fun(): nil }
 function M.gh_start(self, cmd, callback, policy)
   cmd = routed_command(self, cmd)
-  local completed = false
+  local generation = self._session_generation
+  local completed, settling = false, false
+  local function current_session()
+    return generation == self._session_generation and identity.check(self) and generation == self._session_generation
+  end
   local cancelled = false
   local handle = nil
   local retry_timer = nil
@@ -264,7 +268,7 @@ function M.gh_start(self, cmd, callback, policy)
     retry_timer = nil
   end
 
-  local function finish(result)
+  local function deliver(result)
     if completed then
       return
     end
@@ -279,9 +283,39 @@ function M.gh_start(self, cmd, callback, policy)
     end)
   end
 
+  --- @param result table
+  local function finish(result)
+    if completed or settling then
+      return
+    end
+    settling = true
+    if not self._prepared then
+      deliver(result)
+      return
+    end
+    async.run(function()
+      local ok, current = pcall(current_session)
+      if not ok or not current then
+        result = {
+          ok = false,
+          uncertain = sent and not can_retry,
+          err = "GitHub credentials changed or are unavailable; refresh the review before continuing",
+        }
+      end
+      deliver(result)
+    end)
+  end
+
   dbg.trace("github.transport", "gh_start: cmd=" .. vim.inspect(cmd))
 
   local function start_attempt()
+    if completed or cancelled then
+      return
+    end
+    if generation ~= self._session_generation then
+      finish({ ok = false, err = "GitHub session changed; refresh the review before continuing" })
+      return
+    end
     attempt = attempt + 1
     dbg.trace("github.transport", "gh_start: attempt=" .. attempt)
     local gh_err = check_gh_available()
@@ -292,6 +326,9 @@ function M.gh_start(self, cmd, callback, policy)
     sent = true
     local delivered = false
     local started, request = pcall(self._spawn, cmd, function(result)
+      if delivered or completed then
+        return
+      end
       delivered = true
       handle = nil
       dbg.trace(
@@ -315,6 +352,10 @@ function M.gh_start(self, cmd, callback, policy)
       end
 
       if result.code ~= 0 then
+        if (result.stderr or ""):find("unknown flag: --slurp", 1, true) then
+          finish({ ok = false, err = "Parley requires GitHub CLI 2.48 or newer; upgrade gh and retry" })
+          return
+        end
         if attempt < attempts and is_retryable_failure(result) then
           retry_timer = self._defer(function()
             retry_timer = nil
@@ -339,7 +380,7 @@ function M.gh_start(self, cmd, callback, policy)
         return
       end
 
-      local ok_decode, decoded = pcall(vim.json.decode, stdout)
+      local ok_decode, decoded = pcall(decode, cmd, stdout)
       if not ok_decode then
         finish({ ok = false, uncertain = not can_retry, err = "parley.github: failed to decode JSON response" })
         return
@@ -353,12 +394,31 @@ function M.gh_start(self, cmd, callback, policy)
         uncertain = not can_retry,
         err = "parley.github: could not start request: " .. tostring(request),
       })
+    elseif cancelled and request and request.kill then
+      pcall(request.kill, request, 15)
     elseif not completed and not delivered then
       handle = request
     end
   end
 
-  start_attempt()
+  if self._prepared then
+    async.run(function()
+      local ok, current = pcall(current_session)
+      if completed then
+        return
+      end
+      if not ok or not current then
+        deliver({
+          ok = false,
+          err = "GitHub credentials changed or are unavailable; refresh the review before continuing",
+        })
+        return
+      end
+      start_attempt()
+    end)
+  else
+    start_attempt()
+  end
 
   return {
     cancel = function()
@@ -367,7 +427,7 @@ function M.gh_start(self, cmd, callback, policy)
       end
       cancelled = true
       local active = handle
-      finish({ ok = false, cancelled = true })
+      deliver({ ok = false, cancelled = true })
       if active and active.kill then
         pcall(function()
           active:kill(15)
@@ -418,7 +478,7 @@ local function graphql_errors(decoded)
   return table.concat(messages, "; ")
 end
 
---- Run a GraphQL query/mutation synchronously and return its `data` field.
+--- Await a GraphQL query/mutation and return its `data` field.
 --- Raises on transport failure or GraphQL-level errors.
 ---
 --- @param self parley.github.Provider
@@ -433,6 +493,28 @@ function M.gh_graphql(self, query, variables, policy)
     error("parley.github: GraphQL error: " .. err, 0)
   end
   return decoded and decoded.data or nil
+end
+
+--- Fetch a paginated GraphQL connection; the query must use $endCursor.
+--- @param self parley.github.Provider
+--- @param query string
+--- @param variables table
+--- @return table[]
+function M.gh_graphql_pages(self, query, variables)
+  local cmd = M.build_graphql_cmd(query, variables)
+  cmd[#cmd + 1] = "--paginate"
+  local pages = M.gh_run(self, cmd, "read")
+  local data = {}
+  for _, page in ipairs(pages or {}) do
+    assert(type(page) == "table", "Invalid GitHub GraphQL page")
+    local err = graphql_errors(page)
+    if err then
+      error("parley.github: GraphQL error: " .. err, 0)
+    end
+    assert(type(page.data) == "table", "Missing GitHub GraphQL page data")
+    data[#data + 1] = page.data
+  end
+  return data
 end
 
 --- Start a cancellable GraphQL query/mutation request.

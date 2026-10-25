@@ -1,3 +1,4 @@
+local a = require("plenary.async.tests")
 local github = require("parley.providers.github.provider")
 local transport = require("parley.providers.github.transport")
 
@@ -22,18 +23,22 @@ describe("GitHub review-status degradation", function()
     { name = "empty reviews", response = { code = 0, stdout = "[]" }, status = "pending" },
     { name = "approved", response = { code = 0, stdout = '[{"state":"APPROVED"}]' }, status = "approved" },
   }) do
-    it("keeps discussions readable after " .. case.name, function()
+    a.it("keeps discussions readable after " .. case.name, function()
       local provider = github.new({
         repository = "owner/repo",
         config = { retry_count = 0 },
         _runner = function(cmd)
           local args = table.concat(cmd, " ")
           if args:find("/reviews", 1, true) then
-            return case.response
+            local result = vim.deepcopy(case.response)
+            if result.code == 0 then
+              result.stdout = "[" .. result.stdout .. "]"
+            end
+            return result
           elseif args:find("/pulls?", 1, true) then
             return { code = 0, stdout = '[{"number":42,"head":{"sha":"head"},"base":{"ref":"main"}}]' }
           elseif args:find("/comments", 1, true) then
-            return { code = 0, stdout = '[{"id":1,"path":"a.lua","line":1,"body":"Readable"}]' }
+            return { code = 0, stdout = '[[{"id":1,"path":"a.lua","line":1,"body":"Readable"}]]' }
           elseif cmd[2] == "config" then
             return { code = 0, stdout = "viewer" }
           end

@@ -1,3 +1,4 @@
+local a = require("plenary.async.tests")
 local github = require("parley.providers.github.provider")
 local transport = require("parley.providers.github.transport")
 
@@ -13,7 +14,7 @@ describe("GitHub request routing", function()
 
   for _, mode in ipairs({ "coroutine", "callback" }) do
     for _, host in ipairs({ "github.com", "ghe.example.com" }) do
-      it("pins REST and GraphQL " .. mode .. " requests to " .. host, function()
+      a.it("pins REST and GraphQL " .. mode .. " requests to " .. host, function()
         local commands = {}
         local provider = github.new({
           repository = "owner/repo",
@@ -53,7 +54,7 @@ describe("GitHub request routing", function()
     end
   end
 
-  it("uses an explicit API base for REST and GraphQL endpoints", function()
+  a.it("uses an explicit API base for REST and GraphQL endpoints", function()
     local commands = {}
     local provider = github.new({
       repository = "owner/repo",

@@ -39,7 +39,7 @@ Required:
 - Neovim `>= 0.10`
 - [`nvim-lua/plenary.nvim`](https://github.com/nvim-lua/plenary.nvim)
 
-GitHub requires `git` and `gh`. Arcanum requires `arc`, `ya tool arcanum`, `curl`, and HTTPS access
+GitHub requires `git` and `gh >= 2.48`. Arcanum requires `arc`, `ya tool arcanum`, `curl`, and HTTPS access
 to its configured API host (default `arcanum.yandex.net`).
 
 Optional:
@@ -266,7 +266,10 @@ review data and drafts remain visible, with existing identity checks still appli
 Use `:Parley refresh` for an explicit progress-enabled refresh and error reporting.
 Repeated `setup()` replaces the polling schedule; editor shutdown stops it.
 
-Requests to GitHub are made through the standard `gh` CLI.
+Requests to GitHub are made through the standard `gh` CLI. Parley also delegates
+credential lookup (including secure storage) and pagination to `gh`. Prepare
+authentication with `gh auth login`; credentials are checked around API requests
+and changes require a review refresh.
 Arcanum uses `ya tool arcanum` asynchronously for discovery, diff reads, and
 comment actions. Full discussion reads and review verdicts retain HTTPS. Both
 transports share a default request budget of 10 seconds,

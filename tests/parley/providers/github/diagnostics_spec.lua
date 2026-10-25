@@ -14,8 +14,9 @@ describe("GitHub local diagnostics", function()
       calls[#calls + 1] = tool
       return 1
     end
-    diagnostics._read_token = function(host)
+    diagnostics._read_token = function(host, opts)
       assert.equals("example.test", host)
+      assert.is_true(opts.local_only)
       return "SECRET"
     end
     local entries = diagnostics.check({ vcs_info = { branch = "feature" }, opts = { host = "example.test" } })
