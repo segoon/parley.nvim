@@ -217,7 +217,9 @@ All Parley commands support tab completion.
 
 :Parley nav review-prev                              *:Parley-nav-review-prev*
     Jump to the previous comment across all files in the review.
-    Mirror of `:Parley nav review-next`. Wraps around at the start.
+    Jump to the nearest discussion before the cursor, including when the cursor
+    is between discussions. Wraps around at the start. Cross-file navigation
+    from a discussion float reopens the discussion in the destination file.
     Append `unresolved` to visit only unresolved discussions.
 
 :Parley quickfix                                     *:Parley-quickfix*

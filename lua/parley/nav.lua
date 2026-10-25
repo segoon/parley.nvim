@@ -155,7 +155,7 @@ local function goto_discussion(bufnr, winid, original_bufnr, ctx, vcs_root, head
   vim.api.nvim_win_set_cursor(winid, { target_line, 0 })
   if from_float then
     vim.schedule(function()
-      require("parley.discussion_window").open_current_line(bufnr, { cursor_line = target_line })
+      require("parley.discussion_window").open_current_line(target_buf, { cursor_line = target_line })
     end)
   end
 end
@@ -403,15 +403,15 @@ function M.review_prev(bufnr, opts)
   local cursor = vim.api.nvim_win_get_cursor(winid)[1] - 1
   local snapshot = review_repository.get(bufnr)
   local mappings = snapshot and snapshot.all_mappings or {}
-  local cur_idx = M._current_index(sorted, ctx.rel_path, cursor, mappings)
-
-  -- Previous index with wrap-around.
-  -- When cur_idx == 0 (no match) we want the last element.
-  local target_idx
-  if cur_idx <= 1 then
-    target_idx = #sorted
-  else
-    target_idx = cur_idx - 1
+  -- Compare locations directly: the cursor may lie between discussions or in
+  -- a file without discussions. Only wrap when no preceding location exists.
+  local target_idx = #sorted
+  for i, candidate in ipairs(sorted) do
+    local mapping = mappings[candidate.id]
+    local line = mapping and mapping.local_line or candidate.line
+    if candidate.file < ctx.rel_path or (candidate.file == ctx.rel_path and line - 1 < cursor) then
+      target_idx = i
+    end
   end
   local disc = sorted[target_idx]
   if not disc.file or disc.file == "" then
