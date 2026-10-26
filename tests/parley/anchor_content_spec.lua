@@ -23,7 +23,7 @@ a.describe("content anchoring", function()
 
   a.it("maps insertions after a line without shifting that line", function()
     anchor._diff = function()
-      return "@@ -1,0 +2,1 @@\n"
+      return { { old_start = 1, old_count = 0, new_start = 2, new_count = 1 } }
     end
     local result = anchor.map_discussions({ vcs = "arc", root = "/arc" }, "abc", {
       { id = "one", file = "f", line = 1 },
@@ -37,7 +37,7 @@ a.describe("content anchoring", function()
     local count = 0
     anchor._diff = function()
       count = count + 1
-      return ""
+      return {}
     end
     local result = anchor.map_discussions({ vcs = "arc", root = "/arc" }, "abc", {
       { id = "general", file = "", line = 0 },
@@ -51,7 +51,7 @@ a.describe("content anchoring", function()
 
   a.it("marks a range stale when any covered line changes", function()
     anchor._diff = function()
-      return "@@ -3 +3 @@\n"
+      return { { old_start = 3, old_count = 1, new_start = 3, new_count = 1 } }
     end
     local result = anchor.map_discussions({ vcs = "arc", root = "/arc" }, "abc", {
       { id = "range", file = "f", line = 1, end_line = 5 },

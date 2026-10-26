@@ -46,7 +46,7 @@ Current state: ~
 
 GitHub provider: ~
   - git
-  - gh (GitHub CLI, https://cli.github.com)
+  - gh >= 2.48 (GitHub CLI, https://cli.github.com)
 
 Arcanum provider: ~
   - arc (Arcadia VCS CLI)
@@ -450,14 +450,38 @@ credentials, and explicit constructor support configured GitHub Enterprise Serve
 
 Authentication: ~
 
-Tokens are resolved in the following order:
+Parley runs `gh auth token --hostname <host>` asynchronously. GitHub CLI owns
+credential selection from environment variables, its configuration, and secure
+storage. Run `gh auth login` to set up authentication.
 
-  1. Environment variables:
-     - `GH_TOKEN` / `GITHUB_TOKEN` (for github.com and *.ghe.com)
-     - `GH_ENTERPRISE_TOKEN` / `GITHUB_ENTERPRISE_TOKEN` (for GHES)
-  2. The `oauth_token` field in `~/.config/gh/hosts.yml`
+Preparation captures the credential and cache fingerprint. API requests use the
+prepared token and recheck credentials before and after execution. A changed or
+unavailable credential rejects the result and requires a review refresh. Cache
+identity getters perform no I/O; missing stable credentials disable persistent
+caching. Token output is never included in Parley's logs or diagnostics.
 
-Run `gh auth login` to set up authentication.
+The authenticated viewer is resolved with `gh api /user` using the prepared
+credential, then cached for that session. Local account configuration does not
+determine comment ownership. If viewer lookup fails, ownership stays unknown and
+reaction toggles stop until it can be determined.
+
+PR metadata comes from `gh pr view <branch> --json ... --repo HOST/OWNER/REPO`.
+Only open PRs activate Parley. Custom API URLs and numeric branch names use an
+explicit API lookup because gh cannot select those targets unambiguously.
+Review status uses GitHub's aggregate reviewDecision: APPROVED, CHANGES_REQUESTED,
+and REVIEW_REQUIRED map to approved, changes_requested, and pending. Missing or
+unrecognized decisions display unknown; individual review events are not reduced
+locally. A failed metadata request fails the refresh. Earlier cached ownership
+and review statuses are discarded on the first refresh after this update.
+
+REST comments and reactions use `gh api --paginate --slurp`. Standard
+GraphQL thread reads use CLI pagination too. Custom API URLs retain explicit
+cursor traversal because gh does not recognize them as GraphQL pagination targets.
+Coroutine and callback API operations share timeout, retry, and cancellation
+handling. Mutations are never automatically replayed.
+
+Local line mapping consumes structured `vim.diff` hunks. Changed-line validation
+for new GitHub comments continues to use the Git review-range diff.
 
 Provider options: ~
 
@@ -802,7 +826,8 @@ options or private provider fields.
 The optional `provider:prepare(vcs_info)` hook runs in a Plenary coroutine before
 provider identity is published or review caches are consulted. Preparation errors
 clear obsolete provider/review state. Providers without the hook retain their
-existing lifecycle. Arcanum binds the Arc login and selected credential here; its
+existing lifecycle. GitHub resolves its CLI credential here and publishes a
+local token fingerprint. Arcanum binds the Arc login and selected credential here; its
 cache identity includes host, credential fingerprint, and Arc login.
 The ownership cache version changes with this release, so earlier cached ownership
 is not reused. Tokens are neither stored in cache keys nor printed in diagnostics.
@@ -913,8 +938,8 @@ The health check verifies:
   - The source file's repository using registered VCS detectors
   - Local diagnostics supplied by the matching provider
 
-GitHub diagnostics check Git/gh executables, branch, and credentials from the
-environment or hosts.yml. Keyring credentials are not checked. Arcanum diagnostics
+GitHub diagnostics check Git/gh executables, branch, and credentials via gh,
+including secure storage. Token refresh is disabled for health checks. Arcanum diagnostics
 check Arc/ya/curl executables, remote branch, configured HTTPS host, local Arc login,
 and credential source/availability. They do not construct or prepare a provider.
 Missing executables for unrelated providers do not produce warnings.

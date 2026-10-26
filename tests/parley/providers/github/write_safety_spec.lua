@@ -1,3 +1,4 @@
+local a = require("plenary.async.tests")
 local github = require("parley.providers.github.provider")
 local transport = require("parley.providers.github.transport")
 
@@ -16,7 +17,7 @@ describe("GitHub mutation safety", function()
       { "gh", "api", "/reviews", "-f", "body=review" },
       { "gh", "api", "graphql", "-f", "query=mutation { x }" },
     }) do
-      it("never replays a " .. mode .. " mutation: " .. table.concat(command, " "), function()
+      a.it("never replays a " .. mode .. " mutation: " .. table.concat(command, " "), function()
         local calls, deferred, result = 0, {}, nil
         local function response()
           calls = calls + 1
@@ -52,7 +53,7 @@ describe("GitHub mutation safety", function()
     end
   end
 
-  it("continues retrying transient REST reads", function()
+  a.it("continues retrying transient REST reads", function()
     local count = 0
     local provider = github.new({
       repository = "owner/repo",
@@ -66,7 +67,7 @@ describe("GitHub mutation safety", function()
     assert.equals(2, count)
   end)
 
-  it("marks cancellation after sending as uncertain and completes once", function()
+  a.it("marks cancellation after sending as uncertain and completes once", function()
     local receive, result, completions, killed = nil, nil, 0, false
     local provider = github.new({
       repository = "owner/repo",
@@ -92,7 +93,7 @@ describe("GitHub mutation safety", function()
     assert.equals(1, completions)
   end)
 
-  it("marks a malformed successful mutation response as uncertain", function()
+  a.it("marks a malformed successful mutation response as uncertain", function()
     local result
     local provider = github.new({
       repository = "owner/repo",
@@ -106,7 +107,7 @@ describe("GitHub mutation safety", function()
     end)
     assert.is_true(result.uncertain)
   end)
-  it("retries explicitly identified GraphQL reads", function()
+  a.it("retries explicitly identified GraphQL reads", function()
     local calls = 0
     local provider = github.new({
       repository = "owner/repo",
@@ -122,7 +123,7 @@ describe("GitHub mutation safety", function()
     assert.equals(2, calls)
   end)
 
-  it("retries callback reads through the scheduled backoff", function()
+  a.it("retries callback reads through the scheduled backoff", function()
     local calls, retry, result = 0, nil, nil
     local provider = github.new({
       repository = "owner/repo",
@@ -145,7 +146,7 @@ describe("GitHub mutation safety", function()
     assert.equals(2, calls)
   end)
 
-  it("does not mark an explicit HTTP rejection as uncertain", function()
+  a.it("does not mark an explicit HTTP rejection as uncertain", function()
     local result
     local provider = github.new({
       repository = "owner/repo",
@@ -159,5 +160,37 @@ describe("GitHub mutation safety", function()
     end)
     assert.is_false(result.ok)
     assert.is_false(result.uncertain)
+  end)
+  a.it("cancels a pending retry and ignores late callbacks from the previous attempt", function()
+    local receive, retry, result
+    local calls, completions, stopped = 0, 0, false
+    local provider = github.new({
+      repository = "owner/repo",
+      _spawn = function(_, cb)
+        calls, receive = calls + 1, cb
+        return { kill = function() end }
+      end,
+      _defer = function(cb)
+        retry = cb
+        return {
+          stop = function()
+            stopped = true
+          end,
+          close = function() end,
+        }
+      end,
+    })
+    local handle = transport.gh_start(provider, { "gh", "api", "/comments" }, function(value)
+      result, completions = value, completions + 1
+    end)
+    receive({ code = 124, stderr = "timeout" })
+    receive({ code = 0, stdout = "[]" })
+    assert.is_nil(result)
+    handle.cancel()
+    retry()
+    assert.is_true(stopped)
+    assert.is_true(result.cancelled)
+    assert.equals(1, calls)
+    assert.equals(1, completions)
   end)
 end)

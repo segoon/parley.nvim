@@ -1,3 +1,4 @@
+local a = require("plenary.async.tests")
 --- tests/parley/providers/github/transport_spec.lua
 --- Tests for gh availability probe and fast-fail guards.
 
@@ -40,8 +41,8 @@ local function make_provider(opts)
     _runner = opts._runner or function(_cmd)
       return { code = 0, stdout = "[]", stderr = "" }
     end,
-    _spawn = opts._spawn or function(_cmd, callback)
-      callback({ code = 0, stdout = "[]", stderr = "" })
+    _spawn = opts._spawn or function(cmd, callback)
+      callback(opts._runner and opts._runner(cmd) or { code = 0, stdout = "[]", stderr = "" })
       return { kill = function() end }
     end,
     _sleep = opts._sleep or function(_ms) end,
@@ -61,7 +62,7 @@ describe("parley.providers.github.transport — probe_gh_executable", function()
   before_each(save_seams)
   after_each(restore_seams)
 
-  it("sets _gh_available = true when gh is found", function()
+  a.it("sets _gh_available = true when gh is found", function()
     transport._executable = function(_bin)
       return 1
     end
@@ -72,7 +73,7 @@ describe("parley.providers.github.transport — probe_gh_executable", function()
     assert.is_true(transport._gh_available)
   end)
 
-  it("sets _gh_available = false when gh is not found", function()
+  a.it("sets _gh_available = false when gh is not found", function()
     transport._executable = function(_bin)
       return 0
     end
@@ -83,7 +84,7 @@ describe("parley.providers.github.transport — probe_gh_executable", function()
     assert.is_false(transport._gh_available)
   end)
 
-  it("updates _gh_available from false to true when gh becomes available", function()
+  a.it("updates _gh_available from false to true when gh becomes available", function()
     transport._gh_available = false
     transport._executable = function(_bin)
       return 1
@@ -103,7 +104,7 @@ describe("parley.providers.github.transport — gh_run availability guard", func
   before_each(save_seams)
   after_each(restore_seams)
 
-  it("raises a clean error without calling runner when gh is not found after re-probe", function()
+  a.it("raises a clean error without calling runner when gh is not found after re-probe", function()
     transport._gh_available = false
     transport._executable = function(_bin)
       return 0 -- still not found on re-probe
@@ -133,7 +134,7 @@ describe("parley.providers.github.transport — gh_run availability guard", func
     assert.equals(vim.log.levels.WARN, notify_calls[1].level)
   end)
 
-  it("calls runner normally when gh is not found on initial probe but found on re-probe", function()
+  a.it("calls runner normally when gh is not found on initial probe but found on re-probe", function()
     transport._gh_available = false
     transport._executable = function(_bin)
       return 1 -- found on re-probe
@@ -155,7 +156,7 @@ describe("parley.providers.github.transport — gh_run availability guard", func
     assert.is_true(transport._gh_available)
   end)
 
-  it("does not re-probe when _gh_available is already true", function()
+  a.it("does not re-probe when _gh_available is already true", function()
     transport._gh_available = true
     local probe_calls = 0
     transport._executable = function(_bin)
@@ -183,7 +184,7 @@ describe("parley.providers.github.transport — gh_start availability guard", fu
   before_each(save_seams)
   after_each(restore_seams)
 
-  it("calls callback with ok=false and clean error when gh is not found after re-probe", function()
+  a.it("calls callback with ok=false and clean error when gh is not found after re-probe", function()
     transport._gh_available = false
     transport._executable = function(_bin)
       return 0 -- still not found on re-probe
@@ -221,7 +222,7 @@ describe("parley.providers.github.transport — gh_start availability guard", fu
     assert.equals(vim.log.levels.WARN, notify_calls[1].level)
   end)
 
-  it("calls spawn normally when gh is not found on initial probe but found on re-probe", function()
+  a.it("calls spawn normally when gh is not found on initial probe but found on re-probe", function()
     transport._gh_available = false
     transport._executable = function(_bin)
       return 1 -- found on re-probe
@@ -249,7 +250,7 @@ describe("parley.providers.github.transport — gh_start availability guard", fu
     assert.is_true(transport._gh_available)
   end)
 
-  it("does not re-probe when _gh_available is already true", function()
+  a.it("does not re-probe when _gh_available is already true", function()
     transport._gh_available = true
     local probe_calls = 0
     transport._executable = function(_bin)
@@ -285,7 +286,7 @@ describe("parley.providers.github.transport — fetch_viewer_login availability 
   before_each(save_seams)
   after_each(restore_seams)
 
-  it("calls vim.notify(WARN) and skips runner when gh is not found", function()
+  a.it("calls vim.notify(WARN) and skips runner when gh is not found", function()
     transport._gh_available = false
     transport._executable = function(_bin)
       return 0 -- still not found on re-probe
@@ -312,7 +313,7 @@ describe("parley.providers.github.transport — fetch_viewer_login availability 
     assert.equals(vim.log.levels.WARN, notify_calls[1].level)
   end)
 
-  it("does not notify and calls runner when gh is available", function()
+  a.it("does not notify and calls runner when gh is available", function()
     transport._gh_available = true
     transport._executable = function(_bin)
       return 1
@@ -322,7 +323,7 @@ describe("parley.providers.github.transport — fetch_viewer_login availability 
     local provider = make_provider({
       _runner = function(_cmd)
         runner_called = true
-        return { code = 0, stdout = "testuser\n", stderr = "" }
+        return { code = 0, stdout = '{"login":"testuser"}', stderr = "" }
       end,
     })
     provider._viewer_login = nil
@@ -336,7 +337,7 @@ describe("parley.providers.github.transport — fetch_viewer_login availability 
     assert.equals(0, #notify_calls)
   end)
 
-  it("skips runner and does not notify when _viewer_login is already cached", function()
+  a.it("skips runner and does not notify when _viewer_login is already cached", function()
     transport._gh_available = false
     transport._executable = function(_bin)
       return 0
@@ -366,12 +367,12 @@ end)
 -- ---------------------------------------------------------------------------
 
 describe("parley.providers.github.transport — build_graphql_cmd", function()
-  it("builds a gh api graphql command with the query as -f query=", function()
+  a.it("builds a gh api graphql command with the query as -f query=", function()
     local cmd = transport.build_graphql_cmd("query { viewer { login } }", {})
     assert.same({ "gh", "api", "graphql", "-f", "query=query { viewer { login } }" }, cmd)
   end)
 
-  it("passes string variables via -f and numeric/boolean variables via -F", function()
+  a.it("passes string variables via -f and numeric/boolean variables via -F", function()
     local cmd = transport.build_graphql_cmd("query($a: String!, $b: Int!, $c: Boolean!) { x }", {
       a = "owner",
       b = 42,
@@ -393,7 +394,7 @@ describe("parley.providers.github.transport — build_graphql_cmd", function()
     assert.is_true(has_pair("-F", "c=true"))
   end)
 
-  it("omits variables whose value is nil", function()
+  a.it("omits variables whose value is nil", function()
     local cmd = transport.build_graphql_cmd("query($cursor: String) { x }", { cursor = nil })
     assert.same({ "gh", "api", "graphql", "-f", "query=query($cursor: String) { x }" }, cmd)
   end)
@@ -407,7 +408,7 @@ describe("parley.providers.github.transport — gh_graphql", function()
   before_each(save_seams)
   after_each(restore_seams)
 
-  it("returns the decoded data field on success", function()
+  a.it("returns the decoded data field on success", function()
     transport._gh_available = true
     local provider = make_provider({
       _runner = function(_cmd)
@@ -418,7 +419,7 @@ describe("parley.providers.github.transport — gh_graphql", function()
     assert.equals("alice", data.viewer.login)
   end)
 
-  it("raises when the response body contains a top-level errors array", function()
+  a.it("raises when the response body contains a top-level errors array", function()
     transport._gh_available = true
     local provider = make_provider({
       _runner = function(_cmd)
@@ -435,7 +436,7 @@ describe("parley.providers.github.transport — gh_graphql_start", function()
   before_each(save_seams)
   after_each(restore_seams)
 
-  it("calls back with ok=true and the decoded data field on success", function()
+  a.it("calls back with ok=true and the decoded data field on success", function()
     transport._gh_available = true
     local provider = make_provider({
       _spawn = function(_cmd, callback)
@@ -454,7 +455,7 @@ describe("parley.providers.github.transport — gh_graphql_start", function()
     assert.equals("alice", result.data.viewer.login)
   end)
 
-  it("calls back with ok=false when the response contains a top-level errors array", function()
+  a.it("calls back with ok=false when the response contains a top-level errors array", function()
     transport._gh_available = true
     local provider = make_provider({
       _spawn = function(_cmd, callback)

@@ -11,7 +11,7 @@ local semantics = require("parley.discussion")
 -- Type annotations
 -- ---------------------------------------------------------------------------
 
---- A parsed unified-diff hunk.
+--- A changed region from structured indices or a parsed unified patch.
 --- @class parley.anchor.Hunk
 --- @field old_start integer  First line of the old (PR head) region (1-indexed)
 --- @field old_count integer  Number of lines in the old region (0 = pure insertion)
@@ -33,8 +33,8 @@ local semantics = require("parley.discussion")
 -- Injectable runner seam
 -- ---------------------------------------------------------------------------
 
---- Read revision/local text and produce unified hunks. Injectable in tests.
---- @type fun(info: parley.VcsInfo, revision: string, file: string): string|nil, string|nil
+--- Read revision/local text and produce structured hunks. Injectable in tests.
+--- @type fun(info: parley.VcsInfo, revision: string, file: string): parley.anchor.Hunk[]|nil, string|nil
 M._diff = function(info, revision, file)
   local before, err = content.revision(info, revision, file)
   if before == nil then
@@ -47,7 +47,13 @@ M._diff = function(info, revision, file)
   if before:find("\0", 1, true) or after:find("\0", 1, true) then
     return nil, "binary content cannot be mapped"
   end
-  return vim.diff(content.normalize(before), content.normalize(after), { ctxlen = 0 })
+  local hunks = {}
+  for _, h in
+    ipairs(vim.diff(content.normalize(before), content.normalize(after), { result_type = "indices", ctxlen = 0 }))
+  do
+    hunks[#hunks + 1] = { old_start = h[1], old_count = h[2], new_start = h[3], new_count = h[4] }
+  end
+  return hunks
 end
 
 -- ---------------------------------------------------------------------------
@@ -185,7 +191,7 @@ function M.map_line(info, revision, file, line)
   if diff == nil then
     return approximate(line, err or "mapping unavailable")
   end
-  return M.remap_line(line, M.parse_hunks(diff))
+  return M.remap_line(line, diff)
 end
 
 --- Map discussions against loaded buffers or working-tree files; one read per file.
@@ -216,7 +222,7 @@ function M.map_discussions(info, revision, discussions)
     if not ok then
       err, diff = tostring(diff), nil
     end
-    local hunks = diff and M.parse_hunks(diff) or {}
+    local hunks = diff or {}
     for _, disc in ipairs(group.discussions) do
       local mapping = diff and M.remap_line(disc.line, hunks) or approximate(disc.line, err or "mapping unavailable")
       if not diff and disc.anchor then

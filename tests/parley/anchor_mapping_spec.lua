@@ -18,7 +18,7 @@ local function make_runner(stdout)
   local calls = {}
   local function runner(info, revision, file)
     table.insert(calls, { cmd = { info, revision, file }, cwd = info.root })
-    return stdout
+    return anchor.parse_hunks(stdout)
   end
   return { runner = runner, calls = calls }
 end
@@ -32,7 +32,7 @@ local function make_file_runner(by_file)
   local calls = {}
   local function runner(info, revision, file)
     table.insert(calls, { cmd = { info, revision, file }, cwd = info.root })
-    return by_file[file] or ""
+    return anchor.parse_hunks(by_file[file] or "")
   end
   return { runner = runner, calls = calls }
 end
@@ -305,7 +305,7 @@ a.describe("parley.anchor.map_discussions", function()
     local revisions = {}
     anchor._diff = function(_, revision)
       revisions[revision] = (revisions[revision] or 0) + 1
-      return revision == "merge" and "@@ -1 +0,0 @@\n" or ""
+      return anchor.parse_hunks(revision == "merge" and "@@ -1 +0,0 @@\n" or "")
     end
     local source = make_discussion("source", "f", 2)
     local merged = make_discussion("merged", "f", 3)

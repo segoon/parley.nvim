@@ -1,9 +1,7 @@
 --- parley.providers.github.provider — GitHub provider implementation.
 --- Implements parley.Provider against the GitHub REST API via the `gh` CLI.
---- All network calls are made by shelling out to `gh api …`, which handles
---- authentication (env vars, hosts.yml, keyring, SSO) and rate-limiting
---- transparently.
----
+--- Network calls use `gh api` and `gh pr view`, which handle
+--- authentication. Parley owns its explicit retry and cancellation policy.
 --- Design notes:
 ---   • Transport: `gh api` subprocess via vim.system + plenary.async.
 ---   • Discussion IDs = root review-comment database ID (string).
@@ -12,24 +10,13 @@
 ---     query (`gh api graphql`) correlated to REST-derived discussions by
 ---     root comment database id. resolve/unresolve call the corresponding
 ---     GraphQL mutation against the cached thread node id.
----
---- Testability:
----   • _runner:      fun(cmd: string[]): {code,stdout,stderr}  — replace in tests.
----   • _sync_runner: coroutine-free variant used by cache_identity()          — replace in tests.
----   • _auth:        auth module table with read_token(host)                 — replace in tests.
----
----   • _parse_remote_url is a pure function exported for unit testing.
-
-local await = require("parley.runtime.await")
 local dbg = require("parley.debug")
 local mapping = require("parley.providers.github.mapping")
 local transport = require("parley.providers.github.transport")
 
 local M = {}
 
--- ---------------------------------------------------------------------------
 -- Type annotations
--- ---------------------------------------------------------------------------
 
 --- @class parley.github.WriteContext
 --- @field head_sha string
@@ -40,12 +27,17 @@ local M = {}
 --- @field _owner        string
 --- @field _repo         string
 --- @field _api_base     string
---- @field _runner       fun(cmd: string[]): {code: integer, stdout: string, stderr: string}
+--- @field _runner? fun(cmd: string[]): table Test-only adapter to the callback executor.
 --- @field _spawn        fun(
 ---   cmd: string[],
 ---   callback: fun(result: {code: integer, stdout: string, stderr: string})
 --- ): vim.SystemObj|nil
---- @field _sleep        fun(timeout_ms: integer): nil
+--- @field _system function
+--- @field _prepared? boolean
+--- @field _session_generation? integer
+--- @field _session_valid? boolean
+--- @field _session_token? string
+--- @field _session_context? string
 --- @field _defer        fun(callback: fun(), timeout_ms: integer): uv_timer_t|nil
 --- @field _config parley.GitHubProviderConfig
 --- @field _auth         table
@@ -53,9 +45,7 @@ local M = {}
 --- @field _cache_provider string
 --- @field _thread_node_ids table<string, string>  discussion id → GraphQL review-thread node id
 
--- ---------------------------------------------------------------------------
 -- Internal helpers
--- ---------------------------------------------------------------------------
 
 --- Build the REST API base URL for a given GitHub host.
 --- @param host string  e.g. "github.com" or "ghe.corp.com"
@@ -74,38 +64,7 @@ local function repo_path(self)
   return "/repos/" .. self._owner .. "/" .. self._repo
 end
 
---- Fetch review-thread resolution state + node ids for a PR via GraphQL,
---- paginating through reviewThreads until exhausted.
----
---- @param self parley.github.Provider
---- @param review parley.DetectedReview
---- @return table<string, { node_id: string, resolved: boolean }>
-local function fetch_review_threads(self, review)
-  local pr_number = review.write_context and review.write_context.number or tonumber(review.pr.id)
-  local lookup = {}
-  local cursor = nil
-  repeat
-    local data = transport.gh_graphql(self, mapping.REVIEW_THREADS_QUERY, {
-      owner = self._owner,
-      repo = self._repo,
-      number = pr_number,
-      cursor = cursor,
-    }, "read")
-    local conn = data and data.repository and data.repository.pullRequest and data.repository.pullRequest.reviewThreads
-    if not conn then
-      break
-    end
-    for id, entry in pairs(mapping.map_review_thread_nodes(conn.nodes or {})) do
-      lookup[id] = entry
-    end
-    cursor = (conn.pageInfo and conn.pageInfo.hasNextPage) and conn.pageInfo.endCursor or nil
-  until not cursor
-  return lookup
-end
-
--- ---------------------------------------------------------------------------
 -- Provider object
--- ---------------------------------------------------------------------------
 
 --- @type parley.github.Provider
 local GitHubProvider = { display_name = require("parley.providers.github.metadata").display_name }
@@ -113,18 +72,15 @@ GitHubProvider.__index = GitHubProvider
 GitHubProvider.capabilities = require("parley.providers.github.capabilities").get
 GitHubProvider.validate_comment_target = require("parley.providers.comment_target").validate
 GitHubProvider.cache_identity = require("parley.providers.github.cache_identity").get
+GitHubProvider.prepare = require("parley.providers.github.cache_identity").prepare
 GitHubProvider.reaction_choices = require("parley.providers.github.reactions").choices
 GitHubProvider.reaction_presentation = require("parley.providers.github.reactions").presentation
 
--- ---------------------------------------------------------------------------
 -- Constructor
--- ---------------------------------------------------------------------------
 
 --- Create a new GitHub provider.
----
 --- Required opts: repository.
 --- Optional opts: host (default "github.com"), api_base, _runner, _auth.
----
 --- @param opts {
 ---   repository: string,
 ---   host?: string,
@@ -156,26 +112,16 @@ function M.new(opts)
   local self
   local system = opts._system or vim.system
 
-  local default_runner = function(cmd)
-    local result =
-      await.system(cmd, { text = true, timeout = transport.transport_config(self).timeout_ms, _system = system })
-    return { code = result.code, stdout = result.stdout or "", stderr = result.stderr or "" }
-  end
-
-  -- Blocking variant for cache_identity(): that function must produce a
-  -- consistent result whether called from inside a plenary.async coroutine
-  -- (composer submit) or outside one (initial context capture), and
-  -- await.system() silently no-ops outside a coroutine.
-  local default_sync_runner = function(cmd)
-    local result = system(cmd, { text = true, timeout = transport.transport_config(self).timeout_ms }):wait()
-    return { code = result.code, stdout = result.stdout or "", stderr = result.stderr or "" }
-  end
-
   local default_spawn = function(cmd, callback)
     local ui = require("parley.runtime.ui")
     return system(
       cmd,
-      { text = true, timeout = transport.transport_config(self).timeout_ms },
+      {
+        text = true,
+        timeout = transport.transport_config(self).timeout_ms,
+        env = self._session_token and { GH_TOKEN = self._session_token, GH_ENTERPRISE_TOKEN = self._session_token }
+          or nil,
+      },
       ui.wrap(function(result)
         callback({ code = result.code, stdout = result.stdout or "", stderr = result.stderr or "" })
       end)
@@ -187,11 +133,16 @@ function M.new(opts)
     _owner = owner,
     _repo = repo,
     _api_base = opts.api_base or api_base_for_host(host),
-    _runner = opts._runner or default_runner,
-    _sync_runner = opts._sync_runner or default_sync_runner,
-    _spawn = opts._spawn or default_spawn,
-    _sleep = opts._sleep or await.sleep,
-    _defer = opts._defer or vim.defer_fn,
+    _runner = opts._runner,
+    _system = system,
+    _spawn = opts._spawn or (opts._runner and function(cmd, callback)
+      callback(self._runner(cmd))
+      return { kill = function() end }
+    end) or default_spawn,
+    _defer = opts._defer or (opts._sleep and function(callback, delay)
+      opts._sleep(delay)
+      callback()
+    end) or vim.defer_fn,
     _config = config,
     _auth = opts._auth or require("parley.providers.github.auth"),
     _viewer_login = nil,
@@ -202,9 +153,7 @@ function M.new(opts)
   return self
 end
 
--- ---------------------------------------------------------------------------
 -- parley.Provider interface
--- ---------------------------------------------------------------------------
 
 --- Return the authentication token for this host.
 --- @param self parley.github.Provider
@@ -218,107 +167,11 @@ function GitHubProvider:auth()
   return token
 end
 
---- Detect an open PR for the given branch.
---- Makes two REST calls: PR list + reviews.
----
---- @param self       parley.github.Provider
---- @param _repo_root string  (unused — owner/repo already known from constructor)
---- @param branch     string
---- @return parley.DetectedReview|nil
-function GitHubProvider:detect_pr(_repo_root, branch)
-  local model = require("parley.model")
-  local pulls_url = repo_path(self) .. "/pulls?head=" .. self._owner .. ":" .. branch .. "&state=open&per_page=1"
+GitHubProvider.detect_pr = require("parley.providers.github.pull_request").detect
 
-  local pulls = transport.gh_run(self, { "gh", "api", pulls_url })
-  if not pulls or #pulls == 0 then
-    return nil
-  end
-
-  local raw = pulls[1]
-  local pr_number = raw.number
-
-  -- Fetch reviews to determine review_status.
-  local reviews_url = repo_path(self) .. "/pulls/" .. pr_number .. "/reviews"
-  local ok, reviews = pcall(transport.gh_run, self, { "gh", "api", reviews_url })
-  local review_status = mapping.compute_review_status(ok and reviews or nil)
-
-  local pr = model.new_pr({
-    id = tostring(pr_number),
-    title = raw.title or "",
-    state = raw.state or "open",
-    base_branch = raw.base and raw.base.ref or "",
-    head_branch = raw.head and raw.head.ref or "",
-    author = raw.user and raw.user.login or "",
-    url = raw.html_url or "",
-    review_status = review_status,
-  })
-
-  return {
-    pr = pr,
-    head_sha = raw.head and raw.head.sha or "",
-    write_context = {
-      head_sha = raw.head and raw.head.sha or "",
-      number = pr_number,
-    },
-  }
-end
-
---- Fetch all discussions for a PR using the REST review-comments endpoint.
---- Discussions are grouped by root comment id. Resolution state and thread
---- node ids are then fetched via GraphQL and overlaid by root comment id;
---- a GraphQL failure degrades to resolved=false rather than failing the
---- whole fetch (resolve/unresolve will error until the next successful
---- refresh repopulates the thread node id cache).
----
---- @param self parley.github.Provider
---- @param review parley.DetectedReview
---- @return parley.Discussion[]
-function GitHubProvider:fetch_discussions(review)
-  local pr_number = review.write_context and review.write_context.number or tonumber(review.pr.id)
-  local url = repo_path(self) .. "/pulls/" .. pr_number .. "/comments"
-
-  local comments = transport.gh_run(self, { "gh", "api", "--paginate", url }) or {}
-
-  -- Resolve viewer login for is_own detection.
-  transport.fetch_viewer_login(self)
-  local viewer = self._viewer_login or ""
-  dbg.trace(
-    "github.provider",
-    "fetch_discussions: viewer=" .. vim.inspect(viewer) .. " #comments=" .. tostring(#comments)
-  )
-
-  local discussions = mapping.group_comments_into_discussions(comments, viewer)
-
-  local ok, lookup = pcall(fetch_review_threads, self, review)
-  if ok then
-    for _, d in ipairs(discussions) do
-      local entry = lookup[d.id]
-      if entry then
-        d.resolved = entry.resolved
-        self._thread_node_ids[d.id] = entry.node_id
-      end
-    end
-  else
-    dbg.trace("github.provider", "fetch_discussions: review-thread fetch failed: " .. tostring(lookup))
-  end
-
-  local own_count = 0
-  for _, d in ipairs(discussions) do
-    for _, c in ipairs(d.comments) do
-      if c.is_own then
-        own_count = own_count + 1
-      end
-    end
-  end
-  dbg.trace(
-    "github.provider",
-    "fetch_discussions: #discussions=" .. tostring(#discussions) .. " is_own_count=" .. tostring(own_count)
-  )
-  return discussions
-end
+GitHubProvider.fetch_discussions = require("parley.providers.github.discussions").fetch
 
 --- Post a new top-level review comment anchored to a file/line.
----
 --- @param self parley.github.Provider
 --- @param review parley.DetectedReview
 --- @param file string
@@ -381,7 +234,6 @@ end
 
 --- Post a reply to an existing discussion.
 --- discussion_id is the root comment's database id (used as in_reply_to).
----
 --- @param self          parley.github.Provider
 --- @param review         parley.DetectedReview
 --- @param discussion     parley.Discussion
@@ -462,7 +314,6 @@ local function thread_node_id(self, discussion_id)
 end
 
 --- Resolve a discussion thread via the GraphQL resolveReviewThread mutation.
----
 --- @param self          parley.github.Provider
 --- @param _review       parley.DetectedReview
 --- @param discussion_id string
@@ -486,7 +337,6 @@ function GitHubProvider:begin_resolve(_review, discussion_id, callback)
 end
 
 --- Unresolve a discussion thread via the GraphQL unresolveReviewThread mutation.
----
 --- @param self          parley.github.Provider
 --- @param _review       parley.DetectedReview
 --- @param discussion_id string
@@ -510,12 +360,6 @@ function GitHubProvider:begin_unresolve(_review, discussion_id, callback)
 end
 
 --- Toggle a reaction on a comment (add if absent, remove if present).
----
---- Steps:
----   1. Ensure viewer login is cached (GET /user once).
----   2. GET /reactions?content=<type> for the comment.
----   3. If viewer has a reaction → DELETE it; otherwise → POST a new one.
----
 --- @param self       parley.github.Provider
 --- @param _review    parley.DetectedReview
 --- @param comment_id string
@@ -523,13 +367,15 @@ end
 function GitHubProvider:react(_review, comment_id, reaction)
   assert(require("parley.providers.github.reactions").supports(reaction), "unsupported GitHub reaction")
   transport.fetch_viewer_login(self)
-  local viewer = self._viewer_login or ""
+  local viewer = self._viewer_login
+  assert(viewer, "Could not determine the authenticated GitHub user; refresh the review and retry the reaction")
   local base_url = repo_path(self) .. "/pulls/comments/" .. comment_id .. "/reactions"
 
   -- Fetch existing reactions of this type.
   local reactions = transport.gh_run(self, {
     "gh",
     "api",
+    "--paginate",
     base_url .. "?content=" .. reaction .. "&per_page=100",
   }) or {}
 
@@ -566,7 +412,6 @@ function GitHubProvider:react(_review, comment_id, reaction)
 end
 
 --- Edit an existing comment body.
----
 --- @param self       parley.github.Provider
 --- @param _review    parley.DetectedReview
 --- @param comment_id string
@@ -587,7 +432,6 @@ function GitHubProvider:edit(_review, comment_id, body)
 end
 
 --- Delete a comment.
----
 --- @param self       parley.github.Provider
 --- @param _review    parley.DetectedReview
 --- @param comment_id string
@@ -598,7 +442,6 @@ end
 
 --- Submit a PR-level review.
 --- event must be one of: "approve", "request_changes", "comment".
----
 --- @param self  parley.github.Provider
 --- @param review parley.DetectedReview
 --- @param event string
@@ -629,18 +472,13 @@ function GitHubProvider:progress_label()
   return self._host
 end
 
--- ---------------------------------------------------------------------------
 -- Registry helpers
--- ---------------------------------------------------------------------------
 
 --- Parse a git remote URL into { host, owner, repo }, or nil if unrecognized.
----
 --- Recognized forms (trailing ".git" and trailing "/" are stripped):
 ---   • SSH:        git@<host>:<owner>/<repo>(.git)?
 ---   • HTTPS/HTTP: https?://[user@]<host>/<owner>/<repo>(.git)?
----
 --- Pure function exported for unit testing.
----
 --- @param url string|nil
 --- @return { host: string, owner: string, repo: string }|nil
 function M._parse_remote_url(url)
@@ -677,12 +515,10 @@ function M._parse_remote_url(url)
 end
 
 --- Detect whether a VcsInfo points at a GitHub repository.
----
 --- Returns the opts table for M.new (host/repository) on a match, or nil
 --- when the remote URL is missing or not a recognised GitHub URL.  Only
 --- github.com is recognised today; Enterprise hosts can be added later by
 --- extending the host check.
----
 --- @param vcs_info parley.VcsInfo
 --- @return { host: string, repository: string }|nil
 function M.detect(vcs_info)

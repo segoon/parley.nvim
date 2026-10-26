@@ -183,7 +183,7 @@ local function setup(o)
 
   -- Anchor: empty diff → identity mapping (local_line == pr_line, not stale).
   anchor._diff = function()
-    return ""
+    return {}
   end
 
   -- Signs recorders.
@@ -795,7 +795,7 @@ describe("parley.services.read multi-repo", function()
     end
 
     anchor._diff = function()
-      return ""
+      return {}
     end
 
     local render_calls = {}
