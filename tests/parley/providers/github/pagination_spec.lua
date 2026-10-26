@@ -37,8 +37,8 @@ a.describe("GitHub pagination", function()
       host = "ghe.example.com",
       api_base = "https://ghe.example.com/custom/api/v3",
       _runner = function(cmd)
-        if cmd[2] == "config" then
-          return { code = 0, stdout = "alice" }
+        if vim.tbl_contains(cmd, "/user") or table.concat(cmd, " "):find("/user", 1, true) then
+          return { code = 0, stdout = '{"login":"alice"}' }
         end
         if vim.tbl_contains(cmd, "https://ghe.example.com/custom/api/graphql") then
           calls = calls + 1
@@ -65,8 +65,8 @@ a.describe("GitHub pagination", function()
     local p = github.new({
       repository = "owner/repo",
       _runner = function(cmd)
-        if cmd[2] == "config" then
-          return { code = 0, stdout = "alice" }
+        if vim.tbl_contains(cmd, "/user") or table.concat(cmd, " "):find("/user", 1, true) then
+          return { code = 0, stdout = '{"login":"alice"}' }
         end
         if vim.tbl_contains(cmd, "graphql") then
           local pages = { page(1), broken and { errors = { { message = "denied" } } } or page(2) }
@@ -96,7 +96,7 @@ a.describe("GitHub pagination", function()
     end)
   end)
 
-  a.it("uses later review and reaction pages", function()
+  a.it("uses later reaction pages", function()
     local deleted
     local p = github.new({
       repository = "owner/repo",
@@ -106,13 +106,7 @@ a.describe("GitHub pagination", function()
           return { code = 0, stdout = "" }
         end
         local joined = table.concat(cmd, " ")
-        if joined:find("/reviews", 1, true) then
-          return {
-            code = 0,
-            stdout = '[[{"state":"CHANGES_REQUESTED","submitted_at":"2024-01-01"}],'
-              .. '[{"state":"APPROVED","submitted_at":"2024-01-02"}]]',
-          }
-        elseif joined:find("/reactions", 1, true) then
+        if joined:find("/reactions", 1, true) then
           return {
             code = 0,
             stdout = '[[{"id":1,"content":"+1","user":{"login":"bob"}}],'
@@ -122,7 +116,6 @@ a.describe("GitHub pagination", function()
         return { code = 0, stdout = '[{"number":42,"head":{"sha":"abc"}}]' }
       end,
     })
-    assert.equals("approved", p:detect_pr("/repo", "feature").pr.review_status)
     p._viewer_login = "alice"
     p:react(review, "7", "+1")
     assert.is_true(vim.tbl_contains(deleted, "/repos/owner/repo/pulls/comments/7/reactions/2"))

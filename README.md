@@ -269,7 +269,9 @@ Repeated `setup()` replaces the polling schedule; editor shutdown stops it.
 Requests to GitHub are made through the standard `gh` CLI. Parley also delegates
 credential lookup (including secure storage) and pagination to `gh`. Prepare
 authentication with `gh auth login`; credentials are checked around API requests
-and changes require a review refresh.
+and changes require a review refresh. Comment ownership uses the authenticated
+`/user` response. PR metadata and aggregate review status come from `gh pr view`;
+custom API URLs and numeric branch names retain explicit API lookups.
 Arcanum uses `ya tool arcanum` asynchronously for discovery, diff reads, and
 comment actions. Full discussion reads and review verdicts retain HTTPS. Both
 transports share a default request budget of 10 seconds,

@@ -658,7 +658,21 @@ unavailable credential rejects the result and requires a review refresh. Cache
 identity getters perform no I/O; missing stable credentials disable persistent
 caching. Token output is never included in Parley's logs or diagnostics.
 
-REST comments, reviews, and reactions use `gh api --paginate --slurp`. Standard
+The authenticated viewer is resolved with `gh api /user` using the prepared
+credential, then cached for that session. Local account configuration does not
+determine comment ownership. If viewer lookup fails, ownership stays unknown and
+reaction toggles stop until it can be determined.
+
+PR metadata comes from `gh pr view <branch> --json ... --repo HOST/OWNER/REPO`.
+Only open PRs activate Parley. Custom API URLs and numeric branch names use an
+explicit API lookup because gh cannot select those targets unambiguously.
+Review status uses GitHub's aggregate reviewDecision: APPROVED, CHANGES_REQUESTED,
+and REVIEW_REQUIRED map to approved, changes_requested, and pending. Missing or
+unrecognized decisions display unknown; individual review events are not reduced
+locally. A failed metadata request fails the refresh. Earlier cached ownership
+and review statuses are discarded on the first refresh after this update.
+
+REST comments and reactions use `gh api --paginate --slurp`. Standard
 GraphQL thread reads use CLI pagination too. Custom API URLs retain explicit
 cursor traversal because gh does not recognize them as GraphQL pagination targets.
 Coroutine and callback API operations share timeout, retry, and cancellation

@@ -1,6 +1,6 @@
 --- parley.providers.github.provider — GitHub provider implementation.
 --- Implements parley.Provider against the GitHub REST API via the `gh` CLI.
---- All network calls are made by shelling out to `gh api …`, which handles
+--- Network calls use `gh api` and `gh pr view`, which handle
 --- authentication. Parley owns its explicit retry and cancellation policy.
 --- Design notes:
 ---   • Transport: `gh api` subprocess via vim.system + plenary.async.
@@ -10,7 +10,6 @@
 ---     query (`gh api graphql`) correlated to REST-derived discussions by
 ---     root comment database id. resolve/unresolve call the corresponding
 ---     GraphQL mutation against the cached thread node id.
-local await = require("parley.runtime.await")
 local dbg = require("parley.debug")
 local mapping = require("parley.providers.github.mapping")
 local transport = require("parley.providers.github.transport")
@@ -28,7 +27,7 @@ local M = {}
 --- @field _owner        string
 --- @field _repo         string
 --- @field _api_base     string
---- @field _runner       fun(cmd: string[]): {code: integer, stdout: string, stderr: string}
+--- @field _runner? fun(cmd: string[]): table Test-only adapter to the callback executor.
 --- @field _spawn        fun(
 ---   cmd: string[],
 ---   callback: fun(result: {code: integer, stdout: string, stderr: string})
@@ -113,12 +112,6 @@ function M.new(opts)
   local self
   local system = opts._system or vim.system
 
-  local default_runner = function(cmd)
-    local result =
-      await.system(cmd, { text = true, timeout = transport.transport_config(self).timeout_ms, _system = system })
-    return { code = result.code, stdout = result.stdout or "", stderr = result.stderr or "" }
-  end
-
   local default_spawn = function(cmd, callback)
     local ui = require("parley.runtime.ui")
     return system(
@@ -140,7 +133,7 @@ function M.new(opts)
     _owner = owner,
     _repo = repo,
     _api_base = opts.api_base or api_base_for_host(host),
-    _runner = opts._runner or default_runner,
+    _runner = opts._runner,
     _system = system,
     _spawn = opts._spawn or (opts._runner and function(cmd, callback)
       callback(self._runner(cmd))
@@ -174,49 +167,7 @@ function GitHubProvider:auth()
   return token
 end
 
---- Detect an open PR for the given branch.
---- Makes two REST calls: PR list + reviews.
---- @param self       parley.github.Provider
---- @param _repo_root string  (unused — owner/repo already known from constructor)
---- @param branch     string
---- @return parley.DetectedReview|nil
-function GitHubProvider:detect_pr(_repo_root, branch)
-  local model = require("parley.model")
-  local pulls_url = repo_path(self) .. "/pulls?head=" .. self._owner .. ":" .. branch .. "&state=open&per_page=1"
-
-  local pulls = transport.gh_run(self, { "gh", "api", pulls_url })
-  if not pulls or #pulls == 0 then
-    return nil
-  end
-
-  local raw = pulls[1]
-  local pr_number = raw.number
-
-  -- Fetch reviews to determine review_status.
-  local reviews_url = repo_path(self) .. "/pulls/" .. pr_number .. "/reviews"
-  local ok, reviews = pcall(transport.gh_run, self, { "gh", "api", "--paginate", reviews_url })
-  local review_status = mapping.compute_review_status(ok and reviews or nil)
-
-  local pr = model.new_pr({
-    id = tostring(pr_number),
-    title = raw.title or "",
-    state = raw.state or "open",
-    base_branch = raw.base and raw.base.ref or "",
-    head_branch = raw.head and raw.head.ref or "",
-    author = raw.user and raw.user.login or "",
-    url = raw.html_url or "",
-    review_status = review_status,
-  })
-
-  return {
-    pr = pr,
-    head_sha = raw.head and raw.head.sha or "",
-    write_context = {
-      head_sha = raw.head and raw.head.sha or "",
-      number = pr_number,
-    },
-  }
-end
+GitHubProvider.detect_pr = require("parley.providers.github.pull_request").detect
 
 GitHubProvider.fetch_discussions = require("parley.providers.github.discussions").fetch
 
@@ -416,7 +367,8 @@ end
 function GitHubProvider:react(_review, comment_id, reaction)
   assert(require("parley.providers.github.reactions").supports(reaction), "unsupported GitHub reaction")
   transport.fetch_viewer_login(self)
-  local viewer = self._viewer_login or ""
+  local viewer = self._viewer_login
+  assert(viewer, "Could not determine the authenticated GitHub user; refresh the review and retry the reaction")
   local base_url = repo_path(self) .. "/pulls/comments/" .. comment_id .. "/reactions"
 
   -- Fetch existing reactions of this type.

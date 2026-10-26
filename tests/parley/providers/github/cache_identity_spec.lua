@@ -17,6 +17,11 @@ a.describe("prepared GitHub cache identity", function()
     assert.is_nil(p:cache_identity())
     p:prepare()
     local first = p:cache_identity()
+    assert.is_not.equals(
+      vim.fn.sha256(token),
+      first.account,
+      "Old ownership and review-status caches must be discarded"
+    )
     assert.is_nil(vim.inspect(first):find(token, 1, true))
     assert.same(first, p:cache_identity())
     assert.equals(1, calls)

@@ -15,34 +15,18 @@ transport._gh_available = true
 -- Fixtures — raw GitHub API JSON responses (as Lua strings)
 -- ---------------------------------------------------------------------------
 
---- Minimal PR list response (one open PR).
-local PR_LIST_JSON = vim.json.encode({
-  {
-    number = 42,
-    title = "Add feature",
-    state = "open",
-    base = { ref = "main" },
-    head = { ref = "feature", sha = "abc123def456" },
-    user = { login = "alice" },
-    html_url = "https://github.com/owner/repo/pull/42",
-  },
+--- gh pr view JSON metadata.
+local PR_JSON = vim.json.encode({
+  number = 42,
+  title = "Add feature",
+  state = "OPEN",
+  baseRefName = "main",
+  headRefName = "feature",
+  headRefOid = "abc123def456",
+  author = { login = "alice" },
+  url = "https://github.com/owner/repo/pull/42",
+  reviewDecision = "REVIEW_REQUIRED",
 })
-
---- Empty PR list (no open PR for branch).
-local PR_LIST_EMPTY_JSON = vim.json.encode({})
-
---- Reviews list — approved.
-local REVIEWS_APPROVED_JSON = vim.json.encode({
-  { state = "APPROVED", submitted_at = "2024-01-02T10:00:00Z" },
-})
-
---- Reviews list — changes requested.
-local REVIEWS_CHANGES_JSON = vim.json.encode({
-  { state = "CHANGES_REQUESTED", submitted_at = "2024-01-02T10:00:00Z" },
-})
-
---- Empty reviews list → pending.
-local REVIEWS_EMPTY_JSON = vim.json.encode({})
 
 --- Two review comments: one root, one reply.
 local COMMENTS_JSON = vim.json.encode({
@@ -276,11 +260,6 @@ local function ok(json_str)
   return { code = 0, stdout = json_str, stderr = "" }
 end
 
---- Success response with plain text (non-JSON) body.
-local function ok_text(text)
-  return { code = 0, stdout = text, stderr = "" }
-end
-
 --- Success response with no body (DELETE).
 local function ok_empty()
   return { code = 0, stdout = "", stderr = "" }
@@ -289,12 +268,6 @@ end
 --- Failure response.
 local function fail(msg)
   return { code = 1, stdout = "", stderr = msg }
-end
-
---- Return true when cmd is a `gh config get` invocation.
---- Used by test runners to distinguish local config reads from API calls.
-local function is_config_get(cmd)
-  return cmd[1] == "gh" and cmd[2] == "config"
 end
 
 --- Build a runner that dispatches based on the URL argument.
@@ -421,11 +394,7 @@ end
 return {
   model = model,
   gh = gh,
-  PR_LIST_JSON = PR_LIST_JSON,
-  PR_LIST_EMPTY_JSON = PR_LIST_EMPTY_JSON,
-  REVIEWS_APPROVED_JSON = REVIEWS_APPROVED_JSON,
-  REVIEWS_CHANGES_JSON = REVIEWS_CHANGES_JSON,
-  REVIEWS_EMPTY_JSON = REVIEWS_EMPTY_JSON,
+  PR_JSON = PR_JSON,
   COMMENTS_JSON = COMMENTS_JSON,
   COMMENTS_NULL_LINE_JSON = COMMENTS_NULL_LINE_JSON,
   POST_COMMENT_RESP_JSON = POST_COMMENT_RESP_JSON,
@@ -442,10 +411,8 @@ return {
   GRAPHQL_ERROR_JSON = GRAPHQL_ERROR_JSON,
   make_runner = make_runner,
   ok = ok,
-  ok_text = ok_text,
   ok_empty = ok_empty,
   fail = fail,
-  is_config_get = is_config_get,
   make_route_runner = make_route_runner,
   make_auth = make_auth,
   make_auth_err = make_auth_err,

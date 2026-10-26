@@ -57,8 +57,8 @@ a.describe("GitHub CLI delegation", function()
       repository = "owner/repo",
       _runner = function(cmd)
         calls[#calls + 1] = cmd
-        if cmd[2] == "config" then
-          return { code = 0, stdout = "alice" }
+        if vim.tbl_contains(cmd, "/user") or table.concat(cmd, " "):find("/user", 1, true) then
+          return { code = 0, stdout = '{"login":"alice"}' }
         end
         assert.is_true(vim.tbl_contains(cmd, "--paginate"))
         assert.is_true(vim.tbl_contains(cmd, "--slurp"))

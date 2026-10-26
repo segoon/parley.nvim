@@ -331,6 +331,7 @@
         "lua/parley/providers/github/mapping.lua",
         "lua/parley/providers/github/metadata.lua",
         "lua/parley/providers/github/provider.lua",
+        "lua/parley/providers/github/pull_request.lua",
         "lua/parley/providers/github/reactions.lua",
         "lua/parley/providers/github/transport.lua",
         "lua/parley/providers/github/vcs_detector.lua",

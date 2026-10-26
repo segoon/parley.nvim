@@ -25,8 +25,8 @@ The Git detector uses `git rev-parse`, the current non-detached branch, and the
 provider selection currently accepts only the `github.com` host. The provider's
 explicit constructor supports a configured GitHub Enterprise Server host and API
 base; that path is not selected automatically from arbitrary enterprise remotes.
-Every REST and GraphQL request explicitly selects the configured host, overriding
-`GH_HOST` and CLI defaults. A custom API base is used for REST paths; GraphQL uses
+Every request explicitly selects the configured host, overriding `GH_HOST` and CLI
+defaults; `gh pr view` receives `--repo HOST/OWNER/REPO`. A custom API base is used for REST paths; GraphQL uses
 the same base with a trailing `/v3` replaced by `/graphql` (or `/graphql` appended
 when there is no `/v3` suffix).
 
@@ -44,8 +44,14 @@ sent and must be checked before retrying.
 Cache identity includes host, API base, repository, and a one-way token fingerprint.
 The getter performs no I/O. Credentials are not stored in cache keys. If a stable
 credential cannot be established during preparation, persistent caching is disabled
-for that provider instance. The changed fingerprint format causes a cold refresh
-of earlier cached GitHub reviews.
+for that provider instance. The versioned fingerprint causes a cold refresh of
+earlier cached GitHub reviews, removing config-derived ownership and individual
+review verdicts.
+
+Viewer identity comes only from `GET /user` using the prepared credential, and is
+cached for that session. Local gh account configuration is not used to infer
+ownership. Failed viewer lookup leaves comment ownership unknown and prevents
+reaction toggles from guessing whether to add or remove a reaction.
 
 Health checks resolve credentials through `gh` without refreshing tokens, including
 secure-store credentials. Older CLI versions that do not refresh tokens fall back
@@ -55,8 +61,9 @@ to their original token command. Health checks do not validate server authorizat
 
 | Operation | Contract |
 |---|---|
-| PR discovery | `GET /repos/{owner}/{repo}/pulls?head={owner}:{branch}&state=open` |
-| Review status | `GET --paginate /repos/{owner}/{repo}/pulls/{number}/reviews` |
+| PR discovery and metadata | `gh pr view <branch> --json ... --repo HOST/OWNER/REPO`; only open results are accepted |
+| Review status | GitHub's aggregate `reviewDecision`, included in PR metadata |
+| Viewer identity | `GET /user` using the prepared credential |
 | Discussions | `GET --paginate /repos/{owner}/{repo}/pulls/{number}/comments` |
 | Thread state | GraphQL `reviewThreads`, paginated and correlated by root comment database ID |
 | Inline creation | `POST /repos/{owner}/{repo}/pulls/{number}/comments` |
@@ -79,8 +86,18 @@ multiline comments preserve `start_line` through `line`. Whole-file and unavaila
 locations remain readable without fabricated line numbers. The mapping does not
 yet retain the API's left/right side as old-side anchor metadata.
 
-Review status is derived from REST review verdicts. Failed or malformed status
-reads produce `unknown` without preventing PR discovery or discussion loading. Review submission accepts
+Custom API URLs and numeric branch names retain an explicit open-branch REST
+lookup followed by a GraphQL metadata query. The CLI cannot select arbitrary API
+URLs and interprets numeric selectors as PR numbers. A missing branch result or a
+closed/merged PR leaves Parley inactive; authentication and request failures are
+reported rather than treated as absence.
+
+Review status reflects GitHub's aggregate decision: `APPROVED` maps to `approved`,
+`CHANGES_REQUESTED` to `changes_requested`, and `REVIEW_REQUIRED` to `pending`.
+Missing, null, empty, or unrecognized decisions map to `unknown` without blocking
+discussion loading. Individual `COMMENTED` and `DISMISSED` review events no longer
+override a PR's aggregate status. Failure of the whole metadata request fails the
+refresh. Review submission accepts
 `approve`, `request_changes`, or `comment`, mapped to GitHub's corresponding review
 events, and requires a body through the shared workflow.
 
@@ -89,11 +106,11 @@ The reaction picker exposes GitHub's supported review-comment reactions: `+1`,
 
 ## Transport and failure handling
 
-API operations run through `gh api` subprocesses. Coroutine and callback entry
+Network operations run through `gh api` or `gh pr view` subprocesses. Coroutine and callback entry
 points share one request lifecycle with timeout, retry, cancellation, decoding,
 and at-most-once completion.
 
-REST lists (comments, reviews, and reactions) use `--paginate --slurp`; Parley
+REST lists (comments and reactions) use `--paginate --slurp`; Parley
 flattens the resulting page arrays. Standard GraphQL thread queries use the same
 flags and `$endCursor`. A failed later page does not publish partial metadata.
 Custom API bases retain explicit cursor traversal because `gh` only recognizes

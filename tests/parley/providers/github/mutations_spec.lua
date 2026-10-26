@@ -16,8 +16,6 @@ local GRAPHQL_ERROR_JSON = fixtures.GRAPHQL_ERROR_JSON
 local make_runner = fixtures.make_runner
 local ok = fixtures.ok
 local ok_empty = fixtures.ok_empty
-local fail = fixtures.fail
-local is_config_get = fixtures.is_config_get
 local make_route_runner = fixtures.make_route_runner
 local make_provider = fixtures.make_provider
 local make_review = fixtures.make_review
@@ -237,11 +235,8 @@ async_tests.describe("parley.providers.github.provider — resolve/unresolve", f
 end)
 
 async_tests.describe("parley.providers.github.provider — react", function()
-  async_tests.it("caches viewer login on first call (falls back to gh api /user when config unavailable)", function()
+  async_tests.it("caches viewer login on first call via gh api /user", function()
     local runner = make_runner(function(cmd)
-      if is_config_get(cmd) then
-        return fail("no config")
-      end
       for _, a in ipairs(cmd) do
         if a == "/user" then
           return ok(USER_JSON)
@@ -257,9 +252,6 @@ async_tests.describe("parley.providers.github.provider — react", function()
 
   async_tests.it("POSTs reaction when viewer has not reacted", function()
     local runner = make_runner(function(cmd)
-      if is_config_get(cmd) then
-        return fail("no config")
-      end
       -- /user → viewer login
       for _, a in ipairs(cmd) do
         if a == "/user" then
@@ -289,9 +281,6 @@ async_tests.describe("parley.providers.github.provider — react", function()
 
   async_tests.it("DELETEs reaction when viewer has already reacted", function()
     local runner = make_runner(function(cmd)
-      if is_config_get(cmd) then
-        return fail("no config")
-      end
       for _, a in ipairs(cmd) do
         if a == "/user" then
           return ok(USER_JSON)
@@ -327,9 +316,6 @@ async_tests.describe("parley.providers.github.provider — react", function()
   async_tests.it("reuses cached viewer login on second react call", function()
     local user_call_count = 0
     local runner = make_runner(function(cmd)
-      if is_config_get(cmd) then
-        return fail("no config")
-      end
       for _, a in ipairs(cmd) do
         if a == "/user" then
           user_call_count = user_call_count + 1

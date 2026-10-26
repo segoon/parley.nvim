@@ -323,7 +323,7 @@ describe("parley.providers.github.transport — fetch_viewer_login availability 
     local provider = make_provider({
       _runner = function(_cmd)
         runner_called = true
-        return { code = 0, stdout = "testuser\n", stderr = "" }
+        return { code = 0, stdout = '{"login":"testuser"}', stderr = "" }
       end,
     })
     provider._viewer_login = nil

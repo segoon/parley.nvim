@@ -1,6 +1,6 @@
 --- parley.providers.github.mapping — Pure data-mapping helpers.
 ---
---- Converts raw GitHub REST API objects (review comments, reactions, reviews)
+--- Converts raw GitHub REST API objects (review comments and reactions)
 --- into parley model types.  No I/O; all functions are pure.
 
 local dbg = require("parley.debug")
@@ -15,15 +15,6 @@ local M = {}
 --- Map REST reactions object keys → internal reaction type strings.
 --- @type string[]
 M.REST_REACTION_KEYS = require("parley.providers.github.reactions").keys()
-
---- Map GitHub review states → parley.ReviewStatus values.
---- @type table<string, string>
-M.GH_REVIEW_STATE_MAP = {
-  APPROVED = "approved",
-  CHANGES_REQUESTED = "changes_requested",
-  DISMISSED = "dismissed",
-  COMMENTED = "commented",
-}
 
 --- Map provider event names → GitHub review event values.
 --- @type table<string, string>
@@ -79,31 +70,6 @@ mutation($id: ID!) {
 -- ---------------------------------------------------------------------------
 -- Helpers
 -- ---------------------------------------------------------------------------
-
---- Compute review_status from a list of GitHub review objects.
---- Takes the last non-PENDING entry (reviews are in chronological order).
---- @param reviews any Review list or malformed/unavailable remote data.
---- @return parley.ReviewStatus
-function M.compute_review_status(reviews)
-  if type(reviews) ~= "table" or not vim.islist(reviews) then
-    return "unknown"
-  end
-  local status = "pending"
-  for _, r in ipairs(reviews) do
-    if
-      type(r) ~= "table"
-      or type(r.state) ~= "string"
-      or (r.state ~= "PENDING" and not M.GH_REVIEW_STATE_MAP[r.state])
-    then
-      return "unknown"
-    end
-    local mapped = M.GH_REVIEW_STATE_MAP[r.state]
-    if mapped then
-      status = mapped
-    end
-  end
-  return status
-end
 
 --- Map the REST reactions object (embedded in a comment) to parley.Reaction[].
 --- The REST API embeds counts as `{"+1": N, "-1": N, ...}` under `reactions`.

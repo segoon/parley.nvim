@@ -1,54 +1,40 @@
 local a = require("plenary.async.tests")
 local github = require("parley.providers.github.provider")
-local transport = require("parley.providers.github.transport")
+local fixtures = require("tests.parley.providers.github.fixtures")
 
-describe("GitHub review-status degradation", function()
-  local available
-  before_each(function()
-    available = transport._gh_available
-    transport._gh_available = true
-  end)
-  after_each(function()
-    transport._gh_available = available
-  end)
-
+a.describe("GitHub aggregate review status", function()
   for _, case in ipairs({
-    { name = "HTTP failure", response = { code = 1, stdout = "", stderr = "HTTP 503" }, status = "unknown" },
-    { name = "invalid JSON", response = { code = 0, stdout = "invalid" }, status = "unknown" },
-    { name = "null", response = { code = 0, stdout = "null" }, status = "unknown" },
-    { name = "object", response = { code = 0, stdout = '{"message":"unavailable"}' }, status = "unknown" },
-    { name = "null item", response = { code = 0, stdout = "[null]" }, status = "unknown" },
-    { name = "missing state", response = { code = 0, stdout = "[{}]" }, status = "unknown" },
-    { name = "future state", response = { code = 0, stdout = '[{"state":"FUTURE"}]' }, status = "unknown" },
-    { name = "empty reviews", response = { code = 0, stdout = "[]" }, status = "pending" },
-    { name = "approved", response = { code = 0, stdout = '[{"state":"APPROVED"}]' }, status = "approved" },
+    { name = "approval", value = "APPROVED", status = "approved" },
+    { name = "changes requested", value = "CHANGES_REQUESTED", status = "changes_requested" },
+    { name = "review required", value = "REVIEW_REQUIRED", status = "pending" },
+    { name = "null decision", value = vim.NIL, status = "unknown" },
+    { name = "empty decision", value = "", status = "unknown" },
+    { name = "missing decision", status = "unknown" },
+    { name = "future decision", value = "FUTURE", status = "unknown" },
+    { name = "malformed decision", value = {}, status = "unknown" },
   }) do
-    a.it("keeps discussions readable after " .. case.name, function()
-      local provider = github.new({
+    a.it("maps " .. case.name .. " without interpreting individual reviews", function()
+      local raw = vim.json.decode(fixtures.PR_JSON)
+      raw.reviewDecision = case.value
+      raw.reviews = { { state = "APPROVED" }, { state = "COMMENTED" } }
+      local p = github.new({
         repository = "owner/repo",
-        config = { retry_count = 0 },
-        _runner = function(cmd)
-          local args = table.concat(cmd, " ")
-          if args:find("/reviews", 1, true) then
-            local result = vim.deepcopy(case.response)
-            if result.code == 0 then
-              result.stdout = "[" .. result.stdout .. "]"
-            end
-            return result
-          elseif args:find("/pulls?", 1, true) then
-            return { code = 0, stdout = '[{"number":42,"head":{"sha":"head"},"base":{"ref":"main"}}]' }
-          elseif args:find("/comments", 1, true) then
-            return { code = 0, stdout = '[[{"id":1,"path":"a.lua","line":1,"body":"Readable"}]]' }
-          elseif cmd[2] == "config" then
-            return { code = 0, stdout = "viewer" }
+        _spawn = function(cmd, cb)
+          if cmd[2] == "pr" then
+            cb({ code = 0, stdout = vim.json.encode(raw) })
+          elseif vim.tbl_contains(cmd, "/user") then
+            cb({ code = 0, stdout = '{"login":"alice"}' })
+          elseif vim.tbl_contains(cmd, "graphql") then
+            cb({ code = 0, stdout = '[{"data":{}}]' })
+          else
+            assert.is_true(table.concat(cmd, " "):find("/comments", 1, true) ~= nil)
+            cb({ code = 0, stdout = '[[{"id":1,"path":"a.lua","line":1,"body":"Readable"}]]' })
           end
-          return { code = 0, stdout = "{}" }
         end,
       })
-      local review = provider:detect_pr("/repo", "feature")
-      assert.equals("42", review.pr.id)
+      local review = p:detect_pr("/repo", "feature")
       assert.equals(case.status, review.pr.review_status)
-      assert.equals("Readable", provider:fetch_discussions(review)[1].comments[1].body.text)
+      assert.equals("Readable", p:fetch_discussions(review)[1].comments[1].body.text)
     end)
   end
 end)
