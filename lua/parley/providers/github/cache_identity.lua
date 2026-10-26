@@ -68,7 +68,7 @@ function M.get(self)
     host = self._host .. "\0" .. self._api_base,
     repository = self._owner .. "/" .. self._repo,
     -- Invalidate cached config-derived ownership and individual-review verdicts.
-    account = vim.fn.sha256("github-metadata-v2\0" .. self._session_token),
+    account = vim.fn.sha256(vim.json.encode({ "github-metadata-v2", self._session_token })),
   }
 end
 return M
