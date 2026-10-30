@@ -307,6 +307,7 @@
         "lua/parley/providers/arcanum/cli.lua",
         "lua/parley/providers/arcanum/requests.lua",
         "lua/parley/providers/arcanum/comment_write.lua",
+        "lua/parley/providers/arcanum/comment_scope.lua",
         "lua/parley/providers/arcanum/anchors.lua",
         "lua/parley/providers/arcanum/discussions.lua",
         "lua/parley/providers/arcanum/cache_identity.lua",

@@ -2,25 +2,24 @@ local requests = require("parley.providers.arcanum.requests")
 
 describe("explicit Arcanum operation requests", function()
   it("builds discovery and immutable diff reads directly as CLI commands", function()
-    local search = requests.search_prs("users/a/topic", 100)
-    assert.equals("cli", search.kind)
-    assert.equals("read", search.retry_policy)
+    local lookup = requests.get_pr_by_branch("users/a/topic")
+    assert.equals("cli", lookup.kind)
+    assert.equals("read", lookup.retry_policy)
     assert.same({
       "pr",
-      "list",
+      "get",
       "--from-branch",
       "users/a/topic",
-      "--published",
-      "true",
-      "--desc",
-      "--limit",
-      "100",
-      "--offset",
-      "100",
+      "--latest",
+      "--repository",
+      "arcadia",
       "--fields",
-      "id,vcs(from_branch)",
-    }, search.args)
-    assert.same({ "pr", "get", "--id", "12", "--fields", "id,summary,status,url,author,vcs" }, requests.get_pr(12).args)
+      "id,summary,status,url,author,vcs",
+    }, lookup.args)
+    assert.same(
+      { "pr", "diff-info", "--diff-id", "42", "--fields", "id,pull_request_id" },
+      requests.get_diff_info(42).args
+    )
     assert.same(
       { "pr", "active-diff", "--id", "12", "--fields", "id,commit_ids(base,head,merge)" },
       requests.get_active_diff(12).args

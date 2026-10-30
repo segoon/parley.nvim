@@ -58,30 +58,32 @@ local function comment(request, pr_id, comment_id, content)
 end
 
 --- @param branch string
---- @param offset integer
 --- @return parley.arcanum.Request
-function M.search_prs(branch, offset)
-  return cli("search_prs", "read", {
+function M.get_pr_by_branch(branch)
+  return cli("get_pr_by_branch", "read", {
     "pr",
-    "list",
+    "get",
     "--from-branch",
     branch,
-    "--published",
-    "true",
-    "--desc",
-    "--limit",
-    "100",
-    "--offset",
-    tostring(offset),
+    "--latest",
+    "--repository",
+    "arcadia",
     "--fields",
-    "id,vcs(from_branch)",
+    "id,summary,status,url,author,vcs",
   })
 end
 
---- @param pr_id integer|string
+--- @param diff_id integer
 --- @return parley.arcanum.Request
-function M.get_pr(pr_id)
-  return cli("get_pr", "read", { "pr", "get", "--id", tostring(pr_id), "--fields", "id,summary,status,url,author,vcs" })
+function M.get_diff_info(diff_id)
+  return cli("get_diff_info", "read", {
+    "pr",
+    "diff-info",
+    "--diff-id",
+    tostring(diff_id),
+    "--fields",
+    "id,pull_request_id",
+  })
 end
 
 --- @param pr_id integer|string

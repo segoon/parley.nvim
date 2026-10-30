@@ -11,7 +11,7 @@ integration changes. See [README](README.md) for setup, the
 
 | Workflow | Behavior | Limits |
 |---|---|---|
-| Discovery | Detect Arc repositories and find an exact remote-branch match across paginated prefix-search results | No remote branch means inactive; malformed or nonprogressing pages fail |
+| Discovery | Detect Arc repositories and get the latest PR for the exact remote branch | Missing, merged, discarded, or draft PRs remain inactive; inconsistent metadata fails |
 | Authentication | Read supported token sources and bind the Arc login before restoring cached ownership | The selected token must belong to that Arc user |
 | Discussions | Preserve nested, orphaned, and cyclic replies, reactions, issue states, and explicit anchor metadata | Unavailable locations remain readable without fabricated positions |
 | Inline comments | Create new-side line and range comments using the loaded V2 diff | Requires a clean file, matching HEAD, and an entry in the loaded diff |
@@ -34,7 +34,8 @@ and require a refreshed session. Cache identity includes provider, host, reposit
 login, and a credential fingerprint; tokens are neither stored in cache keys nor
 printed in diagnostics. Identity version 5 invalidates earlier API-viewer caches.
 
-`ya tool arcanum` is required. Every CLI process receives the provider-selected
+`ya tool arcanum` with `pr get --from-branch ... --latest` support is required.
+Every CLI process receives the provider-selected
 credential through `ARC_TOKEN` and the explicit HTTPS API URL. Inherited
 `ARCANUM_CLI_REVIEW_SYSTEM` is cleared so ordinary comments do not acquire a review
 system implicitly. Comment text is passed through stdin, not a shell.
@@ -47,7 +48,8 @@ all requests use HTTPS.
 
 | Operation | Execution |
 |---|---|
-| Search | CLI `pr list`, projected cursor pages, then `pr get` for the exact match |
+| Discovery | CLI `pr get --from-branch … --latest --repository arcadia`; one exact-branch metadata lookup |
+| Missing comment PR scope | CLI `pr diff-info --diff-id … --fields id,pull_request_id`, then PR-scoped comment commands |
 | Active diff | CLI `pr active-diff --fields id,commit_ids(base,head,merge)` |
 | Discussions | HTTP `GET /v1/public/review-requests/{id}/comments` to retain full V1 anchors |
 | Inline entry | CLI `pr changelist --diff-id … --diff-mode flat_path --ignorews=false --fields path,entry_id` |
@@ -58,6 +60,22 @@ all requests use HTTPS.
 | Review data | HTTP `GET /v1/plugin/pull-request/{pr_id}/review` |
 | Approval | HTTP `PUT .../review/ship?sticky=false|true`; withdrawal uses `DELETE` |
 | Merge block | HTTP `PUT .../review/block-merge`; withdrawal uses `DELETE` |
+
+Discovery selects the greatest-ID PR for the exact repository/remote-branch pair.
+A 404 means no review; merged, discarded, and draft results leave Parley inactive.
+Authentication failures, unsupported CLI flags, malformed metadata, and branch
+mismatches are errors rather than absence. The returned lifecycle state is checked
+before loading the active diff or discussions; discovery does not enumerate older
+PRs for a reused branch.
+
+When a comment operation lacks PR scope but has an immutable diff ID, Parley reads
+that diff's owning PR through the CLI before sending. Lookup failure, malformed
+ownership, changed diff context, or changed account prevents the mutation. This
+works for replies, edits, deletion, issue transitions, and inline response hydration;
+it does not substitute the active diff for an existing comment's original anchor.
+The caller's review snapshot is not modified. Direct provider calls with neither
+PR nor diff scope retain their existing HTTP behavior. A failed scope lookup never
+falls back to an unscoped HTTP mutation.
 
 PR-scoped V2 comment operations support general and historical inline comments,
 despite the CLI help's narrower “PR-level” wording. Replies inherit the original

@@ -711,8 +711,8 @@ The built-in Arcanum provider supports Arc (Arcadia VCS) repositories via
 `ya tool arcanum` and retained REST APIs over HTTPS at arcanum.yandex.net.
 The CLI handles discovery, diff reads, and comment actions. Complete discussion
 reads and review verdicts retain HTTP to preserve their full contracts. The CLI
-is required. Each operation selects CLI or HTTP before sending; failed CLI
-mutations never fall back to HTTP.
+must support `pr get --from-branch … --latest`. Each operation selects CLI or
+HTTP before sending; failed CLI mutations never fall back to HTTP.
 
 The provider is activated automatically when the current buffer belongs to an
 Arc repository (detected via `arc root`).
@@ -742,11 +742,17 @@ all three without storing the token. Direct provider mutations require a prepare
 session from review loading. The CLI receives the selected token as ARC_TOKEN and
 an explicit API URL; its default credential selection is not used.
 
-PR detection follows prefix-search pages using offset and has_next until an exact
-remote branch match is found. Cursor fields include vcs(from_branch); full PR
-metadata is fetched only for the exact match;
-malformed or nonprogressing pages are errors. Without a remote branch, Parley stays
-inactive without authentication or PR HTTP requests.
+PR detection uses `pr get --from-branch <remote> --latest --repository arcadia`.
+This selects the greatest-ID PR for the exact branch, including closed PRs.
+A 404, or a merged, discarded, or draft result, leaves Parley inactive. Other
+failures and inconsistent metadata are errors. Older PRs are not enumerated when
+a branch is reused. Without a remote branch, Parley stays inactive without
+authentication or remote requests.
+
+Comment operations with a known diff but missing PR scope first use
+`pr diff-info --fields id,pull_request_id` to recover the owning PR. Failed reads,
+invalid ownership, or changed session/diff context prevent the write. Calls with
+neither PR nor diff scope retain their existing HTTP behavior.
 
 Inline comments: ~
 
@@ -804,7 +810,7 @@ Arcanum-specific options live under `providers.arcanum` in the setup call: >lua
 <
 
 Each transport request has one `timeout_ms` budget covering queueing, CLI startup
-or HTTP attempts, and retry waits. Inline entry lookup, comment creation, and
+or HTTP attempts, and retry waits. PR scope lookup, inline entry lookup, comment creation, and
 acknowledgement hydration are separate requests. Expiration completes the request
 and terminates its active subprocess.
 

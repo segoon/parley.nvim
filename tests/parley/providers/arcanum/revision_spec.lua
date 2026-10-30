@@ -4,12 +4,14 @@ local a = require("plenary.async.tests")
 
 a.describe("Arcanum shared review revision", function()
   a.it("requests sparse active-diff fields explicitly", function()
-    local original = transport.request_run
+    local original, original_start = transport.request_run, transport.request_start
+    transport.request_start = function(_, request, callback)
+      assert.equals("get_pr_by_branch", request.operation)
+      callback({ ok = true, data = { id = 1, status = "open", vcs = { from_branch = "users/a/feature" } } })
+      return { cancel = function() end }
+    end
     local requested = false
     transport.request_run = function(_, request)
-      if request.operation == "search_prs" then
-        return { pull_requests = { { id = 1, vcs = { from_branch = "users/a/feature" } } }, has_next = false }
-      end
       if request.operation == "get_active_diff" then
         requested = request.args[6] == "id,commit_ids(base,head,merge)"
         return requested and { id = 2, commit_ids = { base = "base", head = "abc", merge = "merged" } } or {}
@@ -25,7 +27,7 @@ a.describe("Arcanum shared review revision", function()
       },
     })
     local ok, result = pcall(p.detect_pr, p, "/arc", "users/a/feature")
-    transport.request_run = original
+    transport.request_run, transport.request_start = original, original_start
     assert.is_true(ok)
     assert.is_true(requested)
     assert.equals("abc", result.head_sha)
@@ -34,12 +36,14 @@ a.describe("Arcanum shared review revision", function()
     assert.is_string(result.snapshot_id)
   end)
   a.it("retains read access without accepting malformed active-diff metadata", function()
-    local original = transport.request_run
+    local original, original_start = transport.request_run, transport.request_start
+    transport.request_start = function(_, request, callback)
+      assert.equals("get_pr_by_branch", request.operation)
+      callback({ ok = true, data = { id = 1, status = "open", vcs = { from_branch = "users/a/feature" } } })
+      return { cancel = function() end }
+    end
     local active
     transport.request_run = function(_, request)
-      if request.operation == "search_prs" then
-        return { pull_requests = { { id = 1, vcs = { from_branch = "users/a/feature" } } }, has_next = false }
-      end
       if request.operation == "get_active_diff" then
         return active
       end
@@ -68,7 +72,7 @@ a.describe("Arcanum shared review revision", function()
         assert.is_nil(result.write_context.diff_set_xid)
       end
     end)
-    transport.request_run = original
+    transport.request_run, transport.request_start = original, original_start
     assert.is_true(ok, tostring(err))
   end)
 end)

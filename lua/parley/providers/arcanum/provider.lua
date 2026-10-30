@@ -6,7 +6,7 @@
 ---
 --- Design notes:
 ---   • Requests: named operation builders select CLI or HTTPS before execution.
----   • PR detection: paginated CLI search, then an exact branch match.
+---   • PR detection: exact latest-PR lookup through the CLI.
 ---   • Discussion fetching: GET /v1/public/review-requests/{pr_id}/comments.
 ---   • Anchored comment posting requires resolving entry_id from the active diff
 ---     changelist; these are cached in write_context after detect_pr.
@@ -26,6 +26,7 @@ local requests = require("parley.providers.arcanum.requests")
 local M = {}
 local session = require("parley.providers.arcanum.session")
 local comment_write = require("parley.providers.arcanum.comment_write")
+local comment_scope = require("parley.providers.arcanum.comment_scope")
 
 -- ---------------------------------------------------------------------------
 -- Type annotations
@@ -243,11 +244,9 @@ end
 function ArcanumProvider:begin_reply(review, _discussion, parent_comment, body, callback)
   session.require_current(self)
 
-  return comment_write.start(
-    self,
-    requests.reply(comment_write.pr_id(review), parent_comment.id, body.text, self._config.idempotent_write_retries),
-    callback
-  )
+  return comment_scope.start(self, review, function(pr_id)
+    return requests.reply(pr_id, parent_comment.id, body.text, self._config.idempotent_write_retries)
+  end, callback, comment_write.start)
 end
 
 local resolution = require("parley.providers.arcanum.resolution")
@@ -269,7 +268,9 @@ function ArcanumProvider:edit(review, comment_id, body)
   session.require_current(self)
 
   local result = require("parley.runtime.await").callback(function(callback)
-    comment_write.start(self, requests.edit_comment(comment_write.pr_id(review), comment_id, body.text), callback)
+    comment_scope.start(self, review, function(pr_id)
+      return requests.edit_comment(pr_id, comment_id, body.text)
+    end, callback, comment_write.start)
   end)
   if not result.ok then
     error(result.err or "Arcanum edit failed", 0)
@@ -284,7 +285,9 @@ end
 --- @param comment_id  string
 function ArcanumProvider:delete(review, comment_id)
   session.require_current(self)
-  transport.request_run(self, requests.delete_comment(comment_write.pr_id(review), comment_id))
+  comment_scope.run(self, review, function(pr_id)
+    return requests.delete_comment(pr_id, comment_id)
+  end)
 end
 
 --- Submit a PR-level review verdict.

@@ -2,6 +2,7 @@
 local transport = require("parley.providers.arcanum.transport")
 local requests = require("parley.providers.arcanum.requests")
 local comment_write = require("parley.providers.arcanum.comment_write")
+local comment_scope = require("parley.providers.arcanum.comment_scope")
 local ui = require("parley.runtime.ui")
 local M = {}
 
@@ -81,7 +82,15 @@ function M.start(self, review, file, anchor, body, callback)
     local stage, delivered = generation, false
     active = nil
     local creation = descriptor.operation == "create_inline"
-    local executor = creation and comment_write.start or transport.request_start
+    local executor = transport.request_start
+    if creation then
+      executor = function(owner, operation, receive)
+        return comment_scope.start(owner, review, function(pr_id)
+          operation.pr_id = pr_id
+          return operation
+        end, receive, comment_write.start)
+      end
+    end
     local ok, result = pcall(executor, self, descriptor, function(response)
       if completed or delivered or generation ~= stage then
         return
@@ -130,7 +139,7 @@ function M.start(self, review, file, anchor, body, callback)
     local function post(entry_id)
       payload.entry_id = entry_id
       request(
-        requests.create_inline(comment_write.pr_id(review), diff_id, payload, self._config.idempotent_write_retries)
+        requests.create_inline(comment_scope.pr_id(review), diff_id, payload, self._config.idempotent_write_retries)
       )
     end
     local cached = context.changelist_diff_id == diff_id

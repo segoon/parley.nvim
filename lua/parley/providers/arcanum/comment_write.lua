@@ -4,12 +4,6 @@ local requests = require("parley.providers.arcanum.requests")
 local mapping = require("parley.providers.arcanum.mapping")
 local M = {}
 
---- @param review parley.DetectedReview
---- @return integer|string|nil
-function M.pr_id(review)
-  return review.write_context and review.write_context.pr_id or review.pr and review.pr.id
-end
-
 --- @param raw any
 --- @param viewer string
 --- @param content? string

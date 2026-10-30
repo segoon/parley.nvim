@@ -52,7 +52,7 @@ describe("Arcanum issue resolution", function()
     end
     assert.equals(4, #calls)
   end)
-  it("preserves uncertain failures and delegates cancellation", function()
+  it("preserves completed uncertain failures without cancelling finished requests", function()
     result = { ok = false, uncertain = true, cancelled = true, err = "Check the review" }
     local received
     local h = p:begin_resolve({}, "42", function(r)
@@ -60,7 +60,7 @@ describe("Arcanum issue resolution", function()
     end)
     h.cancel()
     assert.same(result, received)
-    assert.equals(1, cancelled)
+    assert.equals(0, cancelled)
   end)
   it("reports missing credentials through the callback without starting HTTP", function()
     p._token = nil
