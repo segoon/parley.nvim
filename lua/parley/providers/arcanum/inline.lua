@@ -1,10 +1,9 @@
 --- V2 inline creation: one cancellable operation for callback and coroutine callers.
 local transport = require("parley.providers.arcanum.transport")
+local requests = require("parley.providers.arcanum.requests")
 local comment_write = require("parley.providers.arcanum.comment_write")
 local ui = require("parley.runtime.ui")
 local M = {}
-
-local COMMENT_FIELDS = "id,author(name),content,reply_to_id,created_at,updated_at,edited_at,reactions(code,user(name))"
 
 --- @param value any
 --- @return boolean
@@ -72,33 +71,32 @@ function M.start(self, review, file, anchor, body, callback)
   }
 
   --- Start a stage safely even when the transport invokes its callback inline.
-  --- @param method string
-  --- @param path string
-  --- @param payload table|nil
+  --- @param descriptor parley.arcanum.Request
   --- @param next_stage? fun(data: any)
-  local function request(method, path, payload, next_stage)
+  local function request(descriptor, next_stage)
     if completed then
       return
     end
     generation = generation + 1
     local stage, delivered = generation, false
     active = nil
-    local executor = method == "POST" and comment_write.start or transport.request_start
-    local ok, result = pcall(executor, self, method, path, payload, function(response)
+    local creation = descriptor.operation == "create_inline"
+    local executor = creation and comment_write.start or transport.request_start
+    local ok, result = pcall(executor, self, descriptor, function(response)
       if completed or delivered or generation ~= stage then
         return
       end
       delivered = true
       active = nil
-      if method == "POST" or not response.ok then
+      if creation or not response.ok then
         finish(response)
         return
       end
       local success, err = pcall(next_stage, response.data)
       if not success then
-        finish({ ok = false, err = tostring(err), uncertain = method == "POST" })
+        finish({ ok = false, err = tostring(err), uncertain = creation })
       end
-    end, method == "POST" and { retry_policy = "create", pr_id = comment_write.pr_id(review) } or nil)
+    end)
     if not ok then
       finish({ ok = false, err = tostring(result) })
     elseif not completed and not delivered and generation == stage then
@@ -131,7 +129,9 @@ function M.start(self, review, file, anchor, body, callback)
     --- @param entry_id string
     local function post(entry_id)
       payload.entry_id = entry_id
-      request("POST", "/v2/public/diff/" .. tostring(diff_id) .. "/comment?fields=" .. COMMENT_FIELDS, payload, nil)
+      request(
+        requests.create_inline(comment_write.pr_id(review), diff_id, payload, self._config.idempotent_write_retries)
+      )
     end
     local cached = context.changelist_diff_id == diff_id
       and type(context.changelist) == "table"
@@ -140,7 +140,7 @@ function M.start(self, review, file, anchor, body, callback)
       post(cached)
       return
     end
-    request("GET", "/v2/public/diff/" .. tostring(diff_id) .. "/changelist?fields=path,entry_id", nil, function(data)
+    request(requests.get_changelist(diff_id), function(data)
       local entries = {}
       if type(data) == "table" then
         for _, entry in ipairs(data) do

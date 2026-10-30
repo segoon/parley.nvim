@@ -10,8 +10,8 @@ describe("Arcanum desired reaction state", function()
     } })
     dofile("tests/support/arcanum_session.lua")(p)
     saved, calls = transport.request_start, {}
-    transport.request_start = function(_, method, path, body, cb, opts)
-      calls[#calls + 1] = { method, path, body, opts }
+    transport.request_start = function(_, request, cb)
+      calls[#calls + 1] = request
       cb({ ok = true })
       return { cancel = function() end }
     end
@@ -39,10 +39,11 @@ describe("Arcanum desired reaction state", function()
       end)
       assert.is_true(result.ok)
       local call = calls[#calls]
-      assert.equals(present and "PUT" or "DELETE", call[1])
-      assert.equals("/v1/plugin/pull-request/12/comment/-42/reaction/%3A%2B1%3A", call[2])
-      assert.is_nil(call[3])
-      assert.same({ retry_policy = "none" }, call[4])
+      assert.equals("cli", call.kind)
+      assert.equals(present and "add-reaction" or "remove-reaction", call.args[2])
+      assert.equals("-42", call.args[6])
+      assert.equals(":+1:", call.args[8])
+      assert.equals("none", call.retry_policy)
     end
   end)
   it("allows removing an opaque code but refuses adding it", function()
@@ -56,7 +57,7 @@ describe("Arcanum desired reaction state", function()
       result = r
     end)
     assert.is_true(result.ok)
-    assert.matches("a%%2Fb%%3F$", calls[1][2])
+    assert.equals("a/b?", calls[1].args[8])
   end)
   it("rejects changed credentials before HTTP", function()
     p._auth.read_token = function()

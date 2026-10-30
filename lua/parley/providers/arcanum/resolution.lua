@@ -1,5 +1,6 @@
 --- Issue-state writes share the cancellable transport; PATCH is never retried automatically.
 local transport = require("parley.providers.arcanum.transport")
+local requests = require("parley.providers.arcanum.requests")
 local await = require("parley.runtime.await")
 local M = {}
 --- @param id string
@@ -21,13 +22,10 @@ local function begin(provider, review, id, state, callback)
   end
   return transport.request_start(
     provider,
-    "PATCH",
-    "/v1/public/review-requests-comments/" .. id,
-    { issue_status = state },
+    requests.set_issue_state(require("parley.providers.arcanum.comment_write").pr_id(review), id, state),
     function(result)
       callback({ ok = result.ok, err = result.err, uncertain = result.uncertain, cancelled = result.cancelled })
-    end,
-    { retry_policy = "none", pr_id = require("parley.providers.arcanum.comment_write").pr_id(review) }
+    end
   )
 end
 --- @param self parley.arcanum.Provider

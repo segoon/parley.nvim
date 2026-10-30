@@ -1,19 +1,14 @@
 --- Exhaust prefix search pages before reporting that the exact remote branch has no review.
 local transport = require("parley.providers.arcanum.transport")
+local requests = require("parley.providers.arcanum.requests")
 local M = {}
-local fields = "id,summary,status,url,author,vcs"
 --- @param self parley.arcanum.Provider
 --- @param branch string
 --- @return table|nil
 function M.find(self, branch)
   local offset, seen = 0, {}
   while true do
-    local data = transport.request_run(self, "POST", "/v1/pull-requests/cursor?fields=id,vcs(from_branch)", {
-      limit = 100,
-      offset = offset,
-      desc_order = true,
-      filter = { user_branch_prefix = branch, state = { published = true } },
-    }, { retry_policy = "read" })
+    local data = transport.request_run(self, requests.search_prs(branch, offset))
     if
       type(data) ~= "table"
       or type(data.pull_requests) ~= "table"
@@ -34,7 +29,7 @@ function M.find(self, branch)
           error("Arcanum review search returned incomplete candidate details", 0)
         end
         if candidate.vcs.from_branch == branch then
-          local full = transport.request_run(self, "GET", "/v1/pull-requests/" .. tostring(id) .. "?fields=" .. fields)
+          local full = transport.request_run(self, requests.get_pr(id))
           if type(full) ~= "table" or full.id ~= id or type(full.vcs) ~= "table" or full.vcs.from_branch ~= branch then
             error("Arcanum review search returned inconsistent candidate details; refresh the review", 0)
           end

@@ -35,6 +35,8 @@ a.describe("configured Arcanum workflow", function()
         data = { pull_requests = { { id = 1, vcs = { from_branch = "feature" } } }, has_next = false }
       elseif argv[8] == "active-diff" then
         data = { id = 2, commit_ids = { head = "head", base = "base", merge = "merge" } }
+      elseif argv[8] == "changelist" then
+        data = { { path = "a.lua", entry_id = "fixture-entry" } }
       elseif argv[8] == "get" then
         data = { id = 1, vcs = { from_branch = "feature" } }
       else
@@ -69,5 +71,47 @@ a.describe("configured Arcanum workflow", function()
     assert.equals("approved", review.pr.review_status)
     assert.equals("merge", review.review_sha)
     assert.equals("configured.example:8443", p:cache_identity().host)
+  end)
+  a.it("uses only CLI for supported comment operations and never replays failed mutations through HTTP", function()
+    local opts = {
+      login = "local-user",
+      _auth = {
+        read_token = function()
+          return "test-token"
+        end,
+      },
+    }
+    local p = descriptor.factory(opts, { host = "configured.example:8443", timeout_ms = 500, request_interval_ms = 1 })
+    local review = p:detect_pr("/checkout", "feature")
+    local first_write = #calls + 1
+    p:post_top_level_comment(review, "a.lua", { start_line = 7, end_line = 8 }, { text = "inline" })
+    p:reply(review, {}, { id = "-3" }, { text = "reply" })
+    p:edit(review, "-3", { text = "edited" })
+    p:delete(review, "-3")
+    p:resolve(review, "1")
+    p:unresolve(review, "1")
+    for _, present in ipairs({ true, false }) do
+      local result = require("parley.runtime.await").callback(function(callback)
+        return p:begin_set_reaction(review, "-3", ":heart:", present, callback)
+      end)
+      assert.is_true(result.ok)
+    end
+    local commands = {}
+    for index = first_write, #calls do
+      assert.equals("cli", calls[index].backend)
+      commands[#commands + 1] = calls[index].argv[8]
+    end
+    assert.same(
+      { "changelist", "post-diff", "reply", "edit", "delete", "edit", "edit", "add-reaction", "remove-reaction" },
+      commands
+    )
+    cli._system = function(_, _, callback)
+      callback({ code = 65, stdout = '{"error":{"code":"REMOTE_ERROR","http_status":503}}', stderr = "" })
+      return { kill = function() end }
+    end
+    local count = #calls
+    local ok = pcall(p.reply, p, review, {}, { id = "-3" }, { text = "do not replay" })
+    assert.is_false(ok)
+    assert.equals(count, #calls, "A failed CLI mutation must not invoke HTTP")
   end)
 end)

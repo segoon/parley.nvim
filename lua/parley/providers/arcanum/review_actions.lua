@@ -1,5 +1,6 @@
 --- Explicit Arcanum review semantics. The server remains authoritative for permissions.
 local transport = require("parley.providers.arcanum.transport")
+local requests = require("parley.providers.arcanum.requests")
 local session = require("parley.providers.arcanum.session")
 local M = {}
 local verbs = { approve = true, approve_pr = true, block_merge = true }
@@ -7,30 +8,22 @@ local definitions = {
   {
     action = "ship",
     label = "Ship",
-    route = "/ship?sticky=false",
-    method = "PUT",
     detail = "Approve the active diff.",
   },
   {
     action = "sticky_ship",
     label = "Sticky ship",
-    route = "/ship?sticky=true",
-    method = "PUT",
     detail = "Approve this PR, including future diffs until withdrawn.",
   },
-  { action = "unship", label = "Unship", route = "/ship", method = "DELETE", detail = "Withdraw your approval." },
+  { action = "unship", label = "Unship", detail = "Withdraw your approval." },
   {
     action = "block_merge",
     label = "Block merge",
-    route = "/block-merge",
-    method = "PUT",
     detail = "Block merging this PR.",
   },
   {
     action = "unblock_merge",
     label = "Unblock merge",
-    route = "/block-merge",
-    method = "DELETE",
     detail = "Withdraw your merge block.",
   },
 }
@@ -71,12 +64,7 @@ end
 --- @param self parley.arcanum.Provider
 --- @param review parley.DetectedReview
 function M.load(self, review)
-  local ok, data = pcall(
-    transport.request_run,
-    self,
-    "GET",
-    "/v1/plugin/pull-request/" .. review.pr.id .. "/review?fields=reviewers(user(name),action),min_ships_required"
-  )
+  local ok, data = pcall(transport.request_run, self, requests.get_review(review.pr.id))
   review.pr.review_status = ok and M.status(data) or "unknown"
   review.write_context.review_data = review.pr.review_status ~= "unknown" and data or nil
 end
@@ -163,10 +151,9 @@ function M.start(self, review, action, callback)
     return cancel
   end
   local token, host = self._token, self._host
-  --- @param method string
-  --- @param path string
+  --- @param descriptor parley.arcanum.Request
   --- @param cb function
-  local function request(method, path, cb)
+  local function request(descriptor, cb)
     generation = generation + 1
     local current = generation
     local called = false
@@ -177,43 +164,39 @@ function M.start(self, review, action, callback)
       called = true
       cb(result)
     end
-    local h =
-      transport.request_start(self, method, path, nil, receive, { retry_policy = method == "GET" and "read" or "none" })
+    local h = transport.request_start(self, descriptor, receive)
     if current == generation then
       handle = h
     end
   end
-  request(
-    "GET",
-    "/v1/pull-requests/" .. wc.pr_id .. "/active-diff?fields=id,commit_ids(base,head,merge)",
-    function(result)
-      if done then
-        return
-      end
-      if not result.ok then
-        finish(result)
-        return
-      end
-      local diff = result.data
-      if not session.current(self) or token ~= self._token or host ~= self._host then
-        finish({ ok = false, err = "Arcanum credentials changed; refresh the review" })
-        return
-      end
-      if
-        type(diff) ~= "table"
-        or diff.id ~= wc.diff_id
-        or type(diff.commit_ids) ~= "table"
-        or diff.commit_ids.head ~= review.head_sha
-        or (review.base_sha ~= nil and diff.commit_ids.base ~= review.base_sha)
-        or (review.review_sha ~= nil and diff.commit_ids.merge ~= review.review_sha)
-      then
-        finish({ ok = false, err = "Active diff changed or is unavailable; refresh before reviewing" })
-        return
-      end
-      scope = selected.method == "PUT" and "REVIEW_REQUEST_SHIP" or "GENERIC_WRITE"
-      request(selected.method, "/v1/plugin/pull-request/" .. wc.pr_id .. "/review" .. selected.route, finish)
+  request(requests.get_active_diff(wc.pr_id), function(result)
+    if done then
+      return
     end
-  )
+    if not result.ok then
+      finish(result)
+      return
+    end
+    local diff = result.data
+    if not session.current(self) or token ~= self._token or host ~= self._host then
+      finish({ ok = false, err = "Arcanum credentials changed; refresh the review" })
+      return
+    end
+    if
+      type(diff) ~= "table"
+      or diff.id ~= wc.diff_id
+      or type(diff.commit_ids) ~= "table"
+      or diff.commit_ids.head ~= review.head_sha
+      or (review.base_sha ~= nil and diff.commit_ids.base ~= review.base_sha)
+      or (review.review_sha ~= nil and diff.commit_ids.merge ~= review.review_sha)
+    then
+      finish({ ok = false, err = "Active diff changed or is unavailable; refresh before reviewing" })
+      return
+    end
+    local mutation = requests.apply_review_action(wc.pr_id, action)
+    scope = mutation.method == "PUT" and "REVIEW_REQUEST_SHIP" or "GENERIC_WRITE"
+    request(mutation, finish)
+  end)
   return cancel
 end
 return M

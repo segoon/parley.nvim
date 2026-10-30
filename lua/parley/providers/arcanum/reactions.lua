@@ -1,5 +1,6 @@
 --- PR-scoped reactions support inline, general, and historical comments alike.
 local transport = require("parley.providers.arcanum.transport")
+local requests = require("parley.providers.arcanum.requests")
 local M = {}
 -- This is the complete server-side allowlist for AI-review comments. Ordinary
 -- comments accept opaque codes, but their DTO does not reliably let us tell
@@ -45,13 +46,6 @@ function M.choices(self, _review, comment)
   end
   return choices
 end
---- @param value string
---- @return string
-local function encode(value)
-  return (value:gsub("[^%w%-._~]", function(char)
-    return string.format("%%%02X", char:byte())
-  end))
-end
 --- @param self parley.arcanum.Provider
 --- @param review parley.DetectedReview
 --- @param id string
@@ -77,20 +71,13 @@ function M.start(self, review, id, code, present, callback)
     callback({ ok = false, err = tostring(err) })
     return { cancel = function() end }
   end
-  return transport.request_start(
-    self,
-    present and "PUT" or "DELETE",
-    "/v1/plugin/pull-request/" .. review.pr.id .. "/comment/" .. id .. "/reaction/" .. encode(code),
-    nil,
-    function(result)
-      if not result.ok and result.status == 409 then
-        result.err = "AI comments allow one reaction per account. Refresh and remove yours before choosing another."
-        result.refresh = true
-      end
-      callback(require("parley.providers.arcanum.action_result").explain(result, "GENERIC_WRITE"))
-    end,
-    { retry_policy = "none" }
-  )
+  return transport.request_start(self, requests.set_reaction(review.pr.id, id, code, present), function(result)
+    if not result.ok and result.status == 409 then
+      result.err = "AI comments allow one reaction per account. Refresh and remove yours before choosing another."
+      result.refresh = true
+    end
+    callback(require("parley.providers.arcanum.action_result").explain(result, "GENERIC_WRITE"))
+  end)
 end
 --- Legacy coroutine toggle reads fresh state before choosing an explicit mutation.
 --- @param self parley.arcanum.Provider

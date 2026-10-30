@@ -6,12 +6,12 @@ a.describe("Arcanum shared review revision", function()
   a.it("requests sparse active-diff fields explicitly", function()
     local original = transport.request_run
     local requested = false
-    transport.request_run = function(_, _, path)
-      if path:find("cursor", 1, true) then
+    transport.request_run = function(_, request)
+      if request.operation == "search_prs" then
         return { pull_requests = { { id = 1, vcs = { from_branch = "users/a/feature" } } }, has_next = false }
       end
-      if path:find("active-diff", 1, true) then
-        requested = path == "/v1/pull-requests/1/active-diff?fields=id,commit_ids(base,head,merge)"
+      if request.operation == "get_active_diff" then
+        requested = request.args[6] == "id,commit_ids(base,head,merge)"
         return requested and { id = 2, commit_ids = { base = "base", head = "abc", merge = "merged" } } or {}
       end
       return { id = 1, vcs = { from_branch = "users/a/feature", to_branch = "trunk" } }
@@ -36,11 +36,11 @@ a.describe("Arcanum shared review revision", function()
   a.it("retains read access without accepting malformed active-diff metadata", function()
     local original = transport.request_run
     local active
-    transport.request_run = function(_, _, path)
-      if path:find("cursor", 1, true) then
+    transport.request_run = function(_, request)
+      if request.operation == "search_prs" then
         return { pull_requests = { { id = 1, vcs = { from_branch = "users/a/feature" } } }, has_next = false }
       end
-      if path:find("active-diff", 1, true) then
+      if request.operation == "get_active_diff" then
         return active
       end
       return { id = 1, vcs = { from_branch = "users/a/feature", to_branch = "trunk" } }

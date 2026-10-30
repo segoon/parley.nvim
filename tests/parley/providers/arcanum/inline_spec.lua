@@ -38,8 +38,9 @@ describe("Arcanum inline submission", function()
       },
     })
     dofile("tests/support/arcanum_session.lua")(p)
-    transport.request_start = function(_, method, path, body, callback)
-      local call = { method = method, path = path, body = body, cancelled = false }
+    transport.request_start = function(_, request, callback)
+      local call = request
+      call.cancelled = false
       calls[#calls + 1] = call
       pending[#pending + 1] = callback
       return {
@@ -66,19 +67,29 @@ describe("Arcanum inline submission", function()
       end
     )
     assert.equals(1, #calls)
-    assert.equals("/v2/public/diff/42/changelist?fields=path,entry_id", calls[1].path)
+    assert.equals("get_changelist", calls[1].operation)
+    assert.equals("42", calls[1].args[4])
     pending[1]({ ok = true, data = { { path = "a.lua", entry_id = "eid:1:fixture" } } })
     assert.equals(2, #calls)
-    assert.matches("^/v2/public/diff/42/comment%?fields=", calls[2].path)
+    assert.equals("create_inline", calls[2].operation)
+    assert.equals("cli", calls[2].kind)
+    assert.equals("hello", calls[2].stdin)
     assert.same({
-      content = "hello",
-      entry_id = "eid:1:fixture",
-      line = 3,
-      size = 3,
-      side = "new",
-      is_draft = false,
-      is_issue = false,
-    }, calls[2].body)
+      "comment",
+      "post-diff",
+      "--diff-id",
+      "42",
+      "--entry-id",
+      "eid:1:fixture",
+      "--line",
+      "3",
+      "--side",
+      "new",
+      "--size",
+      "3",
+      "--content-file",
+      "/dev/stdin",
+    }, calls[2].args)
     pending[2]({ ok = true, data = comment() })
     assert.equals(1, #results)
     assert.is_true(results[1].ok)
@@ -168,9 +179,9 @@ describe("Arcanum inline submission", function()
     p:begin_post_top_level_comment(r, "a.lua", { start_line = 1 }, { text = "hello" }, function(v)
       result = v
     end)
-    assert.equals("GET", calls[1].method)
+    assert.equals("get_changelist", calls[1].operation)
     pending[1]({ ok = true, data = { { path = "a.lua", entry_id = "eid:fresh" } } })
-    assert.equals(1, calls[2].body.size)
+    assert.equals("1", calls[2].args[12])
     pending[2]({ ok = true, data = {} })
     assert.is_true(result.ok)
     assert.is_nil(result.comment)
@@ -202,8 +213,8 @@ describe("Arcanum inline submission", function()
 
   it("handles immediate callbacks without replacing the current stage handle", function()
     local result, post_cancelled = nil, false
-    transport.request_start = function(_, method, _, _, callback)
-      if method == "GET" then
+    transport.request_start = function(_, request, callback)
+      if request.operation == "get_changelist" then
         callback({ ok = true, data = { { path = "a.lua", entry_id = "eid:x" } } })
         return {
           cancel = function()
@@ -244,16 +255,17 @@ describe("Arcanum inline submission", function()
     pending[2]({ ok = true, data = comment() })
     r.write_context.diff_id = 43
     p:begin_post_top_level_comment(r, "a.lua", { start_line = 1 }, { text = "hello" }, function() end)
-    assert.equals("/v2/public/diff/43/changelist?fields=path,entry_id", calls[3].path)
+    assert.equals("get_changelist", calls[3].operation)
+    assert.equals("43", calls[3].args[4])
   end)
 
   async_tests.it("shares the operation with coroutine callers and uses a valid cached entry", function()
     local r = review()
     r.write_context.changelist = { ["a.lua"] = "eid:cached" }
     r.write_context.changelist_diff_id = 42
-    transport.request_start = function(_, method, _, body, callback)
-      assert.equals("POST", method)
-      assert.equals("eid:cached", body.entry_id)
+    transport.request_start = function(_, request, callback)
+      assert.equals("create_inline", request.operation)
+      assert.equals("eid:cached", request.args[6])
       vim.schedule(function()
         callback({ ok = true, data = comment() })
       end)

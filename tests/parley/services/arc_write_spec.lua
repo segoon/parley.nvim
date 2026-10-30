@@ -122,8 +122,8 @@ describe("Arc new-comment validation", function()
     local instance = open()
     local submitted_compose = compose
     composer.patch(buf, { draft = "preserve me" })
-    transport.request_start = function(_, method, _, _, callback)
-      assert.equals("GET", method, "Missing entries must not create general comments")
+    transport.request_start = function(_, request, callback)
+      assert.equals("get_changelist", request.operation, "Missing entries must not create general comments")
       callback({ ok = true, data = {} })
       return { cancel = function() end }
     end

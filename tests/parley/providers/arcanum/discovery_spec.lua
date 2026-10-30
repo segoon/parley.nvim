@@ -13,15 +13,15 @@ describe("exact Arcanum discovery", function()
       },
     })
     calls, pages, details = {}, {}, {}
-    transport.request_run = function(_, method, path, body)
-      calls[#calls + 1] = { method = method, path = path, body = body }
-      if path:find("/v1/pull-requests/cursor?fields=id,vcs(from_branch)", 1, true) then
-        return pages[body.offset]
+    transport.request_run = function(_, request)
+      calls[#calls + 1] = request
+      if request.operation == "search_prs" then
+        return pages[tonumber(request.args[11])]
       end
-      if path:find("active-diff", 1, true) then
+      if request.operation == "get_active_diff" then
         return { id = 7, commit_ids = { head = "head" } }
       end
-      local id = tonumber(path:match("/pull%-requests/(%d+)"))
+      local id = tonumber(request.args[4])
       return details[id]
     end
   end)
@@ -36,8 +36,8 @@ describe("exact Arcanum discovery", function()
     local review = p:detect_pr("/repo", "feature")
     assert.equals("8", review.pr.id)
     assert.equals("local-user", p._viewer_login)
-    assert.equals(100, calls[1].body.limit)
-    assert.equals(1, calls[2].body.offset)
+    assert.equals("100", calls[1].args[9])
+    assert.equals("1", calls[2].args[11])
     assert.equals(5, #calls) -- Two pages, exact details, active diff, verdicts.
   end)
   it("fails malformed and nonprogressing pagination rather than reporting no review", function()

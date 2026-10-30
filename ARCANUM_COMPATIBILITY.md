@@ -62,9 +62,9 @@ all requests use HTTPS.
 PR-scoped V2 comment operations support general and historical inline comments,
 despite the CLI help's narrower “PR-level” wording. Replies inherit the original
 parent anchor; existing writes do not resolve a replacement active diff.
-The provider retains its internal method/path request descriptions to select a
-CLI command or a required HTTP operation before execution. Failed CLI mutations
-never fall back to a second HTTP mutation.
+Named provider operations build explicit CLI commands or HTTP requests before
+execution. The shared transport executes that descriptor without translating API
+paths into commands. Failed CLI mutations never fall back to a second HTTP mutation.
 
 The active diff's `head` identifies the pushed source checkout, `base` is the
 immutable destination revision, and `merge` is the new side shown in the review.

@@ -23,9 +23,9 @@ describe("Arcanum explicit review actions", function()
     saved = transport.request_start
     calls = {}
     diff = { id = 34, commit_ids = { head = "head" } }
-    transport.request_start = function(_, method, path, body, callback, opts)
-      calls[#calls + 1] = { method = method, path = path, body = body, opts = opts }
-      callback({ ok = true, data = method == "GET" and diff or nil })
+    transport.request_start = function(_, request, callback)
+      calls[#calls + 1] = request
+      callback({ ok = true, data = request.operation == "get_active_diff" and diff or nil })
       return { cancel = function() end }
     end
   end)
@@ -63,11 +63,11 @@ describe("Arcanum explicit review actions", function()
         result = r
       end)
       assert.is_true(result.ok)
-      assert.equals("GET", calls[#calls - 1].method)
+      assert.equals("get_active_diff", calls[#calls - 1].operation)
       assert.equals("PUT", calls[#calls].method)
       local expected_path = "/v1/plugin/pull-request/12/review" .. case[2]
       assert.equals(expected_path, calls[#calls].path)
-      assert.same({ retry_policy = "none" }, calls[#calls].opts)
+      assert.equals("none", calls[#calls].retry_policy)
       assert.is_nil(calls[#calls].body)
     end
   end)
@@ -108,7 +108,8 @@ describe("Arcanum explicit review actions", function()
   it("cancels either stage exactly once and ignores late callbacks", function()
     for _, mutation in ipairs({ false, true }) do
       local pending, results, stopped = {}, {}, {}
-      transport.request_start = function(_, method, _, _, cb)
+      transport.request_start = function(_, request, cb)
+        local method = request.kind == "cli" and "GET" or request.method
         pending[#pending + 1] = cb
         return {
           cancel = function()
@@ -137,7 +138,8 @@ describe("Arcanum explicit review actions", function()
   end)
   it("cancels the mutation handle when the recheck completed synchronously", function()
     local stopped, completed
-    transport.request_start = function(_, method, _, _, cb)
+    transport.request_start = function(_, request, cb)
+      local method = request.kind == "cli" and "GET" or request.method
       if method == "GET" then
         cb({ ok = true, data = diff })
       end
@@ -156,7 +158,7 @@ describe("Arcanum explicit review actions", function()
     assert.is_true(completed.uncertain)
   end)
   it("rejects credentials changed during the recheck", function()
-    transport.request_start = function(_, _, _, _, cb)
+    transport.request_start = function(_, _, cb)
       p._auth.read_token = function()
         return "changed"
       end

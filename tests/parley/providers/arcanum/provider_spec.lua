@@ -78,11 +78,11 @@ local function make_provider(responses)
   local calls = {}
   local idx = 0
 
-  local mock_request_run = function(_self, method, path, body)
+  local mock_request_run = function(_self, request)
     idx = idx + 1
-    table.insert(calls, { method = method, path = path, body = body })
+    table.insert(calls, request)
     local r = responses[idx]
-    assert(r, string.format("mock request_run: unexpected call #%d (method=%s path=%s)", idx, method, path))
+    assert(r, string.format("mock request_run: unexpected call #%d (%s)", idx, request.operation))
     if r.error then
       error(r.error, 0)
     end
@@ -112,8 +112,8 @@ local function make_provider(responses)
 
   -- Override transport.request_run on the provider
   transport.request_run = mock_request_run
-  transport.request_start = function(self, method, path, body, callback)
-    local ok, data = pcall(mock_request_run, self, method, path, body)
+  transport.request_start = function(self, request, callback)
+    local ok, data = pcall(mock_request_run, self, request)
     callback(ok and { ok = true, data = data } or { ok = false, err = data })
     return { cancel = function() end }
   end
@@ -268,15 +268,15 @@ async_tests.describe("parley.providers.arcanum.provider — detect_pr", function
     assert.is_nil(result.write_context.diff_id)
   end)
 
-  async_tests.it("posts search request to correct path", function()
+  async_tests.it("uses an explicit CLI search request", function()
     local p, calls = make_provider({
       { response = { pull_requests = {}, has_next = false } },
     })
 
     p:detect_pr("/arc", "users/alice/feature")
 
-    assert.equals("POST", calls[1].method)
-    assert.equals("/v1/pull-requests/cursor?fields=id,vcs(from_branch)", calls[1].path)
+    assert.equals("cli", calls[1].kind)
+    assert.equals("search_prs", calls[1].operation)
   end)
 
   async_tests.it("searches using the provided remote branch id", function()
@@ -286,15 +286,9 @@ async_tests.describe("parley.providers.arcanum.provider — detect_pr", function
 
     p:detect_pr("/arc", "users/segoon/feature/chaotic-const")
 
-    assert.same({
-      limit = 100,
-      offset = 0,
-      desc_order = true,
-      filter = {
-        user_branch_prefix = "users/segoon/feature/chaotic-const",
-        state = { published = true },
-      },
-    }, calls[1].body)
+    assert.equals("users/segoon/feature/chaotic-const", calls[1].args[4])
+    assert.equals("100", calls[1].args[9])
+    assert.equals("0", calls[1].args[11])
   end)
 
   async_tests.it("fetches full PR details only after matching by branch", function()
@@ -307,8 +301,8 @@ async_tests.describe("parley.providers.arcanum.provider — detect_pr", function
     local result = p:detect_pr("/arc", "users/segoon/feature/chaotic-const")
 
     assert.is_not_nil(result)
-    assert.equals("GET", calls[2].method)
-    assert.equals("/v1/pull-requests/13323715?fields=id,summary,status,url,author,vcs", calls[2].path)
+    assert.equals("get_pr", calls[2].operation)
+    assert.equals("13323715", calls[2].args[4])
   end)
 end)
 
@@ -401,7 +395,7 @@ async_tests.describe("parley.providers.arcanum.provider — reply", function()
   async_tests.before_each(save_transport)
   async_tests.after_each(restore_transport)
 
-  async_tests.it("calls replies endpoint on parent comment id", function()
+  async_tests.it("uses CLI reply with the parent comment ID", function()
     local p, calls = make_provider({
       { response = raw_comment(200, "My reply") },
     })
@@ -433,8 +427,9 @@ async_tests.describe("parley.providers.arcanum.provider — reply", function()
 
     local result = p:reply(review, discussion, parent, body)
 
-    assert.equals("POST", calls[1].method)
-    assert.equals("/v1/public/review-requests-comments/100/replies", calls[1].path)
+    assert.equals("reply", calls[1].operation)
+    assert.equals("100", calls[1].args[6])
+    assert.equals("Reply text", calls[1].stdin)
     assert.equals("200", result.id)
   end)
 
@@ -480,7 +475,7 @@ async_tests.describe("parley.providers.arcanum.provider — edit", function()
   async_tests.before_each(save_transport)
   async_tests.after_each(restore_transport)
 
-  async_tests.it("calls PATCH endpoint with comment id", function()
+  async_tests.it("uses CLI edit with the comment ID", function()
     local p, calls = make_provider({
       { response = raw_comment(55, "Edited content") },
     })
@@ -504,8 +499,8 @@ async_tests.describe("parley.providers.arcanum.provider — edit", function()
 
     local result = p:edit(review, "55", body)
 
-    assert.equals("PATCH", calls[1].method)
-    assert.equals("/v1/public/review-requests-comments/55", calls[1].path)
+    assert.equals("edit_comment", calls[1].operation)
+    assert.equals("55", calls[1].args[6])
     assert.equals("55", result.id)
   end)
 end)
@@ -516,7 +511,7 @@ async_tests.describe("parley.providers.arcanum.provider — delete", function()
   async_tests.before_each(save_transport)
   async_tests.after_each(restore_transport)
 
-  async_tests.it("calls DELETE endpoint with comment id", function()
+  async_tests.it("uses CLI delete with the comment ID", function()
     local p, calls = make_provider({
       { response = nil }, -- DELETE returns no body
     })
@@ -539,8 +534,8 @@ async_tests.describe("parley.providers.arcanum.provider — delete", function()
 
     p:delete(review, "77")
 
-    assert.equals("DELETE", calls[1].method)
-    assert.equals("/v1/public/review-requests-comments/77", calls[1].path)
+    assert.equals("delete_comment", calls[1].operation)
+    assert.equals("77", calls[1].args[6])
   end)
 end)
 
