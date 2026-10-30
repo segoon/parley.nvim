@@ -78,11 +78,11 @@ local function make_provider(responses)
   local calls = {}
   local idx = 0
 
-  local mock_request_run = function(_self, method, path, body)
+  local mock_request_run = function(_self, request)
     idx = idx + 1
-    table.insert(calls, { method = method, path = path, body = body })
+    table.insert(calls, request)
     local r = responses[idx]
-    assert(r, string.format("mock request_run: unexpected call #%d (method=%s path=%s)", idx, method, path))
+    assert(r, string.format("mock request_run: unexpected call #%d (%s)", idx, request.operation))
     if r.error then
       error(r.error, 0)
     end
@@ -112,9 +112,9 @@ local function make_provider(responses)
 
   -- Override transport.request_run on the provider
   transport.request_run = mock_request_run
-  transport.request_start = function(self, method, path, body, callback)
-    local ok, data = pcall(mock_request_run, self, method, path, body)
-    callback(ok and { ok = true, data = data } or { ok = false, err = data })
+  transport.request_start = function(self, request, callback)
+    local ok, data = pcall(mock_request_run, self, request)
+    callback(ok and { ok = true, data = data } or { ok = false, err = data, status = responses[idx].status })
     return { cancel = function() end }
   end
 
@@ -186,129 +186,36 @@ async_tests.describe("parley.providers.arcanum.provider — detect_pr", function
   async_tests.before_each(save_transport)
   async_tests.after_each(restore_transport)
 
-  local function minimal_search_result(pr_id, branch)
-    return {
-      pull_requests = {
-        { id = pr_id, vcs = { from_branch = branch or "users/alice/feature" } },
-      },
-      has_next = false,
-    }
-  end
-
-  async_tests.it("returns nil when no PRs found", function()
-    local p, _ = make_provider({
-      { response = { pull_requests = {}, has_next = false } }, -- search
-    })
-
-    local result = p:detect_pr("/arc", "users/alice/feature")
-
-    assert.is_nil(result)
+  async_tests.it("returns nil when no PR exists for the exact branch", function()
+    local p = make_provider({ { error = "not found", status = 404 } })
+    assert.is_nil(p:detect_pr("/arc", "users/alice/feature"))
   end)
 
   async_tests.it("returns DetectedReview on success", function()
-    local p, _ = make_provider({
-      { response = minimal_search_result(42) }, -- search
-      { response = pr_search_result(42, "users/alice/feature").pull_requests[1] }, -- full PR
-      { response = active_diff(101, "ARC:DEADBEEF", "arc-sha") }, -- active-diff
+    local p, calls = make_provider({
+      { response = pr_search_result(42, "users/alice/feature").pull_requests[1] },
+      { response = active_diff(101, "ARC:DEADBEEF", "arc-sha") },
     })
-
     local result = p:detect_pr("/arc", "users/alice/feature")
-
-    assert.is_not_nil(result)
     assert.equals("42", result.pr.id)
     assert.equals("My PR", result.pr.title)
     assert.equals("arc-sha", result.head_sha)
-  end)
-
-  async_tests.it("write_context contains pr_id and diff metadata", function()
-    local p, _ = make_provider({
-      { response = minimal_search_result(42) },
-      { response = pr_search_result(42, "users/alice/feature").pull_requests[1] },
-      { response = active_diff(101, "ARC:DEADBEEF") },
-    })
-
-    local result = p:detect_pr("/arc", "users/alice/feature")
-
     assert.equals(42, result.write_context.pr_id)
     assert.equals(101, result.write_context.diff_id)
     assert.equals("101", result.snapshot_id)
-  end)
-
-  async_tests.it("returns nil when branch does not match any PR", function()
-    local p, _ = make_provider({
-      { response = minimal_search_result(1, "users/bob/other") },
-      {
-        response = {
-          id = 1,
-          summary = "Other PR",
-          status = "open",
-          url = "",
-          author = { name = "bob" },
-          vcs = { from_branch = "users/bob/other", to_branch = "trunk", type = "arc" },
-        },
-      },
-    })
-
-    local result = p:detect_pr("/arc", "users/alice/feature")
-
-    assert.is_nil(result)
+    assert.equals("get_pr_by_branch", calls[1].operation)
+    assert.equals("users/alice/feature", calls[1].args[4])
+    assert.equals("get_active_diff", calls[2].operation)
   end)
 
   async_tests.it("proceeds without active diff when active-diff call fails", function()
-    local p, _ = make_provider({
-      { response = minimal_search_result(42) },
+    local p = make_provider({
       { response = pr_search_result(42, "users/alice/feature").pull_requests[1] },
-      { error = "diff not found" }, -- active-diff fails
+      { error = "diff not found" },
     })
-
-    -- Should not throw; diff_id will be nil
     local result = p:detect_pr("/arc", "users/alice/feature")
-
     assert.is_not_nil(result)
     assert.is_nil(result.write_context.diff_id)
-  end)
-
-  async_tests.it("posts search request to correct path", function()
-    local p, calls = make_provider({
-      { response = { pull_requests = {}, has_next = false } },
-    })
-
-    p:detect_pr("/arc", "users/alice/feature")
-
-    assert.equals("POST", calls[1].method)
-    assert.equals("/v1/pull-requests/cursor?fields=id,vcs(from_branch)", calls[1].path)
-  end)
-
-  async_tests.it("searches using the provided remote branch id", function()
-    local p, calls = make_provider({
-      { response = { pull_requests = {}, has_next = false } },
-    })
-
-    p:detect_pr("/arc", "users/segoon/feature/chaotic-const")
-
-    assert.same({
-      limit = 100,
-      offset = 0,
-      desc_order = true,
-      filter = {
-        user_branch_prefix = "users/segoon/feature/chaotic-const",
-        state = { published = true },
-      },
-    }, calls[1].body)
-  end)
-
-  async_tests.it("fetches full PR details only after matching by branch", function()
-    local p, calls = make_provider({
-      { response = minimal_search_result(13323715, "users/segoon/feature/chaotic-const") },
-      { response = pr_search_result(13323715, "users/segoon/feature/chaotic-const").pull_requests[1] },
-      { response = active_diff(101, "ARC:DEADBEEF") },
-    })
-
-    local result = p:detect_pr("/arc", "users/segoon/feature/chaotic-const")
-
-    assert.is_not_nil(result)
-    assert.equals("GET", calls[2].method)
-    assert.equals("/v1/pull-requests/13323715?fields=id,summary,status,url,author,vcs", calls[2].path)
   end)
 end)
 
@@ -401,7 +308,7 @@ async_tests.describe("parley.providers.arcanum.provider — reply", function()
   async_tests.before_each(save_transport)
   async_tests.after_each(restore_transport)
 
-  async_tests.it("calls replies endpoint on parent comment id", function()
+  async_tests.it("uses CLI reply with the parent comment ID", function()
     local p, calls = make_provider({
       { response = raw_comment(200, "My reply") },
     })
@@ -433,8 +340,9 @@ async_tests.describe("parley.providers.arcanum.provider — reply", function()
 
     local result = p:reply(review, discussion, parent, body)
 
-    assert.equals("POST", calls[1].method)
-    assert.equals("/v1/public/review-requests-comments/100/replies", calls[1].path)
+    assert.equals("reply", calls[1].operation)
+    assert.equals("100", calls[1].args[6])
+    assert.equals("Reply text", calls[1].stdin)
     assert.equals("200", result.id)
   end)
 
@@ -480,7 +388,7 @@ async_tests.describe("parley.providers.arcanum.provider — edit", function()
   async_tests.before_each(save_transport)
   async_tests.after_each(restore_transport)
 
-  async_tests.it("calls PATCH endpoint with comment id", function()
+  async_tests.it("uses CLI edit with the comment ID", function()
     local p, calls = make_provider({
       { response = raw_comment(55, "Edited content") },
     })
@@ -504,8 +412,8 @@ async_tests.describe("parley.providers.arcanum.provider — edit", function()
 
     local result = p:edit(review, "55", body)
 
-    assert.equals("PATCH", calls[1].method)
-    assert.equals("/v1/public/review-requests-comments/55", calls[1].path)
+    assert.equals("edit_comment", calls[1].operation)
+    assert.equals("55", calls[1].args[6])
     assert.equals("55", result.id)
   end)
 end)
@@ -516,7 +424,7 @@ async_tests.describe("parley.providers.arcanum.provider — delete", function()
   async_tests.before_each(save_transport)
   async_tests.after_each(restore_transport)
 
-  async_tests.it("calls DELETE endpoint with comment id", function()
+  async_tests.it("uses CLI delete with the comment ID", function()
     local p, calls = make_provider({
       { response = nil }, -- DELETE returns no body
     })
@@ -539,8 +447,8 @@ async_tests.describe("parley.providers.arcanum.provider — delete", function()
 
     p:delete(review, "77")
 
-    assert.equals("DELETE", calls[1].method)
-    assert.equals("/v1/public/review-requests-comments/77", calls[1].path)
+    assert.equals("delete_comment", calls[1].operation)
+    assert.equals("77", calls[1].args[6])
   end)
 end)
 

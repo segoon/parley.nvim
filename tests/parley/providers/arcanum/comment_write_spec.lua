@@ -1,3 +1,4 @@
+local requests = require("parley.providers.arcanum.requests")
 local write = require("parley.providers.arcanum.comment_write")
 local transport = require("parley.providers.arcanum.transport")
 describe("Arcanum acknowledged comment writes", function()
@@ -5,8 +6,8 @@ describe("Arcanum acknowledged comment writes", function()
   before_each(function()
     saved, calls = transport.request_start, {}
     p = { _viewer_login = "alice" }
-    transport.request_start = function(_, method, path, body, callback, opts)
-      calls[#calls + 1] = { method = method, path = path, body = body, callback = callback, opts = opts }
+    transport.request_start = function(_, request, callback)
+      calls[#calls + 1] = { request = request, callback = callback }
       return { cancel = function() end }
     end
   end)
@@ -15,12 +16,12 @@ describe("Arcanum acknowledged comment writes", function()
   end)
   it("hydrates ID-only acknowledgements and preserves signed IDs", function()
     local result
-    write.start(p, "POST", "/create", { content = "hello" }, function(r)
+    write.start(p, requests.reply(12, "1", "hello", false), function(r)
       result = r
-    end, { pr_id = 12, retry_policy = "create" })
+    end)
     calls[1].callback({ ok = true, data = { id = -456 } })
-    assert.equals("GET", calls[2].method)
-    assert.matches("^/v2/public/pull%-request/12/comment/%-456%?fields=", calls[2].path)
+    assert.equals("get_comment", calls[2].request.operation)
+    assert.equals("-456", calls[2].request.args[6])
     calls[2].callback({
       ok = true,
       data = { id = -456, content = "hello", author = { name = "alice" }, created_at = "now" },
@@ -34,9 +35,9 @@ describe("Arcanum acknowledged comment writes", function()
     for _, cancel in ipairs({ false, true }) do
       calls = {}
       local result, count = nil, 0
-      local handle = write.start(p, "POST", "/create", {}, function(r)
+      local handle = write.start(p, requests.reply(12, "1", "hello", false), function(r)
         result, count = r, count + 1
-      end, { pr_id = 12 })
+      end)
       calls[1].callback({ ok = true, data = { id = 123 } })
       if cancel then
         handle.cancel()
@@ -49,5 +50,18 @@ describe("Arcanum acknowledged comment writes", function()
       assert.equals(1, count)
       assert.equals(2, #calls)
     end
+  end)
+  it("hydrates sparse empty edits using the explicit signed comment ID", function()
+    local result
+    write.start(p, requests.edit_comment(12, "-456", ""), function(r)
+      result = r
+    end)
+    calls[1].callback({ ok = true, data = {} })
+    assert.equals("get_comment", calls[2].request.operation)
+    assert.equals("-456", calls[2].request.args[6])
+    calls[2].callback({ ok = true, data = { id = -456, author = { name = "alice" }, created_at = "now" } })
+    assert.is_true(result.ok)
+    assert.equals("-456", result.comment.id)
+    assert.equals("", result.comment.body.text)
   end)
 end)

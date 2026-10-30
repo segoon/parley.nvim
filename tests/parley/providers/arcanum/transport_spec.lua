@@ -67,9 +67,16 @@ describe("Arcanum reliable transport", function()
   --- @param policy? string
   --- @return table
   local function start(method, policy)
-    return transport.request_start(p, method or "GET", "/endpoint", { content = "hello" }, function(r)
+    return transport.request_start(p, {
+      kind = "http",
+      operation = "test_request",
+      method = method or "GET",
+      path = "/endpoint",
+      body = { content = "hello" },
+      retry_policy = policy or ((method == nil or method == "GET") and "read" or "none"),
+    }, function(r)
       results[#results + 1] = r
-    end, { retry_policy = policy })
+    end)
   end
   --- @param index integer
   --- @param status integer
@@ -119,7 +126,7 @@ describe("Arcanum reliable transport", function()
     assert.equals(calls[2].opts.headers["Idempotency-Key"], calls[3].opts.headers["Idempotency-Key"])
   end)
   it("paces CLI and retained HTTP together and cancels CLI without falling back", function()
-    transport.request_start(p, "GET", "/v1/pull-requests/12/active-diff?fields=id", nil, function(r)
+    transport.request_start(p, require("parley.providers.arcanum.requests").get_active_diff(12), function(r)
       results[#results + 1] = r
     end)
     start()
@@ -374,7 +381,10 @@ describe("Arcanum reliable transport", function()
   it("wakes coroutine callers through the same paced transport", function()
     local outcome
     require("plenary.async").run(function()
-      outcome = transport.request_run(p, "GET", "/read")
+      outcome = transport.request_run(
+        p,
+        { kind = "http", operation = "test_read", method = "GET", path = "/read", retry_policy = "read" }
+      )
     end)
     assert.is_nil(outcome)
     respond(1, 200)
@@ -447,7 +457,10 @@ describe("Arcanum reliable transport", function()
     local handle = p:begin_post_top_level_comment(r, "a.lua", { start_line = 1 }, { text = "hello" }, function(v)
       result = v
     end)
-    assert.equals("unique-submit-key", calls[1].opts.headers["Idempotency-Key"])
+    assert.equals("diff-info", calls[1].argv[8])
+    respond(1, 200, nil, '{"data":{"id":42,"pull_request_id":12}}')
+    clock.advance(1000)
+    assert.equals("unique-submit-key", calls[2].opts.headers["Idempotency-Key"])
     handle.cancel()
     assert.is_true(result.cancelled)
     assert.is_true(result.uncertain)

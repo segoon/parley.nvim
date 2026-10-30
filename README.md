@@ -272,10 +272,13 @@ authentication with `gh auth login`; credentials are checked around API requests
 and changes require a review refresh. Comment ownership uses the authenticated
 `/user` response. PR metadata and aggregate review status come from `gh pr view`;
 custom API URLs and numeric branch names retain explicit API lookups.
-Arcanum uses `ya tool arcanum` asynchronously for discovery, diff reads, and
-comment actions. Full discussion reads and review verdicts retain HTTPS. Both
-transports share a default request budget of 10 seconds,
-including queueing and retry waits, with request starts spaced one second apart.
+Arcanum requires `ya tool arcanum` with `pr get --from-branch … --latest` support
+and uses it asynchronously for exact branch discovery, diff reads, and
+comment actions. Missing comment PR scope is recovered from a known diff through
+the CLI. Full discussion reads and review verdicts retain HTTPS. Each
+operation selects CLI or HTTP before sending; a failed CLI mutation is never
+replayed through HTTP. Both transports share a default request budget of 10
+seconds, including queueing and retry waits, with request starts spaced one second apart.
 Comment and reply retries are opt-in via
 `providers.arcanum.idempotent_write_retries = true`; enable this only after
 confirming the deployed server supports idempotency keys; this selects keyed

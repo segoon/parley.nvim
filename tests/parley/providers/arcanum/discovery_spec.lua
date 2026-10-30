@@ -1,9 +1,12 @@
 local provider = require("parley.providers.arcanum.provider")
 local transport = require("parley.providers.arcanum.transport")
-describe("exact Arcanum discovery", function()
-  local saved, p, calls, pages, details
+
+local a = require("plenary.async.tests")
+
+a.describe("exact Arcanum discovery", function()
+  local saved, p, calls, response
   before_each(function()
-    saved = transport.request_run
+    saved = transport.request_start
     p = provider.new({
       login = "local-user",
       _auth = {
@@ -12,69 +15,103 @@ describe("exact Arcanum discovery", function()
         end,
       },
     })
-    calls, pages, details = {}, {}, {}
-    transport.request_run = function(_, method, path, body)
-      calls[#calls + 1] = { method = method, path = path, body = body }
-      if path:find("/v1/pull-requests/cursor?fields=id,vcs(from_branch)", 1, true) then
-        return pages[body.offset]
+    calls = {}
+    response = { ok = true, data = { id = 8, status = "open", vcs = { from_branch = "feature" } } }
+    transport.request_start = function(_, request, callback)
+      calls[#calls + 1] = request
+      if request.operation == "get_pr_by_branch" then
+        callback(response)
+      elseif request.operation == "get_active_diff" then
+        callback({ ok = true, data = { id = 7, commit_ids = { head = "head" } } })
+      else
+        callback({ ok = true, data = { reviewers = {}, min_ships_required = 0 } })
       end
-      if path:find("active-diff", 1, true) then
-        return { id = 7, commit_ids = { head = "head" } }
-      end
-      local id = tonumber(path:match("/pull%-requests/(%d+)"))
-      return details[id]
+      return { cancel = function() end }
     end
   end)
   after_each(function()
-    transport.request_run = saved
+    transport.request_start = saved
   end)
-  it("continues prefix pages until the exact branch is found", function()
-    pages[0] = { pull_requests = { { id = 9, vcs = { from_branch = "feature-extra" } } }, has_next = true }
-    pages[1] = { pull_requests = { { id = 8, vcs = { from_branch = "feature" } } }, has_next = false }
-    details[9] = { id = 9, status = "open", vcs = { from_branch = "feature-extra" } }
-    details[8] = { id = 8, status = "open", vcs = { from_branch = "feature" } }
+  a.it("loads exact branch metadata with one CLI lookup", function()
     local review = p:detect_pr("/repo", "feature")
     assert.equals("8", review.pr.id)
     assert.equals("local-user", p._viewer_login)
-    assert.equals(100, calls[1].body.limit)
-    assert.equals(1, calls[2].body.offset)
-    assert.equals(5, #calls) -- Two pages, exact details, active diff, verdicts.
+    assert.same({
+      "pr",
+      "get",
+      "--from-branch",
+      "feature",
+      "--latest",
+      "--repository",
+      "arcadia",
+      "--fields",
+      "id,summary,status,url,author,vcs",
+    }, calls[1].args)
+    assert.equals(3, #calls) -- Exact PR, active diff, verdicts.
   end)
-  it("fails malformed and nonprogressing pagination rather than reporting no review", function()
-    for _, page in ipairs({ {}, { pull_requests = {}, has_next = true }, { pull_requests = {}, has_next = "true" } }) do
-      pages[0] = page
+  a.it("treats only a definite missing branch result as absence", function()
+    response = { ok = false, status = 404, err = "not found" }
+    assert.is_nil(p:detect_pr("/repo", "feature"))
+    assert.equals(1, #calls)
+    for _, status in ipairs({ 400, 401, 403, 429, 503 }) do
+      response = { ok = false, status = status, err = "lookup failed" }
       assert.has_error(function()
         p:detect_pr("/repo", "feature")
       end)
     end
   end)
-  it("deduplicates candidates across pages and stops when the server is exhausted", function()
-    pages[0] = { pull_requests = { { id = 9, vcs = { from_branch = "feature-extra" } } }, has_next = true }
-    pages[1] = {
-      pull_requests = {
-        { id = 9, vcs = { from_branch = "feature-a" } },
-        { id = 8, vcs = { from_branch = "feature-b" } },
-      },
-      has_next = false,
-    }
-    details[9] = { id = 9, vcs = { from_branch = "feature-a" } }
-    details[8] = { id = 8, vcs = { from_branch = "feature-b" } }
-    assert.is_nil(p:detect_pr("/repo", "feature"))
-    assert.equals(2, #calls) -- Two pages; no candidate detail reads.
+  a.it("does not attach the latest merged, discarded, or draft PR", function()
+    for _, status in ipairs({ "merged", "discarded", "draft" }) do
+      calls = {}
+      response.data.status = status
+      assert.is_nil(p:detect_pr("/repo", "feature"))
+      assert.equals(1, #calls)
+    end
   end)
-  it("rejects repeated pages and sparse details", function()
-    pages[0] = { pull_requests = { { id = 9, vcs = { from_branch = "feature-extra" } } }, has_next = true }
-    pages[1] = pages[0]
-    details[9] = { id = 9, vcs = { from_branch = "feature-extra" } }
-    assert.has_error(function()
-      p:detect_pr("/repo", "feature")
-    end)
-    pages[0] = { pull_requests = { { id = 9 } }, has_next = false }
+  a.it("does not interpret an obsolete session's 404 as absence", function()
+    transport.request_start = function(_, _, callback)
+      p._auth.read_token = function()
+        return "replacement"
+      end
+      p:prepare()
+      callback({ ok = false, status = 404, err = "obsolete session" })
+      return { cancel = function() end }
+    end
     assert.has_error(function()
       p:detect_pr("/repo", "feature")
     end)
   end)
-  it("makes no HTTP requests without an upstream branch", function()
+  a.it("rejects malformed results and branch mismatches rather than hiding lookup errors", function()
+    for _, data in ipairs({
+      vim.NIL,
+      {},
+      { id = 0 },
+      { id = "8" },
+      { id = 8, status = "open", vcs = { from_branch = "feature-extra" } },
+      { id = 8, status = "unrecognized", vcs = { from_branch = "feature" } },
+    }) do
+      response = { ok = true, data = data }
+      assert.has_error(function()
+        p:detect_pr("/repo", "feature")
+      end)
+    end
+  end)
+  a.it("keeps active PR lifecycle states readable", function()
+    for _, status in ipairs({
+      "open",
+      "conflicts",
+      "errors",
+      "configuration_failed",
+      "merging",
+      "merge_failed",
+      "uploading",
+      "no_changes",
+    }) do
+      response.data.status = status
+      assert.is_not_nil(p:detect_pr("/repo", "feature"))
+    end
+  end)
+  a.it("makes no requests without an upstream branch", function()
     assert.is_nil(p:detect_pr("/repo", ""))
     assert.same({}, calls)
   end)

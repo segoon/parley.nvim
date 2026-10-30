@@ -1,25 +1,19 @@
 --- Acknowledged writes may need a read; failure of that read must never replay the write.
 local transport = require("parley.providers.arcanum.transport")
+local requests = require("parley.providers.arcanum.requests")
 local mapping = require("parley.providers.arcanum.mapping")
 local M = {}
-local fields = "id,author(name),content,reply_to_id,created_at,updated_at,edited_at,reactions(code,user(name))"
-
---- @param review parley.DetectedReview
---- @return integer|string|nil
-function M.pr_id(review)
-  return review.write_context and review.write_context.pr_id or review.pr and review.pr.id
-end
 
 --- @param raw any
 --- @param viewer string
---- @param body table
+--- @param content? string
 --- @return parley.Comment|nil
-local function mapped(raw, viewer, body)
+local function mapped(raw, viewer, content)
   if type(raw) ~= "table" or not tostring(raw.id):match("^%-?%d+$") or tonumber(raw.id) == 0 then
     return nil
   end
   local author = type(raw.author) == "table" and raw.author or type(raw.user) == "table" and raw.user or {}
-  if raw.content == nil and body.content == "" then
+  if raw.content == nil and content == "" then
     raw.content = ""
   end
   if
@@ -36,15 +30,11 @@ local function mapped(raw, viewer, body)
 end
 
 --- @param self parley.arcanum.Provider
---- @param method string
---- @param path string
---- @param body table
+--- @param operation parley.arcanum.Request
 --- @param callback parley.WriteCallback
---- @param opts? parley.arcanum.RequestOptions
 --- @return parley.CancelHandle
-function M.start(self, method, path, body, callback, opts)
+function M.start(self, operation, callback)
   local done, acknowledged, active, generation = false, false, nil, 0
-  opts = opts or {}
   --- @param result parley.WriteResult
   local function finish(result)
     if done then
@@ -53,55 +43,44 @@ function M.start(self, method, path, body, callback, opts)
     done = true
     callback(result)
   end
-  --- @param verb string
-  --- @param route string
-  --- @param payload table|nil
-  --- @param options table|nil
+  --- @param descriptor parley.arcanum.Request
   --- @param receive fun(result: table)
-  local function request(verb, route, payload, options, receive)
+  local function request(descriptor, receive)
     generation = generation + 1
     local stage, delivered = generation, false
-    local ok, handle = pcall(transport.request_start, self, verb, route, payload, function(result)
+    local ok, handle = pcall(transport.request_start, self, descriptor, function(result)
       if done or delivered or stage ~= generation then
         return
       end
       delivered, active = true, nil
       receive(result)
-    end, options)
+    end)
     if not ok then
       finish(acknowledged and { ok = true } or { ok = false, err = tostring(handle) })
     elseif not done and not delivered and stage == generation then
       active = handle
     end
   end
-  request(method, path, body, opts, function(result)
+  request(operation, function(result)
     if not result.ok then
       finish(result)
       return
     end
     acknowledged = true
-    local comment = mapped(result.data, self._viewer_login or "", body)
+    local comment = mapped(result.data, self._viewer_login or "", operation.content)
     if comment then
       finish({ ok = true, comment = comment })
       return
     end
     local id = type(result.data) == "table" and result.data.id
-    if not id and method == "PATCH" then
-      id = path:match("/(%-?%d+)$")
-    end
-    if not opts.pr_id or not tostring(id):match("^%-?%d+$") or tonumber(id) == 0 then
+    id = id or operation.comment_id
+    if not operation.pr_id or not tostring(id):match("^%-?%d+$") or tonumber(id) == 0 then
       finish({ ok = true })
       return
     end
-    request(
-      "GET",
-      "/v2/public/pull-request/" .. opts.pr_id .. "/comment/" .. id .. "?fields=" .. fields,
-      nil,
-      nil,
-      function(read)
-        finish({ ok = true, comment = read.ok and mapped(read.data, self._viewer_login or "", body) or nil })
-      end
-    )
+    request(requests.get_comment(operation.pr_id, tostring(id)), function(read)
+      finish({ ok = true, comment = read.ok and mapped(read.data, self._viewer_login or "", operation.content) or nil })
+    end)
   end)
   return {
     cancel = function()

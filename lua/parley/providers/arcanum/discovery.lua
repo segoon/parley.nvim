@@ -1,54 +1,53 @@
---- Exhaust prefix search pages before reporting that the exact remote branch has no review.
+--- Find the latest exact-branch PR; closed and unpublished reviews remain inactive.
 local transport = require("parley.providers.arcanum.transport")
+local requests = require("parley.providers.arcanum.requests")
+local await = require("parley.runtime.await")
+local session = require("parley.providers.arcanum.session")
 local M = {}
-local fields = "id,summary,status,url,author,vcs"
+local active = {
+  open = true,
+  conflicts = true,
+  errors = true,
+  configuration_failed = true,
+  merging = true,
+  merge_failed = true,
+  uploading = true,
+  no_changes = true,
+}
+local inactive = { merged = true, discarded = true, draft = true }
+
 --- @param self parley.arcanum.Provider
 --- @param branch string
 --- @return table|nil
 function M.find(self, branch)
-  local offset, seen = 0, {}
-  while true do
-    local data = transport.request_run(self, "POST", "/v1/pull-requests/cursor?fields=id,vcs(from_branch)", {
-      limit = 100,
-      offset = offset,
-      desc_order = true,
-      filter = { user_branch_prefix = branch, state = { published = true } },
-    }, { retry_policy = "read" })
-    if
-      type(data) ~= "table"
-      or type(data.pull_requests) ~= "table"
-      or not vim.islist(data.pull_requests)
-      or type(data.has_next) ~= "boolean"
-    then
-      error("Arcanum review search returned an invalid page", 0)
-    end
-    local progress = false
-    for _, candidate in ipairs(data.pull_requests) do
-      local id = type(candidate) == "table" and candidate.id
-      if type(id) ~= "number" or id <= 0 or id ~= math.floor(id) or id == math.huge then
-        error("Arcanum review search returned an invalid candidate ID", 0)
-      end
-      if not seen[id] then
-        seen[id], progress = true, true
-        if type(candidate.vcs) ~= "table" or type(candidate.vcs.from_branch) ~= "string" then
-          error("Arcanum review search returned incomplete candidate details", 0)
-        end
-        if candidate.vcs.from_branch == branch then
-          local full = transport.request_run(self, "GET", "/v1/pull-requests/" .. tostring(id) .. "?fields=" .. fields)
-          if type(full) ~= "table" or full.id ~= id or type(full.vcs) ~= "table" or full.vcs.from_branch ~= branch then
-            error("Arcanum review search returned inconsistent candidate details; refresh the review", 0)
-          end
-          return full
-        end
-      end
-    end
-    if not data.has_next then
+  local token, host, viewer = self._session_token, self._host, self._viewer_login
+  local result = await.callback(function(callback)
+    transport.request_start(self, requests.get_pr_by_branch(branch), callback)
+  end)
+  session.require_current(self)
+  if self._session_token ~= token or self._host ~= host or self._viewer_login ~= viewer then
+    error("Arcanum session changed during branch lookup; refresh the review", 0)
+  end
+  if not result.ok then
+    if result.status == 404 and not result.cancelled and not result.timed_out then
       return nil
     end
-    if not progress then
-      error("Arcanum review search did not advance; refresh the review", 0)
-    end
-    offset = offset + #data.pull_requests
+    error(result.err or "Arcanum branch lookup failed; refresh the review", 0)
   end
+  local data = result.data
+  if
+    type(data) ~= "table"
+    or type(data.id) ~= "number"
+    or data.id <= 0
+    or data.id == math.huge
+    or data.id ~= math.floor(data.id)
+    or type(data.vcs) ~= "table"
+    or data.vcs.from_branch ~= branch
+    or type(data.status) ~= "string"
+    or not (active[data.status] or inactive[data.status])
+  then
+    error("Arcanum branch lookup returned invalid or inconsistent PR metadata; refresh the review", 0)
+  end
+  return active[data.status] and data or nil
 end
 return M

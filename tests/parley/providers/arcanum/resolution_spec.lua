@@ -14,9 +14,9 @@ describe("Arcanum issue resolution", function()
     saved = transport.request_start
     calls, cancelled = {}, 0
     result = { ok = true, data = { id = 42 } }
-    transport.request_start = function(_, method, path, body, callback, opts)
+    transport.request_start = function(_, request, callback)
       assert.equals("test-token", p._token)
-      calls[#calls + 1] = { method, path, body, opts }
+      calls[#calls + 1] = request
       callback(result)
       return {
         cancel = function()
@@ -45,14 +45,14 @@ describe("Arcanum issue resolution", function()
       assert.is_true(r.ok)
     end)
     for i, call in ipairs(calls) do
-      assert.equals("PATCH", call[1])
-      assert.equals("/v1/public/review-requests-comments/42", call[2])
-      assert.same({ issue_status = i % 2 == 1 and "resolved" or "open" }, call[3])
-      assert.same({ retry_policy = "none" }, call[4])
+      assert.equals("PATCH", call.method)
+      assert.equals("/v1/public/review-requests-comments/42", call.path)
+      assert.same({ issue_status = i % 2 == 1 and "resolved" or "open" }, call.body)
+      assert.equals("none", call.retry_policy)
     end
     assert.equals(4, #calls)
   end)
-  it("preserves uncertain failures and delegates cancellation", function()
+  it("preserves completed uncertain failures without cancelling finished requests", function()
     result = { ok = false, uncertain = true, cancelled = true, err = "Check the review" }
     local received
     local h = p:begin_resolve({}, "42", function(r)
@@ -60,7 +60,7 @@ describe("Arcanum issue resolution", function()
     end)
     h.cancel()
     assert.same(result, received)
-    assert.equals(1, cancelled)
+    assert.equals(0, cancelled)
   end)
   it("reports missing credentials through the callback without starting HTTP", function()
     p._token = nil

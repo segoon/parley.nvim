@@ -31,12 +31,14 @@ a.describe("configured Arcanum workflow", function()
       assert.equals("test-token", opts.env.ARC_TOKEN)
       assert.is_true(opts.timeout > 0 and opts.timeout <= 500)
       local data
-      if argv[8] == "list" then
-        data = { pull_requests = { { id = 1, vcs = { from_branch = "feature" } } }, has_next = false }
-      elseif argv[8] == "active-diff" then
+      if argv[8] == "active-diff" then
         data = { id = 2, commit_ids = { head = "head", base = "base", merge = "merge" } }
+      elseif argv[8] == "diff-info" then
+        data = { id = 2, pull_request_id = 1 }
+      elseif argv[8] == "changelist" then
+        data = { { path = "a.lua", entry_id = "fixture-entry" } }
       elseif argv[8] == "get" then
-        data = { id = 1, vcs = { from_branch = "feature" } }
+        data = { id = 1, status = "open", vcs = { from_branch = "feature" } }
       else
         data = { id = 3, content = "reply", author = { name = "local-user" }, created_at = "now" }
       end
@@ -60,14 +62,101 @@ a.describe("configured Arcanum workflow", function()
     assert.same({}, p:fetch_discussions(review))
     assert.is_true(p:reply(review, {}, { id = "1" }, { text = "reply" }).is_own)
     p:resolve(review, "1")
-    assert.equals(7, #calls)
+    assert.equals(6, #calls)
     assert.equals("cli", calls[1].backend)
+    assert.equals("http", calls[3].backend)
     assert.equals("http", calls[4].backend)
-    assert.equals("http", calls[5].backend)
+    assert.equals("cli", calls[5].backend)
     assert.equals("cli", calls[6].backend)
-    assert.equals("cli", calls[7].backend)
     assert.equals("approved", review.pr.review_status)
     assert.equals("merge", review.review_sha)
     assert.equals("configured.example:8443", p:cache_identity().host)
+  end)
+  a.it("uses only CLI for supported comment operations and never replays failed mutations through HTTP", function()
+    local opts = {
+      login = "local-user",
+      _auth = {
+        read_token = function()
+          return "test-token"
+        end,
+      },
+    }
+    local p = descriptor.factory(opts, { host = "configured.example:8443", timeout_ms = 500, request_interval_ms = 1 })
+    local review = p:detect_pr("/checkout", "feature")
+    local first_write = #calls + 1
+    p:post_top_level_comment(review, "a.lua", { start_line = 7, end_line = 8 }, { text = "inline" })
+    p:reply(review, {}, { id = "-3" }, { text = "reply" })
+    p:edit(review, "-3", { text = "edited" })
+    p:delete(review, "-3")
+    p:resolve(review, "1")
+    p:unresolve(review, "1")
+    for _, present in ipairs({ true, false }) do
+      local result = require("parley.runtime.await").callback(function(callback)
+        return p:begin_set_reaction(review, "-3", ":heart:", present, callback)
+      end)
+      assert.is_true(result.ok)
+    end
+    local commands = {}
+    for index = first_write, #calls do
+      assert.equals("cli", calls[index].backend)
+      commands[#commands + 1] = calls[index].argv[8]
+    end
+    assert.same(
+      { "changelist", "post-diff", "reply", "edit", "delete", "edit", "edit", "add-reaction", "remove-reaction" },
+      commands
+    )
+    cli._system = function(_, _, callback)
+      callback({ code = 65, stdout = '{"error":{"code":"REMOTE_ERROR","http_status":503}}', stderr = "" })
+      return { kill = function() end }
+    end
+    local count = #calls
+    local ok = pcall(p.reply, p, review, {}, { id = "-3" }, { text = "do not replay" })
+    assert.is_false(ok)
+    assert.equals(count, #calls, "A failed CLI mutation must not invoke HTTP")
+  end)
+  a.it("recovers missing PR scope through CLI for every comment mutation", function()
+    local opts = {
+      login = "local-user",
+      _auth = {
+        read_token = function()
+          return "test-token"
+        end,
+      },
+    }
+    local p = descriptor.factory(opts, { host = "configured.example:8443", timeout_ms = 500, request_interval_ms = 1 })
+    local review = p:detect_pr("/checkout", "feature")
+    review.pr, review.write_context.pr_id = nil, nil
+    local first_write = #calls + 1
+    p:reply(review, {}, { id = "-3" }, { text = "reply" })
+    p:edit(review, "-3", { text = "edited" })
+    p:delete(review, "-3")
+    p:resolve(review, "1")
+    p:unresolve(review, "1")
+    p:post_top_level_comment(review, "a.lua", { start_line = 7 }, { text = "inline" })
+    local commands = {}
+    for index = first_write, #calls do
+      local call = calls[index]
+      assert.equals("cli", call.backend)
+      commands[#commands + 1] = call.argv[8]
+      if call.argv[7] == "comment" and call.argv[8] ~= "post-diff" then
+        assert.equals("--id", call.argv[9])
+        assert.equals("1", call.argv[10])
+      end
+    end
+    assert.same({
+      "diff-info",
+      "reply",
+      "diff-info",
+      "edit",
+      "diff-info",
+      "delete",
+      "diff-info",
+      "edit",
+      "diff-info",
+      "edit",
+      "changelist",
+      "diff-info",
+      "post-diff",
+    }, commands)
   end)
 end)

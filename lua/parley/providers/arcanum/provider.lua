@@ -5,8 +5,8 @@
 --- retain HTTPS. Both executors share scheduling, deadlines, and session guards.
 ---
 --- Design notes:
----   • Transport: CLI/HTTPS selection through the provider-owned transport.
----   • PR detection: POST /v1/pull-requests/cursor filtered by branch.
+---   • Requests: named operation builders select CLI or HTTPS before execution.
+---   • PR detection: exact latest-PR lookup through the CLI.
 ---   • Discussion fetching: GET /v1/public/review-requests/{pr_id}/comments.
 ---   • Anchored comment posting requires resolving entry_id from the active diff
 ---     changelist; these are cached in write_context after detect_pr.
@@ -21,10 +21,12 @@
 local dbg = require("parley.debug")
 local mapping = require("parley.providers.arcanum.mapping")
 local transport = require("parley.providers.arcanum.transport")
+local requests = require("parley.providers.arcanum.requests")
 
 local M = {}
 local session = require("parley.providers.arcanum.session")
 local comment_write = require("parley.providers.arcanum.comment_write")
+local comment_scope = require("parley.providers.arcanum.comment_scope")
 
 -- ---------------------------------------------------------------------------
 -- Type annotations
@@ -155,12 +157,7 @@ function ArcanumProvider:detect_pr(_repo_root, branch)
 
   dbg.trace("arcanum.provider", "detect_pr: found pr_id=" .. tostring(pr_id))
 
-  local ok_diff, data = pcall(
-    transport.request_run,
-    self,
-    "GET",
-    "/v1/pull-requests/" .. tostring(pr_id) .. "/active-diff?fields=id,commit_ids(base,head,merge)"
-  )
+  local ok_diff, data = pcall(transport.request_run, self, requests.get_active_diff(pr_id))
   local diff = ok_diff and type(data) == "table" and data or {}
   local commits = type(diff.commit_ids) == "table" and diff.commit_ids or {}
   --- @param name string
@@ -201,7 +198,7 @@ function ArcanumProvider:fetch_discussions(review)
     return {}
   end
 
-  local data = transport.request_run(self, "GET", "/v1/public/review-requests/" .. tostring(pr_id) .. "/comments")
+  local data = transport.request_run(self, requests.get_discussions(pr_id))
   if not data then
     return {}
   end
@@ -247,14 +244,9 @@ end
 function ArcanumProvider:begin_reply(review, _discussion, parent_comment, body, callback)
   session.require_current(self)
 
-  return comment_write.start(
-    self,
-    "POST",
-    "/v1/public/review-requests-comments/" .. parent_comment.id .. "/replies",
-    { content = body.text },
-    callback,
-    { retry_policy = "create", pr_id = comment_write.pr_id(review) }
-  )
+  return comment_scope.start(self, review, function(pr_id)
+    return requests.reply(pr_id, parent_comment.id, body.text, self._config.idempotent_write_retries)
+  end, callback, comment_write.start)
 end
 
 local resolution = require("parley.providers.arcanum.resolution")
@@ -276,14 +268,9 @@ function ArcanumProvider:edit(review, comment_id, body)
   session.require_current(self)
 
   local result = require("parley.runtime.await").callback(function(callback)
-    comment_write.start(
-      self,
-      "PATCH",
-      "/v1/public/review-requests-comments/" .. comment_id,
-      { content = body.text },
-      callback,
-      { pr_id = comment_write.pr_id(review) }
-    )
+    comment_scope.start(self, review, function(pr_id)
+      return requests.edit_comment(pr_id, comment_id, body.text)
+    end, callback, comment_write.start)
   end)
   if not result.ok then
     error(result.err or "Arcanum edit failed", 0)
@@ -298,13 +285,9 @@ end
 --- @param comment_id  string
 function ArcanumProvider:delete(review, comment_id)
   session.require_current(self)
-  transport.request_run(
-    self,
-    "DELETE",
-    "/v1/public/review-requests-comments/" .. comment_id,
-    nil,
-    { pr_id = comment_write.pr_id(review) }
-  )
+  comment_scope.run(self, review, function(pr_id)
+    return requests.delete_comment(pr_id, comment_id)
+  end)
 end
 
 --- Submit a PR-level review verdict.

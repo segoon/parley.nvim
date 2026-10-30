@@ -13,9 +13,9 @@ describe("Arc-bound Arcanum sessions", function()
         end,
       },
     })
-    transport.request_run = function(_, method, path)
-      calls[#calls + 1] = { method, path }
-      assert.is_nil(path:find("users/me", 1, true))
+    transport.request_run = function(_, request)
+      calls[#calls + 1] = request
+      assert.equals("get_discussions", request.operation)
       return {
         { id = 1, user = { name = "arc-user" }, content = "own", created_at = "now" },
         { id = 2, user = { name = "other-user" }, content = "not own", created_at = "now" },
